@@ -12,10 +12,12 @@ use App\Http\Controllers\FileUploadController;
 // File Upload (Public for testing)
 Route::post('upload', [FileUploadController::class, 'upload']);
 
+// PCB Orders
+Route::prefix('orders/')->group(function () {
+    Route::post('submit', [OrderController::class, 'store']);
+});
+
 // Frontend API Routes (Protected by API token)
 Route::middleware('verify.api.token')->group(function () {
-    // PCB Orders
-    Route::prefix('orders/')->group(function () {
-        Route::post('submit', [OrderController::class, 'store']);
-    });
+    
 });
