@@ -93,63 +93,29 @@ class AdminController extends Controller
     public function stats(Request $request)
     {
         try {
-            // Users
-            $totalUsers  = DB::table('users')->count();
-            $activeUsers = DB::table('users')->where('status', 'active')->count();
+            // PCB Orders Total Revenue
+            $totalRevenue = Schema::hasTable('pcb_orders') ? DB::table('pcb_orders')->sum('order_value') : 0;
+            $totalOrders  = Schema::hasTable('pcb_orders') ? DB::table('pcb_orders')->count() : 0;
+            $pendingOrders = Schema::hasTable('pcb_orders') ? DB::table('pcb_orders')->where('status', 'like', '%pending%')->orWhere('status', 'like', '%move%')->count() : 0;
 
-            // Scrapes
-            $totalScrapes      = DB::table('scraped_pages')->count();
-            $successfulScrapes = DB::table('scraped_pages')->where('ai_status', 'completed')->count();
+            // Manufacturing & Users
+            $totalUsers   = Schema::hasTable('pcb_users') ? DB::table('pcb_users')->count() : 0;
+            $mfgRuns      = Schema::hasTable('pcb_orders') ? DB::table('pcb_orders')->whereNotIn('status', ['Cancelled', 'Completed', 'Shipped'])->count() : 0;
 
-            // Support Tickets
-            $openTickets     = DB::table('support_tickets')->where('status', 'open')->count();
-            $resolvedTickets = DB::table('support_tickets')->where('status', 'resolved')->count();
-            $totalTickets    = DB::table('support_tickets')->count();
-
-            // Financial
-            $totalRevenue      = DB::table('payments')->sum('amount');
-            $totalTransactions = DB::table('payments')->count();
-
-            // Credits
-            $creditsAllocated = DB::table('wallet_transactions')->where('credit_type', 'credit')->sum('credits');
-            $creditsUsed      = DB::table('wallet_transactions')->where('credit_type', 'debit')->sum('credits');
-
-            // Blogs
-            $totalBlogs     = Schema::hasTable('blogs') ? DB::table('blogs')->count() : 0;
-            $publishedBlogs = Schema::hasTable('blogs') ? DB::table('blogs')->where('status', 'published')->count() : 0;
-            $draftBlogs     = Schema::hasTable('blogs') ? DB::table('blogs')->where('status', 'draft')->count() : 0;
-
-            // Visitors
-            $totalVisitors = Schema::hasTable('visitor_logs') ? DB::table('visitor_logs')->count() : 0;
-            $todayVisitors = Schema::hasTable('visitor_logs')
-                ? DB::table('visitor_logs')->whereDate('created_at', now()->toDateString())->count()
-                : 0;
-
-            // Contact Messages
-            $totalContacts   = Schema::hasTable('contact_messages') ? DB::table('contact_messages')->count() : 0;
-            $pendingContacts = Schema::hasTable('contact_messages') ? DB::table('contact_messages')->where('status', 'pending')->count() : 0;
+            // Status Breakdown Distribution
+            $statusCounts = Schema::hasTable('pcb_orders') 
+                ? DB::table('pcb_orders')->select('status', DB::raw('count(*) as count'))->groupBy('status')->pluck('count', 'status') 
+                : [];
 
             return response()->json([
                 'status' => true,
                 'stats'  => [
+                    'total_revenue'      => (float)$totalRevenue,
+                    'total_orders'       => $totalOrders,
+                    'pending_orders'     => $pendingOrders,
+                    'active_mfg_runs'    => $mfgRuns,
                     'total_users'        => $totalUsers,
-                    'active_users'       => $activeUsers,
-                    'total_scrapes'      => $totalScrapes,
-                    'successful_scrapes' => $successfulScrapes,
-                    'open_tickets'       => $openTickets,
-                    'resolved_tickets'   => $resolvedTickets,
-                    'total_tickets'      => $totalTickets,
-                    'total_revenue'      => $totalRevenue,
-                    'total_transactions' => $totalTransactions,
-                    'credits_allocated'  => $creditsAllocated,
-                    'credits_used'       => $creditsUsed,
-                    'total_blogs'        => $totalBlogs,
-                    'published_blogs'    => $publishedBlogs,
-                    'draft_blogs'        => $draftBlogs,
-                    'total_visitors'     => $totalVisitors,
-                    'today_visitors'     => $todayVisitors,
-                    'total_contacts'     => $totalContacts,
-                    'pending_contacts'   => $pendingContacts,
+                    'status_counts'      => $statusCounts,
                 ]
             ]);
         } catch (\Throwable $th) {
