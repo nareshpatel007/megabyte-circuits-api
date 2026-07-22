@@ -11,12 +11,13 @@ return new class extends Migration
         Schema::create('pcb_order_status_histories', function (Blueprint $table) {
             $table->id();
             $table->foreignId('pcb_order_id')->constrained('pcb_orders')->onDelete('cascade');
-            $table->string('admin_name')->default('Admin');
+            $table->unsignedBigInteger('admin_id')->nullable();
             $table->string('status_name');
             $table->string('remark')->nullable();
             $table->timestamp('created_at')->useCurrent();
 
             $table->index('pcb_order_id');
+            $table->index('admin_id');
         });
     }
 

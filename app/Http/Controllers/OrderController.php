@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use App\Models\PcbOrder;
 use App\Models\PcbOrderMeta;
+use App\Models\PcbOrderStatusHistory;
 
 class OrderController extends Controller
 {
@@ -159,7 +160,7 @@ class OrderController extends Controller
 
     public function index()
     {
-        $orders = PcbOrder::with(['metas', 'statusDetails'])->orderBy('created_at', 'desc')->get();
+        $orders = PcbOrder::with(['metas', 'statusDetails', 'statusHistories'])->orderBy('created_at', 'desc')->get();
         
         return response()->json([
             'status' => true,
@@ -169,7 +170,7 @@ class OrderController extends Controller
 
     public function show($id)
     {
-        $order = PcbOrder::with(['metas', 'statusDetails', 'user'])->findOrFail($id);
+        $order = PcbOrder::with(['metas', 'statusDetails', 'statusHistories', 'user'])->findOrFail($id);
         
         return response()->json([
             'status' => true,
@@ -180,6 +181,8 @@ class OrderController extends Controller
     public function update(Request $request, $id)
     {
         $order = PcbOrder::findOrFail($id);
+        $adminId = $request->input('admin_id', null);
+        $remark = $request->input('remark', null);
         
         if ($request->has('status')) {
             $order->status = $request->status;
@@ -191,10 +194,21 @@ class OrderController extends Controller
 
         $order->save();
 
+        // Create status change history log
+        if ($request->has('status')) {
+            PcbOrderStatusHistory::create([
+                'pcb_order_id' => $order->id,
+                'admin_id' => $adminId,
+                'status_name' => $request->status,
+                'remark' => $remark,
+                'created_at' => now()
+            ]);
+        }
+
         return response()->json([
             'status' => true,
             'message' => 'Order status updated successfully',
-            'data' => $order->load(['metas', 'statusDetails'])
+            'data' => $order->load(['metas', 'statusDetails', 'statusHistories'])
         ]);
     }
 }

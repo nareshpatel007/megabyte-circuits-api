@@ -50,4 +50,10 @@ class PcbOrder extends Model
         $meta = $this->metas->where('meta_key', $key)->first();
         return $meta ? $meta->meta_value : $default;
     }
+
+    // Status Histories relationship
+    public function statusHistories()
+    {
+        return $this->hasMany(PcbOrderStatusHistory::class, 'pcb_order_id')->with('admin')->orderBy('created_at', 'desc');
+    }
 }
