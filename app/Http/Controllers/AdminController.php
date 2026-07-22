@@ -49,6 +49,13 @@ class AdminController extends Controller
                 ], 403);
             }
 
+            // Update last login timestamp
+            $now = date('Y-m-d H:i:s');
+            DB::table('admins')->where('id', $admin->id)->update([
+                'last_login_at' => $now,
+                'updated_at' => $now
+            ]);
+
             // Generate JWT Token
             $payload = [
                 'admin_id' => $admin->id,

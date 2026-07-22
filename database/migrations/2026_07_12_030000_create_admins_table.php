@@ -15,6 +15,7 @@ return new class extends Migration
             $table->string('email')->unique();
             $table->string('password_hash');
             $table->string('status', 45)->default('active');
+            $table->timestamp('last_login_at')->nullable();
             $table->timestamps();
         });
 
