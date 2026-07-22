@@ -72,8 +72,9 @@ class AdminController extends Controller
                 'status' => true,
                 'message' => 'Logged in successfully as Admin',
                 'data' => [
-                    'access_token' => $jwt_token,
+                    'id' => $admin->id,
                     'admin_id' => $admin->id,
+                    'access_token' => $jwt_token,
                     'name' => $admin->name,
                     'email' => $admin->email,
                     'is_admin' => true
