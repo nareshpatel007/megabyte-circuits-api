@@ -180,35 +180,43 @@ class OrderController extends Controller
 
     public function update(Request $request, $id)
     {
-        $order = PcbOrder::findOrFail($id);
-        $adminId = $request->input('admin_id') ?: $request->attributes->get('admin_id');
-        $remark = $request->input('remark', null);
-        
-        if ($request->has('status')) {
-            $order->status = $request->status;
-        }
+        try {
+            $order = PcbOrder::findOrFail($id);
+            $adminId = $request->input('admin_id') ?: $request->attributes->get('admin_id');
+            $remark = $request->input('remark', null);
+            
+            if ($request->has('status')) {
+                $order->status = $request->status;
+            }
 
-        if ($request->has('status_id')) {
-            $order->status_id = $request->status_id;
-        }
+            if ($request->has('status_id')) {
+                $order->status_id = $request->status_id;
+            }
 
-        $order->save();
+            $order->save();
 
-        // Create status change history log
-        if ($request->has('status')) {
-            PcbOrderStatusHistory::create([
-                'pcb_order_id' => $order->id,
-                'admin_id' => $adminId,
-                'status_name' => $request->status,
-                'remark' => $remark,
-                'created_at' => now()
+            // Create status change history log
+            if ($request->has('status')) {
+                PcbOrderStatusHistory::create([
+                    'pcb_order_id' => $order->id,
+                    'admin_id' => $adminId ?: ($order->user_id ?: 1),
+                    'status_name' => $request->status,
+                    'remark' => $remark,
+                    'created_at' => now()
+                ]);
+            }
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Order status updated successfully',
+                'data' => $order->load(['metas', 'statusDetails', 'statusHistories'])
             ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'status' => false,
+                'message' => $e->getMessage(),
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        return response()->json([
-            'status' => true,
-            'message' => 'Order status updated successfully',
-            'data' => $order->load(['metas', 'statusDetails', 'statusHistories'])
-        ]);
     }
 }
