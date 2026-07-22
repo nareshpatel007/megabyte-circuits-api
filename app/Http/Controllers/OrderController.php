@@ -159,21 +159,42 @@ class OrderController extends Controller
 
     public function index()
     {
-        $orders = PcbOrder::with('metas')->orderBy('created_at', 'desc')->paginate(20);
+        $orders = PcbOrder::with(['metas', 'statusDetails'])->orderBy('created_at', 'desc')->get();
         
         return response()->json([
-            'success' => true,
+            'status' => true,
             'data' => $orders
         ]);
     }
 
     public function show($id)
     {
-        $order = PcbOrder::with('metas')->findOrFail($id);
+        $order = PcbOrder::with(['metas', 'statusDetails', 'user'])->findOrFail($id);
         
         return response()->json([
-            'success' => true,
+            'status' => true,
             'data' => $order
+        ]);
+    }
+
+    public function update(Request $request, $id)
+    {
+        $order = PcbOrder::findOrFail($id);
+        
+        if ($request->has('status')) {
+            $order->status = $request->status;
+        }
+
+        if ($request->has('status_id')) {
+            $order->status_id = $request->status_id;
+        }
+
+        $order->save();
+
+        return response()->json([
+            'status' => true,
+            'message' => 'Order status updated successfully',
+            'data' => $order->load(['metas', 'statusDetails'])
         ]);
     }
 }

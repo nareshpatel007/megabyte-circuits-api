@@ -5,6 +5,7 @@ use App\Http\Controllers\AdminController;
 use App\Http\Controllers\BlogController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\StatusController;
+use App\Http\Controllers\OrderController;
 
 // Public Admin Auth
 Route::post('admin/login', [AdminController::class, 'login']);
@@ -12,6 +13,11 @@ Route::post('admin/login', [AdminController::class, 'login']);
 // Protected Admin Panel Endpoints
 Route::middleware('verify.admin.token')->group(function () {
     Route::prefix('admin/')->group(function () {
+        // Order Management
+        Route::get('orders', [OrderController::class, 'index']);
+        Route::get('orders/{id}', [OrderController::class, 'show']);
+        Route::put('orders/{id}', [OrderController::class, 'update']);
+
         // Blog Management
         Route::get('blogs', [BlogController::class, 'index']);
         Route::get('blogs/{id}', [BlogController::class, 'show']);
