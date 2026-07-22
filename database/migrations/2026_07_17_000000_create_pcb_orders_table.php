@@ -21,7 +21,8 @@ return new class extends Migration
             $table->string('customer_name', 200)->nullable();
             $table->string('user_email');
             $table->string('user_mobile', 15);
-            $table->string('status', 50)->default('pending');
+            $table->unsignedBigInteger('status_id')->nullable();
+            $table->string('status', 50)->default('move');
             $table->decimal('unit_price', 10, 2)->default(0);
             $table->decimal('order_value', 10, 2)->default(0);
             $table->date('delivery_date')->nullable();
@@ -29,6 +30,7 @@ return new class extends Migration
             $table->softDeletes();
 
             $table->index('user_id');
+            $table->index('status_id');
             $table->index('order_number');
             $table->index('user_email');
             $table->index('user_mobile');

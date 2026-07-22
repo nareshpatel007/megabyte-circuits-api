@@ -14,6 +14,7 @@ class PcbOrder extends Model
 
     protected $fillable = [
         'user_id',
+        'status_id',
         'order_number',
         'board_name',
         'customer_name',
@@ -24,6 +25,12 @@ class PcbOrder extends Model
         'order_value',
         'delivery_date',
     ];
+
+    // Status relationship
+    public function statusDetails()
+    {
+        return $this->belongsTo(Status::class, 'status_id');
+    }
 
     protected $casts = [
         'unit_price' => 'decimal:2',
