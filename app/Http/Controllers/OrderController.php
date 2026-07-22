@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use App\Models\PcbOrder;
+use App\Models\PcbOrderMeta;
 
 class OrderController extends Controller
 {
@@ -14,70 +15,15 @@ class OrderController extends Controller
     {
         // Validate the request
         $validator = Validator::make($request->all(), [
-            // Basic PCB Specifications
-            'base_material' => 'required|string|max:50',
-            'layers' => 'required|integer|min:1|max:16',
-            'width' => 'required|numeric|min:0',
-            'height' => 'required|numeric|min:0',
-            'unit' => 'required|in:mm,inches',
-            'qty' => 'required|integer|min:3',
-            'product_type' => 'required|string|max:100',
-            'different_design' => 'required|integer|min:1|max:4',
-            
-            // PCB Specifications
-            'thickness' => 'required|string|max:20',
-            'pcb_color' => 'required|string|max:20',
-            'silkscreen' => 'required|string|max:50',
-            'material_type' => 'required|string|max:100',
-            'surface_finish' => 'required|string|max:50',
-            
-            // High-spec Options
-            'copper_weight' => 'required|string|max:20',
-            'via_covering' => 'nullable|string|max:100',
-            'via_plating' => 'nullable|string|max:100',
-            'min_hole' => 'nullable|string|max:50',
-            'tolerance' => 'nullable|string|max:50',
-            'confirm_file' => 'nullable|string|max:10',
-            'mark_on_pcb' => 'nullable|string|max:100',
-            'elec_test' => 'nullable|string|max:100',
-            'gold_fingers' => 'nullable|string|max:10',
-            'castellated' => 'nullable|string|max:10',
-            'edge_plating' => 'nullable|string|max:10',
-            'blind_slots' => 'nullable|string|max:10',
-            'ul_marking' => 'nullable|string|max:100',
-            'humidity' => 'nullable|string|max:10',
-            
-            // Advanced Options
-            'kelvin_test' => 'nullable|string|max:10',
-            'paper_between' => 'nullable|string|max:10',
-            'appearance_quality' => 'nullable|string|max:100',
-            'silkscreen_tech' => 'nullable|string|max:100',
-            'inspection_report' => 'nullable|string|max:100',
-            'pcb_remark' => 'nullable|string',
-            
-            // Additional Options
-            'assembly_on' => 'nullable|boolean',
-            'stencil_on' => 'nullable|boolean',
-            'build_time' => 'nullable|string|max:50',
-            
-            // Customer Information
+            'user_id' => 'nullable|integer',
             'board_name' => 'required|string|max:200',
-            'user_mobile' => 'required|string|regex:/^[0-9]{10}$/',
+            'user_mobile' => 'required|string',
             'user_email' => 'required|email|max:200',
-            'gst_number' => 'nullable|string|max:50',
             'customer_name' => 'nullable|string|max:200',
-            'billing_address' => 'nullable|string',
-            'shipping_address' => 'nullable|string',
-            
-            // Pricing Information
-            'lead_time_days' => 'required|integer|min:1|max:30',
-            'unit_price' => 'required|numeric|min:0',
-            'order_value' => 'required|numeric|min:0',
-            'delivery_date' => 'required|date',
-            'total_area_sqm' => 'required|numeric|min:0',
-            
-            // File Upload
-            'gerber_file' => 'nullable|file|mimes:zip,gz, rar,7z|max:10240', // Max 10MB
+            'unit_price' => 'nullable|numeric|min:0',
+            'order_value' => 'nullable|numeric|min:0',
+            'delivery_date' => 'nullable|date',
+            'gerber_file' => 'nullable|file|mimes:zip,gz,rar,7z|max:10240',
         ]);
 
         if ($validator->fails()) {
@@ -89,6 +35,33 @@ class OrderController extends Controller
         }
 
         try {
+            // Find or create PcbUser by email
+            $userId = $request->user_id;
+            if (!$userId && $request->user_email) {
+                $user = \App\Models\PcbUser::where('email', $request->user_email)->first();
+                if (!$user) {
+                    $user = \App\Models\PcbUser::create([
+                        'email' => $request->user_email,
+                        'name' => $request->customer_name ?? strtok($request->user_email, '@'),
+                        'mobile' => $request->user_mobile,
+                        'gst_number' => $request->gst_number ?? null,
+                        'status' => 'active',
+                    ]);
+                } else {
+                    // Update mobile or name if missing
+                    if (empty($user->mobile) && $request->user_mobile) {
+                        $user->mobile = $request->user_mobile;
+                        $user->save();
+                    }
+                }
+                $userId = $user->id;
+            }
+
+            // Generate unique sequential order number starting from M0001
+            $lastOrder = PcbOrder::withTrashed()->orderBy('id', 'desc')->first();
+            $nextId = $lastOrder ? ($lastOrder->id + 1) : 1;
+            $orderNumber = 'M' . str_pad($nextId, 4, '0', STR_PAD_LEFT);
+
             // Handle file upload
             $gerberFileUrl = null;
             $gerberFileName = null;
@@ -104,86 +77,44 @@ class OrderController extends Controller
                 $gerberFileSize = $this->formatFileSize($file->getSize());
             }
 
-            // Generate unique order number
-            $orderNumber = 'MB' . strtoupper(Str::random(8)) . date('Ymd');
-
-            // Create the order
+            // Create the main compact order record
             $order = PcbOrder::create([
-                // Basic PCB Specifications
-                'base_material' => $request->base_material,
-                'layers' => $request->layers,
-                'width' => $request->width,
-                'height' => $request->height,
-                'unit' => $request->unit,
-                'qty' => $request->qty,
-                'product_type' => $request->product_type,
-                'different_design' => $request->different_design,
-                
-                // PCB Specifications
-                'thickness' => $request->thickness,
-                'pcb_color' => $request->pcb_color,
-                'silkscreen' => $request->silkscreen,
-                'material_type' => $request->material_type,
-                'surface_finish' => $request->surface_finish,
-                
-                // High-spec Options
-                'copper_weight' => $request->copper_weight,
-                'via_covering' => $request->via_covering ?? 'Not Specified',
-                'via_plating' => $request->via_plating ?? 'Not Specified',
-                'min_hole' => $request->min_hole ?? '0.3mm',
-                'tolerance' => $request->tolerance ?? 'Regular',
-                'confirm_file' => $request->confirm_file ?? 'No',
-                'mark_on_pcb' => $request->mark_on_pcb ?? 'Remove Mark',
-                'elec_test' => $request->elec_test ?? 'Flying Probe Fully Test',
-                'gold_fingers' => $request->gold_fingers ?? 'No',
-                'castellated' => $request->castellated ?? 'No',
-                'edge_plating' => $request->edge_plating ?? 'No',
-                'blind_slots' => $request->blind_slots ?? 'No',
-                'ul_marking' => $request->ul_marking ?? 'No',
-                'humidity' => $request->humidity ?? 'No',
-                
-                // Advanced Options
-                'kelvin_test' => $request->kelvin_test ?? 'No',
-                'paper_between' => $request->paper_between ?? 'No',
-                'appearance_quality' => $request->appearance_quality ?? 'IPC Class 2 Standard',
-                'silkscreen_tech' => $request->silkscreen_tech ?? 'Ink-jet Printing Silkscreen',
-                'inspection_report' => $request->inspection_report ?? 'No',
-                'pcb_remark' => $request->pcb_remark,
-                
-                // Additional Options
-                'assembly_on' => $request->assembly_on ?? false,
-                'stencil_on' => $request->stencil_on ?? false,
-                'build_time' => $request->build_time ?? '2 days',
-                
-                // Customer Information
-                'board_name' => $request->board_name,
-                'user_mobile' => $request->user_mobile,
-                'user_email' => $request->user_email,
-                'gst_number' => $request->gst_number,
-                'customer_name' => $request->customer_name,
-                'billing_address' => $request->billing_address,
-                'shipping_address' => $request->shipping_address,
-                
-                // Pricing Information
-                'lead_time_days' => $request->lead_time_days,
-                'unit_price' => $request->unit_price,
-                'order_value' => $request->order_value,
-                'delivery_date' => $request->delivery_date,
-                'total_area_sqm' => $request->total_area_sqm,
-                
-                // File Upload
-                'gerber_file_url' => $gerberFileUrl,
-                'gerber_file_name' => $gerberFileName,
-                'gerber_file_size' => $gerberFileSize,
-                
-                // Order Status
-                'status' => 'pending',
+                'user_id' => $userId,
                 'order_number' => $orderNumber,
-                
-                // Metadata
-                'ip_address' => $request->ip(),
-                'user_agent' => $request->userAgent(),
+                'board_name' => $request->board_name,
+                'customer_name' => $request->customer_name,
+                'user_email' => $request->user_email,
+                'user_mobile' => $request->user_mobile,
+                'status' => 'pending',
+                'unit_price' => $request->unit_price ?? 0,
+                'order_value' => $request->order_value ?? 0,
+                'delivery_date' => $request->delivery_date,
             ]);
+
+            // Save all additional specification attributes into pcb_order_meta
+            $metaData = $request->except([
+                'user_id', 'order_number', 'board_name', 'customer_name', 'user_email', 'user_mobile',
+                'status', 'unit_price', 'order_value', 'delivery_date', 'gerber_file'
+            ]);
+
+            if ($gerberFileUrl) {
+                $metaData['gerber_file_url'] = $gerberFileUrl;
+                $metaData['gerber_file_name'] = $gerberFileName;
+                $metaData['gerber_file_size'] = $gerberFileSize;
+            }
+
+            $metaData['ip_address'] = $request->ip();
+            $metaData['user_agent'] = $request->userAgent();
+
+            foreach ($metaData as $key => $value) {
+                if ($value !== null && $value !== '') {
+                    PcbOrderMeta::create([
+                        'pcb_order_id' => $order->id,
+                        'meta_key' => $key,
+                        'meta_value' => is_array($value) ? json_encode($value) : (string)$value,
+                    ]);
+                }
+            }
 
             return response()->json([
                 'success' => true,
@@ -193,7 +124,6 @@ class OrderController extends Controller
                     'order_number' => $order->order_number,
                     'status' => $order->status,
                     'total_value' => $order->order_value,
-                    'delivery_date' => $order->delivery_date->format('d M Y'),
                 ]
             ], 201);
 
@@ -225,7 +155,7 @@ class OrderController extends Controller
 
     public function index()
     {
-        $orders = PcbOrder::orderBy('created_at', 'desc')->paginate(20);
+        $orders = PcbOrder::with('metas')->orderBy('created_at', 'desc')->paginate(20);
         
         return response()->json([
             'success' => true,
@@ -235,7 +165,7 @@ class OrderController extends Controller
 
     public function show($id)
     {
-        $order = PcbOrder::findOrFail($id);
+        $order = PcbOrder::with('metas')->findOrFail($id);
         
         return response()->json([
             'success' => true,
