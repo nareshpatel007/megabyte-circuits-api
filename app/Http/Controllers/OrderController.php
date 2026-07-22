@@ -181,7 +181,7 @@ class OrderController extends Controller
     public function update(Request $request, $id)
     {
         $order = PcbOrder::findOrFail($id);
-        $adminId = $request->input('admin_id', null);
+        $adminId = $request->input('admin_id') ?: $request->attributes->get('admin_id');
         $remark = $request->input('remark', null);
         
         if ($request->has('status')) {

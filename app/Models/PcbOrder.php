@@ -32,6 +32,12 @@ class PcbOrder extends Model
         return $this->belongsTo(Status::class, 'status_id');
     }
 
+    // Customer User relationship
+    public function user()
+    {
+        return $this->belongsTo(PcbUser::class, 'user_id');
+    }
+
     protected $casts = [
         'unit_price' => 'decimal:2',
         'order_value' => 'decimal:2',
