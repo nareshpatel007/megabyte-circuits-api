@@ -124,6 +124,10 @@ class OrderController extends Controller
                     'order_number' => $order->order_number,
                     'status' => $order->status,
                     'total_value' => $order->order_value,
+                    'delivery_date' => $order->delivery_date ? \Carbon\Carbon::parse($order->delivery_date)->format('M d, Y') : null,
+                    'board_name' => $order->board_name,
+                    'user_email' => $order->user_email,
+                    'user_mobile' => $order->user_mobile,
                 ]
             ], 201);
 
