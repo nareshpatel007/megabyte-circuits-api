@@ -1334,24 +1334,7 @@
             'aliases' => array(),
             'dev_requirement' => false,
         ),
-        'webklex/laravel-imap' => array(
-            'pretty_version' => '6.2.0',
-            'version' => '6.2.0.0',
-            'reference' => '57609df58c2f4ef625e4d90a47d8615cfb15f925',
-            'type' => 'library',
-            'install_path' => __DIR__ . '/../webklex/laravel-imap',
-            'aliases' => array(),
-            'dev_requirement' => false,
-        ),
-        'webklex/php-imap' => array(
-            'pretty_version' => '6.2.0',
-            'version' => '6.2.0.0',
-            'reference' => '6b8ef85d621bbbaf52741b00cca8e9237e2b2e05',
-            'type' => 'library',
-            'install_path' => __DIR__ . '/../webklex/php-imap',
-            'aliases' => array(),
-            'dev_requirement' => false,
-        ),
+
         'webmozart/assert' => array(
             'pretty_version' => '1.11.0',
             'version' => '1.11.0.0',
