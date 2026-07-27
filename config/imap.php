@@ -150,8 +150,8 @@ return [
     */
     'options' => [
         'delimiter' => '/',
-        'fetch' => \Webklex\PHPIMAP\IMAP::FT_PEEK,
-        'sequence' => \Webklex\PHPIMAP\IMAP::ST_UID,
+        'fetch' => 1,
+        'sequence' => 0,
         'fetch_body' => true,
         'fetch_flags' => true,
         'soft_fail' => false,

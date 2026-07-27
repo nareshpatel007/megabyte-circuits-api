@@ -14,17 +14,20 @@ class AdminController extends Controller
     public function login(Request $request)
     {
         try {
-            $email = $request->input('email');
+            $usernameOrEmail = $request->input('username') ?: $request->input('email');
             $password = $request->input('password');
 
-            if (empty($email) || empty($password)) {
+            if (empty($usernameOrEmail) || empty($password)) {
                 return response()->json([
                     'status' => false,
-                    'message' => 'Email and password are required.'
+                    'message' => 'Username or Email and password are required.'
                 ], 400);
             }
 
-            $admin = DB::table('admins')->where('email', $email)->first();
+            $admin = DB::table('admins')
+                ->where('email', $usernameOrEmail)
+                ->orWhere('username', $usernameOrEmail)
+                ->first();
 
             if (!$admin) {
                 return response()->json([
@@ -49,6 +52,21 @@ class AdminController extends Controller
                 ], 403);
             }
 
+            // Fetch Role & Permissions
+            $role = null;
+            $permissions = [];
+            if (!empty($admin->role_id) && Schema::hasTable('roles')) {
+                $roleObj = DB::table('roles')->where('id', $admin->role_id)->first();
+                if ($roleObj) {
+                    $role = $roleObj->name;
+                    $permissions = DB::table('role_permissions')
+                        ->join('permissions', 'role_permissions.permission_id', '=', 'permissions.id')
+                        ->where('role_permissions.role_id', $admin->role_id)
+                        ->pluck('permissions.slug')
+                        ->toArray();
+                }
+            }
+
             // Update last login timestamp
             $now = date('Y-m-d H:i:s');
             DB::table('admins')->where('id', $admin->id)->update([
@@ -60,7 +78,10 @@ class AdminController extends Controller
             $payload = [
                 'admin_id' => $admin->id,
                 'name' => $admin->name,
+                'username' => $admin->username ?? strtok($admin->email, '@'),
                 'email' => $admin->email,
+                'role' => $role ?? 'Admin',
+                'permissions' => $permissions,
                 'is_admin' => true,
                 'exp' => time() + (24 * 60 * 60) // 24 hours
             ];
@@ -76,7 +97,10 @@ class AdminController extends Controller
                     'admin_id' => $admin->id,
                     'access_token' => $jwt_token,
                     'name' => $admin->name,
+                    'username' => $admin->username ?? strtok($admin->email, '@'),
                     'email' => $admin->email,
+                    'role' => $role ?? 'Admin',
+                    'permissions' => $permissions,
                     'is_admin' => true
                 ]
             ]);
@@ -496,6 +520,267 @@ class AdminController extends Controller
             return response()->json([
                 'status' => true,
                 'visitors' => $visitors
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    // ==========================================
+    // Staff & Admin User Management Endpoints
+    // ==========================================
+
+    public function listStaff(Request $request)
+    {
+        try {
+            $staff = DB::table('admins')
+                ->leftJoin('roles', 'admins.role_id', '=', 'roles.id')
+                ->select(
+                    'admins.id',
+                    'admins.name',
+                    'admins.username',
+                    'admins.email',
+                    'admins.status',
+                    'admins.role_id',
+                    'admins.last_login_at',
+                    'admins.created_at',
+                    'roles.name as role_name'
+                )
+                ->orderBy('admins.id', 'asc')
+                ->get();
+
+            return response()->json([
+                'status' => true,
+                'data' => $staff
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function createStaff(Request $request)
+    {
+        try {
+            $name = $request->input('name');
+            $username = $request->input('username');
+            $email = $request->input('email');
+            $password = $request->input('password');
+            $roleId = $request->input('role_id');
+            $status = $request->input('status', 'active');
+
+            if (empty($name) || empty($email) || empty($password)) {
+                return response()->json(['status' => false, 'message' => 'Name, email, and password are required.'], 400);
+            }
+
+            // Check duplicate email / username
+            if (DB::table('admins')->where('email', $email)->exists()) {
+                return response()->json(['status' => false, 'message' => 'An account with this email already exists.'], 422);
+            }
+            if ($username && DB::table('admins')->where('username', $username)->exists()) {
+                return response()->json(['status' => false, 'message' => 'An account with this username already exists.'], 422);
+            }
+
+            $id = DB::table('admins')->insertGetId([
+                'name' => $name,
+                'username' => $username ?: strtok($email, '@'),
+                'email' => $email,
+                'password_hash' => password_hash($password, PASSWORD_BCRYPT),
+                'role_id' => $roleId ?: null,
+                'status' => $status,
+                'created_at' => now(),
+                'updated_at' => now()
+            ]);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Staff user created successfully.',
+                'data' => ['id' => $id]
+            ], 201);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function updateStaff(Request $request, $id)
+    {
+        try {
+            $admin = DB::table('admins')->where('id', $id)->first();
+            if (!$admin) {
+                return response()->json(['status' => false, 'message' => 'User not found.'], 404);
+            }
+
+            $updateData = ['updated_at' => now()];
+
+            if ($request->has('name')) $updateData['name'] = $request->input('name');
+            if ($request->has('username')) $updateData['username'] = $request->input('username');
+            if ($request->has('email')) $updateData['email'] = $request->input('email');
+            if ($request->has('role_id')) $updateData['role_id'] = $request->input('role_id');
+            if ($request->has('status')) $updateData['status'] = $request->input('status');
+            if ($request->filled('password')) {
+                $updateData['password_hash'] = password_hash($request->input('password'), PASSWORD_BCRYPT);
+            }
+
+            DB::table('admins')->where('id', $id)->update($updateData);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Staff user updated successfully.'
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function deleteStaff(Request $request, $id)
+    {
+        try {
+            if ((int)$id === 1) {
+                return response()->json(['status' => false, 'message' => 'Cannot delete default Super Admin account.'], 403);
+            }
+
+            DB::table('admins')->where('id', $id)->delete();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Staff user deleted.'
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    // ==========================================
+    // Roles & Permissions Endpoints
+    // ==========================================
+
+    public function listRoles(Request $request)
+    {
+        try {
+            $roles = DB::table('roles')->get();
+
+            foreach ($roles as $role) {
+                $role->permissions = DB::table('role_permissions')
+                    ->join('permissions', 'role_permissions.permission_id', '=', 'permissions.id')
+                    ->where('role_permissions.role_id', $role->id)
+                    ->select('permissions.id', 'permissions.name', 'permissions.slug', 'permissions.module')
+                    ->get();
+            }
+
+            return response()->json([
+                'status' => true,
+                'data' => $roles
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function listPermissions(Request $request)
+    {
+        try {
+            $permissions = DB::table('permissions')->get();
+            return response()->json([
+                'status' => true,
+                'data' => $permissions
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function createRole(Request $request)
+    {
+        try {
+            $name = $request->input('name');
+            $description = $request->input('description');
+            $permissionIds = $request->input('permission_ids', []);
+
+            if (empty($name)) {
+                return response()->json(['status' => false, 'message' => 'Role name is required.'], 400);
+            }
+
+            $slug = \Illuminate\Support\Str::slug($name);
+
+            $roleId = DB::table('roles')->insertGetId([
+                'name' => $name,
+                'slug' => $slug,
+                'description' => $description,
+                'created_at' => now(),
+                'updated_at' => now()
+            ]);
+
+            if (is_array($permissionIds)) {
+                foreach ($permissionIds as $pId) {
+                    DB::table('role_permissions')->insert([
+                        'role_id' => $roleId,
+                        'permission_id' => $pId,
+                        'created_at' => now(),
+                        'updated_at' => now()
+                    ]);
+                }
+            }
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Role created successfully.',
+                'data' => ['id' => $roleId]
+            ], 201);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function updateRole(Request $request, $id)
+    {
+        try {
+            $role = DB::table('roles')->where('id', $id)->first();
+            if (!$role) {
+                return response()->json(['status' => false, 'message' => 'Role not found.'], 404);
+            }
+
+            if ($request->has('name')) {
+                DB::table('roles')->where('id', $id)->update([
+                    'name' => $request->input('name'),
+                    'slug' => \Illuminate\Support\Str::slug($request->input('name')),
+                    'description' => $request->input('description', $role->description),
+                    'updated_at' => now()
+                ]);
+            }
+
+            if ($request->has('permission_ids') && is_array($request->input('permission_ids'))) {
+                DB::table('role_permissions')->where('role_id', $id)->delete();
+                foreach ($request->input('permission_ids') as $pId) {
+                    DB::table('role_permissions')->insert([
+                        'role_id' => $id,
+                        'permission_id' => $pId,
+                        'created_at' => now(),
+                        'updated_at' => now()
+                    ]);
+                }
+            }
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Role updated successfully.'
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function deleteRole(Request $request, $id)
+    {
+        try {
+            if ((int)$id === 1) {
+                return response()->json(['status' => false, 'message' => 'Cannot delete Super Admin role.'], 403);
+            }
+
+            DB::table('role_permissions')->where('role_id', $id)->delete();
+            DB::table('roles')->where('id', $id)->delete();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Role deleted.'
             ]);
         } catch (\Throwable $th) {
             return response()->json(['status' => false, 'message' => $th->getMessage()], 500);

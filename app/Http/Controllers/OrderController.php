@@ -158,9 +158,30 @@ class OrderController extends Controller
         }
     }
 
-    public function index()
+    public function index(Request $request)
     {
-        $orders = PcbOrder::with(['metas', 'statusDetails', 'statusHistories'])->orderBy('created_at', 'desc')->get();
+        $query = PcbOrder::with(['metas', 'statusDetails', 'statusHistories']);
+
+        // Date Range Filtering
+        if ($request->filled('start_date')) {
+            $query->whereDate('created_at', '>=', $request->start_date);
+        }
+        if ($request->filled('end_date')) {
+            $query->whereDate('created_at', '<=', $request->end_date);
+        }
+
+        // Sorting (Default: delivery_date desc)
+        $sortBy = $request->input('sort_by', 'delivery_date');
+        $sortOrder = strtolower($request->input('sort_order', 'desc')) === 'asc' ? 'asc' : 'desc';
+
+        if ($sortBy === 'delivery_date') {
+            // Sort by delivery_date desc, fallback to created_at desc if delivery_date is null
+            $query->orderByRaw("COALESCE(delivery_date, created_at) {$sortOrder}");
+        } else {
+            $query->orderBy($sortBy, $sortOrder);
+        }
+
+        $orders = $query->get();
         
         return response()->json([
             'status' => true,
@@ -172,6 +193,22 @@ class OrderController extends Controller
     {
         $order = PcbOrder::with(['metas', 'statusDetails', 'statusHistories', 'user'])->findOrFail($id);
         
+        // Also load internal notes if table exists
+        if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_notes')) {
+            $order->notes = \Illuminate\Support\Facades\DB::table('pcb_order_notes')
+                ->leftJoin('admins', 'pcb_order_notes.admin_id', '=', 'admins.id')
+                ->where('pcb_order_notes.pcb_order_id', $id)
+                ->select(
+                    'pcb_order_notes.*',
+                    'admins.name as admin_name',
+                    'admins.username as admin_username'
+                )
+                ->orderBy('pcb_order_notes.created_at', 'desc')
+                ->get();
+        } else {
+            $order->notes = [];
+        }
+
         return response()->json([
             'status' => true,
             'data' => $order
@@ -193,13 +230,17 @@ class OrderController extends Controller
                 $order->status_id = $request->status_id;
             }
 
+            if ($request->has('delivery_date')) {
+                $order->delivery_date = $request->delivery_date;
+            }
+
             $order->save();
 
-            // Create status change history log
+            // Create status change history log with logged-in admin ID & timestamp
             if ($request->has('status')) {
                 PcbOrderStatusHistory::create([
                     'pcb_order_id' => $order->id,
-                    'admin_id' => $adminId ?: ($order->user_id ?: 1),
+                    'admin_id' => $adminId ?: 1,
                     'status_name' => $request->status,
                     'remark' => $remark,
                     'created_at' => now()
@@ -208,7 +249,7 @@ class OrderController extends Controller
 
             return response()->json([
                 'status' => true,
-                'message' => 'Order status updated successfully',
+                'message' => 'Order updated successfully',
                 'data' => $order->load(['metas', 'statusDetails', 'statusHistories'])
             ]);
         } catch (\Throwable $e) {
@@ -217,6 +258,73 @@ class OrderController extends Controller
                 'message' => $e->getMessage(),
                 'error' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    // Order Internal Notes
+    public function getNotes($id)
+    {
+        try {
+            if (!\Illuminate\Support\Facades\Schema::hasTable('pcb_order_notes')) {
+                return response()->json(['status' => true, 'data' => []]);
+            }
+
+            $notes = \Illuminate\Support\Facades\DB::table('pcb_order_notes')
+                ->leftJoin('admins', 'pcb_order_notes.admin_id', '=', 'admins.id')
+                ->where('pcb_order_notes.pcb_order_id', $id)
+                ->select(
+                    'pcb_order_notes.*',
+                    'admins.name as admin_name',
+                    'admins.username as admin_username'
+                )
+                ->orderBy('pcb_order_notes.created_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'status' => true,
+                'data' => $notes
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function addNote(Request $request, $id)
+    {
+        try {
+            $noteText = $request->input('note');
+            $adminId = $request->input('admin_id') ?: $request->attributes->get('admin_id');
+
+            if (empty($noteText)) {
+                return response()->json(['status' => false, 'message' => 'Note content cannot be empty.'], 400);
+            }
+
+            $noteId = \Illuminate\Support\Facades\DB::table('pcb_order_notes')->insertGetId([
+                'pcb_order_id' => $id,
+                'admin_id' => $adminId ?: 1,
+                'note' => $noteText,
+                'is_internal' => true,
+                'created_at' => now(),
+                'updated_at' => now()
+            ]);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Note added successfully.',
+                'data' => ['id' => $noteId]
+            ], 201);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function deleteNote($noteId)
+    {
+        try {
+            \Illuminate\Support\Facades\DB::table('pcb_order_notes')->where('id', $noteId)->delete();
+            return response()->json(['status' => true, 'message' => 'Note deleted.']);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
         }
     }
 }
