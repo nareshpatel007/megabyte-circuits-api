@@ -57,6 +57,10 @@ Route::middleware('verify.admin.token')->group(function () {
         // Payment Management
         Route::get('payments', [AdminController::class, 'payments']);
 
+        // Gerber Management
+        Route::get('gerber-files', [AdminController::class, 'gerberFiles']);
+        Route::delete('gerber-files/{id}', [AdminController::class, 'deleteGerberFile']);
+
         // Status Management
         Route::get('statuses', [StatusController::class, 'index']);
         Route::post('statuses', [StatusController::class, 'store']);

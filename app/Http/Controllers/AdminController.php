@@ -1377,4 +1377,130 @@ class AdminController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Get all Gerber files with client and order details
+     */
+    public function gerberFiles(Request $request)
+    {
+        try {
+            $query = DB::table('gerber_files')
+                ->leftJoin('users', 'gerber_files.user_id', '=', 'users.id')
+                ->leftJoin('pcb_orders', 'pcb_orders.gerber_file_id', '=', 'gerber_files.id')
+                ->whereNull('gerber_files.deleted_at')
+                ->select(
+                    'gerber_files.id',
+                    'gerber_files.user_id',
+                    'gerber_files.original_name',
+                    'gerber_files.file_name',
+                    'gerber_files.file_path',
+                    'gerber_files.file_url',
+                    'gerber_files.file_size',
+                    'gerber_files.board_name',
+                    'gerber_files.preview_data',
+                    'gerber_files.created_at',
+                    'gerber_files.updated_at',
+                    'users.name as client_name',
+                    'users.first_name as client_first_name',
+                    'users.last_name as client_last_name',
+                    'users.email as client_email',
+                    'users.company_name as client_company',
+                    'users.phone_number as client_phone',
+                    'pcb_orders.id as order_id',
+                    'pcb_orders.order_number as order_number'
+                );
+
+            // Search filter
+            $search = trim($request->input('search', ''));
+            if (!empty($search)) {
+                $query->where(function ($q) use ($search) {
+                    $q->where('gerber_files.original_name', 'like', "%{$search}%")
+                        ->orWhere('gerber_files.board_name', 'like', "%{$search}%")
+                        ->orWhere('gerber_files.file_name', 'like', "%{$search}%")
+                        ->orWhere('users.name', 'like', "%{$search}%")
+                        ->orWhere('users.email', 'like', "%{$search}%")
+                        ->orWhere('users.company_name', 'like', "%{$search}%")
+                        ->orWhere('pcb_orders.order_number', 'like', "%{$search}%");
+                });
+            }
+
+            // Type filter: client | guest | all
+            $type = $request->input('type');
+            if ($type === 'client') {
+                $query->whereNotNull('gerber_files.user_id');
+            } elseif ($type === 'guest') {
+                $query->whereNull('gerber_files.user_id');
+            }
+
+            // Attachment filter: attached | unattached
+            $attachment = $request->input('attachment');
+            if ($attachment === 'attached') {
+                $query->whereNotNull('pcb_orders.id');
+            } elseif ($attachment === 'unattached') {
+                $query->whereNull('pcb_orders.id');
+            }
+
+            // Ordering & Pagination
+            $query->orderBy('gerber_files.created_at', 'desc');
+
+            $files = $query->get();
+
+            // Stats calculation
+            $totalFiles = DB::table('gerber_files')->whereNull('deleted_at')->count();
+            $clientFilesCount = DB::table('gerber_files')->whereNull('deleted_at')->whereNotNull('user_id')->count();
+            $guestFilesCount = DB::table('gerber_files')->whereNull('deleted_at')->whereNull('user_id')->count();
+            $orderedFilesCount = DB::table('pcb_orders')->whereNotNull('gerber_file_id')->distinct('gerber_file_id')->count('gerber_file_id');
+
+            return response()->json([
+                'status' => true,
+                'data' => $files,
+                'stats' => [
+                    'total_files' => $totalFiles,
+                    'client_files' => $clientFilesCount,
+                    'guest_files' => $guestFilesCount,
+                    'ordered_files' => $orderedFilesCount
+                ]
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to fetch Gerber files: ' . $th->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete a Gerber file
+     */
+    public function deleteGerberFile($id)
+    {
+        try {
+            $file = DB::table('gerber_files')->where('id', $id)->first();
+            if (!$file) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Gerber file not found'
+                ], 404);
+            }
+
+            // Remove physical file if exists
+            if (!empty($file->file_path) && \Illuminate\Support\Facades\Storage::disk('public')->exists($file->file_path)) {
+                \Illuminate\Support\Facades\Storage::disk('public')->delete($file->file_path);
+            }
+
+            // Delete database row
+            DB::table('gerber_files')->where('id', $id)->delete();
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Gerber file deleted successfully'
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to delete Gerber file: ' . $th->getMessage()
+            ], 500);
+        }
+    }
 }
+
