@@ -54,6 +54,9 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::post('blogs/upload-image',[BlogController::class, 'uploadImage']);
         Route::post('blogs/generate-ai', [BlogController::class, 'generateAI']);
 
+        // Payment Management
+        Route::get('payments', [AdminController::class, 'payments']);
+
         // Status Management
         Route::get('statuses', [StatusController::class, 'index']);
         Route::post('statuses', [StatusController::class, 'store']);

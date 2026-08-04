@@ -843,25 +843,6 @@ class AdminController extends Controller
         }
     }
 
-    // Payments lists
-    public function payments(Request $request)
-    {
-        try {
-            $payments = DB::table('payments')
-                ->leftJoin('users', 'payments.user_id', '=', 'users.id')
-                ->leftJoin('credit_packs', 'payments.credit_pack_id', '=', 'credit_packs.id')
-                ->select('payments.*', 'users.name as user_name', 'users.email as user_email', 'credit_packs.name as pack_name')
-                ->orderBy('payments.created_at', 'desc')
-                ->paginate(20);
-
-            return response()->json([
-                'status' => true,
-                'payments' => $payments
-            ]);
-        } catch (\Throwable $th) {
-            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
-        }
-    }
 
     // Change Admin Password
     public function changePassword(Request $request)
@@ -1298,6 +1279,102 @@ class AdminController extends Controller
             ]);
         } catch (\Throwable $th) {
             return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Get completed payments list with pagination and filters for admin panel
+     */
+    public function payments(Request $request)
+    {
+        try {
+            $userTable = Schema::hasTable('pcb_users') ? 'pcb_users' : 'users';
+            $userColumns = Schema::hasTable($userTable) ? Schema::getColumnListing($userTable) : [];
+            $mobileCol = in_array('mobile', $userColumns) ? 'mobile' : (in_array('phone_number', $userColumns) ? 'phone_number' : null);
+            $mobileSelect = $mobileCol ? "{$userTable}.{$mobileCol} as user_mobile" : DB::raw("NULL as user_mobile");
+
+            $query = DB::table('payment_transactions')
+                ->leftJoin($userTable, 'payment_transactions.user_id', '=', "{$userTable}.id")
+                ->select(
+                    'payment_transactions.*',
+                    "{$userTable}.name as user_name",
+                    "{$userTable}.email as user_email",
+                    $mobileSelect
+                );
+
+            // Filter for completed/successful payments
+            $statusFilter = $request->input('status', 'success');
+            if ($statusFilter !== 'all') {
+                $query->where('payment_transactions.status', $statusFilter);
+            }
+
+            // Search filter (Transaction #, Razorpay Payment ID, Razorpay Order ID, Customer Name/Email)
+            if ($request->filled('search')) {
+                $search = trim($request->input('search'));
+                $query->where(function ($q) use ($search, $userTable, $mobileCol) {
+                    $q->where('payment_transactions.transaction_number', 'LIKE', "%{$search}%")
+                        ->orWhere('payment_transactions.razorpay_payment_id', 'LIKE', "%{$search}%")
+                        ->orWhere('payment_transactions.razorpay_order_id', 'LIKE', "%{$search}%")
+                        ->orWhere("{$userTable}.name", 'LIKE', "%{$search}%")
+                        ->orWhere("{$userTable}.email", 'LIKE', "%{$search}%");
+                    if ($mobileCol) {
+                        $q->orWhere("{$userTable}.{$mobileCol}", 'LIKE', "%{$search}%");
+                    }
+                });
+            }
+
+            // Payment method filter (e.g. Razorpay, UPI, Card, Netbanking)
+            if ($request->filled('payment_method')) {
+                $query->where('payment_transactions.payment_method', $request->input('payment_method'));
+            }
+
+            // Date Range Filtering
+            if ($request->filled('start_date')) {
+                $query->whereDate('payment_transactions.created_at', '>=', $request->input('start_date'));
+            }
+            if ($request->filled('end_date')) {
+                $query->whereDate('payment_transactions.created_at', '<=', $request->input('end_date'));
+            }
+
+            // Sorting
+            $sortBy = $request->input('sort_by', 'created_at');
+            $sortOrder = strtolower($request->input('sort_order', 'desc')) === 'asc' ? 'asc' : 'desc';
+            
+            $validSortColumns = ['id', 'amount', 'created_at', 'status', 'payment_method'];
+            if (!in_array($sortBy, $validSortColumns)) {
+                $sortBy = 'created_at';
+            }
+            
+            $query->orderBy("payment_transactions.{$sortBy}", $sortOrder);
+
+            // Pagination
+            $perPage = (int) $request->input('per_page', 15);
+            $page = (int) $request->input('page', 1);
+
+            $total = $query->count();
+            $payments = $query->skip(($page - 1) * $perPage)->take($perPage)->get();
+
+            // Total statistics
+            $totalAmount = DB::table('payment_transactions')
+                ->where('status', 'success')
+                ->sum('amount');
+
+            return response()->json([
+                'status' => true,
+                'data' => $payments,
+                'meta' => [
+                    'current_page' => $page,
+                    'per_page' => $perPage,
+                    'total' => $total,
+                    'last_page' => ceil($total / $perPage) ?: 1,
+                    'total_completed_amount' => (float)$totalAmount
+                ]
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to fetch payments: ' . $th->getMessage()
+            ], 500);
         }
     }
 }
