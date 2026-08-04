@@ -62,5 +62,14 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::post('statuses', [StatusController::class, 'store']);
         Route::put('statuses/{id}', [StatusController::class, 'update']);
         Route::delete('statuses/{id}', [StatusController::class, 'destroy']);
+
+        // Inventory Management
+        Route::get('inventory', [\App\Http\Controllers\InventoryController::class, 'index']);
+        Route::get('inventory/{id}', [\App\Http\Controllers\InventoryController::class, 'show']);
+        Route::post('inventory', [\App\Http\Controllers\InventoryController::class, 'store']);
+        Route::put('inventory/{id}', [\App\Http\Controllers\InventoryController::class, 'update']);
+        Route::delete('inventory/{id}', [\App\Http\Controllers\InventoryController::class, 'destroy']);
+        Route::post('inventory/{id}/stock', [\App\Http\Controllers\InventoryController::class, 'adjustStock']);
+        Route::get('inventory/{id}/logs', [\App\Http\Controllers\InventoryController::class, 'getLogs']);
     });
 });
