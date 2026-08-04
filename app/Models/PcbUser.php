@@ -9,7 +9,7 @@ class PcbUser extends Model
 {
     use HasFactory;
 
-    protected $table = 'pcb_users';
+    protected $table = 'users';
 
     protected $fillable = [
         'name',

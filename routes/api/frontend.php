@@ -8,6 +8,8 @@ use App\Http\Controllers\SubscriptionController;
 use App\Http\Controllers\ScrapingController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\FileUploadController;
+use App\Http\Controllers\CartController;
+use App\Http\Controllers\CheckoutController;
 
 // File Upload (Public for testing)
 Route::post('upload', [FileUploadController::class, 'upload']);
@@ -15,6 +17,43 @@ Route::post('upload', [FileUploadController::class, 'upload']);
 // PCB Orders
 Route::prefix('orders/')->group(function () {
     Route::post('submit', [OrderController::class, 'store']);
+});
+
+// Auth Routes
+Route::prefix('auth/')->group(function () {
+    Route::post('login', [AuthController::class, 'login']);
+    Route::post('register', [AuthController::class, 'register']);
+    Route::post('google-login', [AuthController::class, 'googleLogin']);
+    Route::post('logout', [AuthController::class, 'logout']);
+});
+
+// Cart Routes
+Route::prefix('cart/')->group(function () {
+    Route::post('save', [CartController::class, 'save']);
+    Route::get('get', [CartController::class, 'get']);
+});
+
+use App\Http\Controllers\DashboardController;
+
+// Checkout Routes
+Route::prefix('checkout/')->group(function () {
+    Route::get('addresses', [CheckoutController::class, 'getAddresses']);
+    Route::post('save-address', [CheckoutController::class, 'saveAddress']);
+    Route::post('delete-address', [CheckoutController::class, 'deleteAddress']);
+    Route::post('create-razorpay-order', [CheckoutController::class, 'createRazorpayOrder']);
+    Route::post('verify-payment', [CheckoutController::class, 'verifyPaymentAndCreateOrders']);
+});
+
+// User Dashboard Routes
+Route::prefix('dashboard/')->group(function () {
+    Route::get('overview', [DashboardController::class, 'overview']);
+    Route::get('sidebar-counts', [DashboardController::class, 'sidebarCounts']);
+    Route::get('account', [DashboardController::class, 'accountDetails']);
+    Route::get('orders', [DashboardController::class, 'orders']);
+    Route::get('order-details', [DashboardController::class, 'orderDetails']);
+    Route::get('gerber-files', [DashboardController::class, 'gerberFiles']);
+    Route::post('delete-gerber', [DashboardController::class, 'deleteGerberFile']);
+    Route::get('payments', [DashboardController::class, 'payments']);
 });
 
 // Frontend API Routes (Protected by API token)

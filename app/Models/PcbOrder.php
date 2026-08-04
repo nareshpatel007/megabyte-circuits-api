@@ -22,6 +22,7 @@ class PcbOrder extends Model
         'user_mobile',
         'status',
         'unit_price',
+        'completed_qty',
         'order_value',
         'delivery_date',
     ];

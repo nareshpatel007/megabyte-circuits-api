@@ -11,6 +11,7 @@
 
 namespace Symfony\Component\String;
 
+use Random\Randomizer;
 use Symfony\Component\String\Exception\ExceptionInterface;
 use Symfony\Component\String\Exception\InvalidArgumentException;
 use Symfony\Component\String\Exception\RuntimeException;
@@ -45,7 +46,7 @@ class ByteString extends AbstractString
     public static function fromRandom(int $length = 16, ?string $alphabet = null): self
     {
         if ($length <= 0) {
-            throw new InvalidArgumentException(sprintf('A strictly positive length is expected, "%d" given.', $length));
+            throw new InvalidArgumentException(\sprintf('A strictly positive length is expected, "%d" given.', $length));
         }
 
         $alphabet ??= self::ALPHABET_ALPHANUMERIC;
@@ -53,6 +54,10 @@ class ByteString extends AbstractString
         $bits = (int) ceil(log($alphabetSize, 2.0));
         if ($bits <= 0 || $bits > 56) {
             throw new InvalidArgumentException('The length of the alphabet must in the [2^1, 2^56] range.');
+        }
+
+        if (\PHP_VERSION_ID >= 80300) {
+            return new static((new Randomizer())->getBytesFromString($alphabet, $length));
         }
 
         $ret = '';
@@ -178,7 +183,11 @@ class ByteString extends AbstractString
             return null;
         }
 
-        $i = $this->ignoreCase ? stripos($this->string, $needle, $offset) : strpos($this->string, $needle, $offset);
+        try {
+            $i = $this->ignoreCase ? stripos($this->string, $needle, $offset) : strpos($this->string, $needle, $offset);
+        } catch (\ValueError) {
+            return null;
+        }
 
         return false === $i ? null : $i;
     }
@@ -195,7 +204,11 @@ class ByteString extends AbstractString
             return null;
         }
 
-        $i = $this->ignoreCase ? strripos($this->string, $needle, $offset) : strrpos($this->string, $needle, $offset);
+        try {
+            $i = $this->ignoreCase ? strripos($this->string, $needle, $offset) : strrpos($this->string, $needle, $offset);
+        } catch (\ValueError) {
+            return null;
+        }
 
         return false === $i ? null : $i;
     }
@@ -335,15 +348,15 @@ class ByteString extends AbstractString
     public function slice(int $start = 0, ?int $length = null): static
     {
         $str = clone $this;
-        $str->string = (string) substr($this->string, $start, $length ?? \PHP_INT_MAX);
+        $str->string = substr($this->string, $start, $length ?? \PHP_INT_MAX);
 
         return $str;
     }
 
     public function snake(): static
     {
-        $str = clone $this;
-        $str->string = str_replace(' ', '_', strtolower(preg_replace(['/([A-Z]+)([A-Z][a-z])/', '/([a-z\d])([A-Z])/'], '\1 \2', $str->string)));
+        $str = $this->camel();
+        $str->string = strtolower(preg_replace(['/([A-Z]+)([A-Z][a-z])/', '/([a-z\d])([A-Z])/'], '\1_\2', $str->string));
 
         return $str;
     }
@@ -436,7 +449,7 @@ class ByteString extends AbstractString
         }
 
         if (!$validEncoding) {
-            throw new InvalidArgumentException(sprintf('Invalid "%s" string.', $fromEncoding ?? 'Windows-1252'));
+            throw new InvalidArgumentException(\sprintf('Invalid "%s" string.', $fromEncoding ?? 'Windows-1252'));
         }
 
         $u->string = mb_convert_encoding($this->string, 'UTF-8', $fromEncoding ?? 'Windows-1252');

@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Validator;
 
 class FileUploadController extends Controller
 {
@@ -12,10 +14,11 @@ class FileUploadController extends Controller
     {
         try {
             // Validate the request
-            $validator = \Validator::make($request->all(), [
-                'file' => 'required|file|mimes:zip,rar,7z,gz|max:10240', // Max 10MB
+            $validator = Validator::make($request->all(), [
+                'file' => 'required|file|mimes:zip,rar,7z,gz|max:102400', // Max 100MB
                 'fileName' => 'nullable|string|max:255',
                 'folder' => 'nullable|string|max:100',
+                'user_id' => 'nullable|integer',
             ]);
 
             if ($validator->fails()) {
@@ -36,26 +39,42 @@ class FileUploadController extends Controller
             $file = $request->file('file');
             $originalName = $request->input('fileName', $file->getClientOriginalName());
             $folder = $request->input('folder', 'gerber-files');
+            $userId = $request->input('user_id', null);
 
             // Generate unique filename
             $fileName = time() . '_' . Str::random(10) . '.' . $file->getClientOriginalExtension();
-            
+
             // Store file in public disk
             $filePath = $file->storeAs($folder, $fileName, 'public');
-            
+
             // Get the public URL
             $url = Storage::url($filePath);
+            $formattedSize = $this->formatFileSize($file->getSize());
+
+            // Insert into gerber_files table
+            $gerberFileId = DB::table('gerber_files')->insertGetId([
+                'user_id' => $userId,
+                'original_name' => $originalName,
+                'file_name' => $fileName,
+                'file_path' => $filePath,
+                'file_url' => $url,
+                'file_size' => $formattedSize,
+                'board_name' => pathinfo($originalName, PATHINFO_FILENAME),
+                'preview_data' => $request->input('preview_data'),
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s')
+            ]);
 
             return response()->json([
                 'success' => true,
+                'gerber_file_id' => $gerberFileId,
                 'folder' => $folder,
                 'fileName' => $fileName,
                 'originalName' => $originalName,
                 'url' => $url,
                 'path' => $filePath,
-                'size' => $this->formatFileSize($file->getSize())
+                'size' => $formattedSize
             ], 200);
-
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,

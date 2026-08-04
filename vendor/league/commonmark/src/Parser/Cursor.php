@@ -239,7 +239,7 @@ class Cursor
         if ($characters === 1) {
             $asArray = [$nextFewChars];
         } elseif ($this->isMultibyte) {
-            /** @var string[] $asArray */
+            /** @var list<string> $asArray */
             $asArray = \mb_str_split($nextFewChars, 1, 'UTF-8');
         } else {
             $asArray = \str_split($nextFewChars);
@@ -322,20 +322,21 @@ class Cursor
      */
     public function advanceToNextNonSpaceOrNewline(): int
     {
-        $remainder = $this->getRemainder();
+        $currentCharacter = $this->getCurrentCharacter();
 
         // Optimization: Avoid the regex if we know there are no spaces or newlines
-        if ($remainder === '' || ($remainder[0] !== ' ' && $remainder[0] !== "\n")) {
+        if ($currentCharacter !== ' ' && $currentCharacter !== "\n") {
             $this->previousPosition = $this->currentPosition;
 
             return 0;
         }
 
         $matches = [];
-        \preg_match('/^ *(?:\n *)?/', $remainder, $matches, \PREG_OFFSET_CAPTURE);
+        \preg_match('/^ *(?:\n *)?/', $this->getRemainder(), $matches, \PREG_OFFSET_CAPTURE);
 
         // [0][0] contains the matched text
         // [0][1] contains the index of that match
+        \assert(isset($matches[0]));
         $increment = $matches[0][1] + \strlen($matches[0][0]);
 
         $this->advanceBy($increment);
@@ -416,9 +417,23 @@ class Cursor
             $matchLength = \strlen($matches[0][0]);
         }
 
-        // [0][0] contains the matched text
-        // [0][1] contains the index of that match
-        $this->advanceBy($offset + $matchLength);
+        $advance = $offset + $matchLength;
+
+        // The remainder we matched against had any partially-consumed tab expanded into spaces,
+        // so those columns must be advanced by column instead of by character
+        if ($this->partiallyConsumedTab) {
+            $charsToTab = 4 - ($this->column % 4);
+            if ($advance < $charsToTab) {
+                $this->advanceBy($advance, true);
+
+                return $matches[0][0];
+            }
+
+            $this->advanceBy($charsToTab, true);
+            $advance -= $charsToTab;
+        }
+
+        $this->advanceBy($advance);
 
         return $matches[0][0];
     }

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Database\Schema\Blueprint;
 use Firebase\JWT\JWT;
 use App\CommonHelper;
 
@@ -117,29 +118,61 @@ class AdminController extends Controller
     public function stats(Request $request)
     {
         try {
-            // PCB Orders Total Revenue
-            $totalRevenue = Schema::hasTable('pcb_orders') ? DB::table('pcb_orders')->sum('order_value') : 0;
-            $totalOrders  = Schema::hasTable('pcb_orders') ? DB::table('pcb_orders')->count() : 0;
-            $pendingOrders = Schema::hasTable('pcb_orders') ? DB::table('pcb_orders')->where('status', 'like', '%pending%')->orWhere('status', 'like', '%move%')->count() : 0;
+            $hasOrders = Schema::hasTable('pcb_orders');
+            $hasUsers = Schema::hasTable('pcb_users') || Schema::hasTable('users');
+            $userTable = Schema::hasTable('pcb_users') ? 'pcb_users' : 'users';
 
-            // Manufacturing & Users
-            $totalUsers   = Schema::hasTable('pcb_users') ? DB::table('pcb_users')->count() : 0;
-            $mfgRuns      = Schema::hasTable('pcb_orders') ? DB::table('pcb_orders')->whereNotIn('status', ['Cancelled', 'Completed', 'Shipped'])->count() : 0;
+            $totalRevenue = $hasOrders ? (float)DB::table('pcb_orders')->sum('order_value') : 0;
+            $totalOrders  = $hasOrders ? DB::table('pcb_orders')->count() : 0;
 
-            // Status Breakdown Distribution
-            $statusCounts = Schema::hasTable('pcb_orders') 
-                ? DB::table('pcb_orders')->select('status', DB::raw('count(*) as count'))->groupBy('status')->pluck('count', 'status') 
-                : [];
+            $statusTable = Schema::hasTable('pcb_order_statuses') ? 'pcb_order_statuses' : (Schema::hasTable('pcb_statuses') ? 'pcb_statuses' : (Schema::hasTable('statuses') ? 'statuses' : null));
+
+            $pendingOrders = 0;
+            $mfgRuns = 0;
+            $statusCounts = [];
+
+            if ($hasOrders) {
+                if ($statusTable) {
+                    $pendingOrders = DB::table('pcb_orders')
+                        ->leftJoin($statusTable, 'pcb_orders.status_id', '=', "{$statusTable}.id")
+                        ->where(function ($q) use ($statusTable) {
+                            $q->where("{$statusTable}.name", 'like', '%pending%')
+                              ->orWhere("{$statusTable}.name", 'like', '%move%')
+                              ->orWhereNull('pcb_orders.status_id');
+                        })
+                        ->count();
+
+                    $mfgRuns = DB::table('pcb_orders')
+                        ->leftJoin($statusTable, 'pcb_orders.status_id', '=', "{$statusTable}.id")
+                        ->whereNotIn("{$statusTable}.name", ['Cancelled', 'Completed', 'Shipped'])
+                        ->count();
+
+                    $rawCounts = DB::table('pcb_orders')
+                        ->leftJoin($statusTable, 'pcb_orders.status_id', '=', "{$statusTable}.id")
+                        ->select(DB::raw("COALESCE({$statusTable}.name, 'Pending') as status_name"), DB::raw('count(*) as total'))
+                        ->groupBy('status_name')
+                        ->get();
+
+                    foreach ($rawCounts as $row) {
+                        $statusCounts[$row->status_name] = $row->total;
+                    }
+                } else {
+                    $pendingOrders = $totalOrders;
+                    $statusCounts = ['Pending' => $totalOrders];
+                }
+            }
+
+            $totalUsers = $hasUsers ? DB::table($userTable)->count() : 0;
 
             return response()->json([
                 'status' => true,
                 'stats'  => [
-                    'total_revenue'      => (float)$totalRevenue,
-                    'total_orders'       => $totalOrders,
-                    'pending_orders'     => $pendingOrders,
-                    'active_mfg_runs'    => $mfgRuns,
-                    'total_users'        => $totalUsers,
-                    'status_counts'      => $statusCounts,
+                    'total_revenue'   => $totalRevenue,
+                    'total_orders'    => $totalOrders,
+                    'pending_orders'  => $pendingOrders,
+                    'active_mfg_runs' => $mfgRuns,
+                    'total_users'     => $totalUsers,
+                    'status_counts'   => $statusCounts,
                 ]
             ]);
         } catch (\Throwable $th) {
@@ -152,22 +185,259 @@ class AdminController extends Controller
     {
         try {
             $search = $request->input('search');
-            $query = DB::table('users')->orderBy('created_at', 'desc');
+            
+            $query = DB::table('users');
 
             if (!empty($search)) {
                 $query->where(function($q) use ($search) {
                     $q->where('name', 'like', "%{$search}%")
                       ->orWhere('email', 'like', "%{$search}%")
                       ->orWhere('first_name', 'like', "%{$search}%")
-                      ->orWhere('last_name', 'like', "%{$search}%");
+                      ->orWhere('last_name', 'like', "%{$search}%")
+                      ->orWhere('company_name', 'like', "%{$search}%");
                 });
             }
 
-            $users = $query->paginate(15);
+            $users = $query->orderBy('created_at', 'desc')->get();
+
+            // Fetch order stats aggregated by user_id
+            $orderStats = DB::table('pcb_orders')
+                ->select(
+                    'user_id',
+                    DB::raw('COUNT(id) as orders_count'),
+                    DB::raw('COALESCE(SUM(order_value), 0) as total_spent')
+                )
+                ->whereNotNull('user_id')
+                ->groupBy('user_id')
+                ->get()
+                ->keyBy('user_id');
+
+            $users->transform(function ($user) use ($orderStats) {
+                $stat = $orderStats->get($user->id);
+                $user->orders_count = $stat ? (int)$stat->orders_count : 0;
+                $user->total_spent = $stat ? (float)$stat->total_spent : 0;
+                return $user;
+            });
 
             return response()->json([
                 'status' => true,
+                'data' => $users,
                 'users' => $users
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    // Create new client/user account
+    public function createUser(Request $request)
+    {
+        try {
+            $firstName = $request->input('first_name');
+            $lastName = $request->input('last_name');
+            $name = $request->input('name');
+            if (empty($name)) {
+                $name = trim("{$firstName} {$lastName}");
+            }
+            $email = strtolower(trim($request->input('email', '')));
+            $password = $request->input('password');
+            $phone = $request->input('phone') ?: $request->input('phone_number');
+            $companyName = $request->input('company_name');
+            $gstin = $request->input('gstin') ?: $request->input('gst_number');
+
+            if (empty($email)) {
+                return response()->json(['status' => false, 'message' => 'Email address is required.'], 400);
+            }
+
+            // Check if user email already exists
+            $existingUser = DB::table('users')->where('email', $email)->first();
+            if ($existingUser) {
+                return response()->json(['status' => false, 'message' => 'A client account with this email already exists.'], 422);
+            }
+
+            if (empty($password)) {
+                $password = \Illuminate\Support\Str::random(10);
+            }
+
+            $now = date('Y-m-d H:i:s');
+            $userPayload = [
+                'name' => $name,
+                'first_name' => $firstName ?? strtok($name, ' '),
+                'last_name' => $lastName ?? '',
+                'email' => $email,
+                'password' => password_hash($password, PASSWORD_BCRYPT),
+                'password_hash' => password_hash($password, PASSWORD_BCRYPT),
+                'phone_number' => $phone,
+                'company_name' => $companyName,
+                'gstin' => $gstin,
+                'status' => 'Active',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+
+            // Filter columns based on actual users table schema
+            $columns = Schema::getColumnListing('users');
+            $insertData = [];
+            foreach ($userPayload as $key => $val) {
+                if (in_array($key, $columns)) {
+                    $insertData[$key] = $val;
+                }
+            }
+
+            $userId = DB::table('users')->insertGetId($insertData);
+
+            // Sync with pcb_users if table exists
+            if (Schema::hasTable('pcb_users')) {
+                $pcbCols = Schema::getColumnListing('pcb_users');
+                $pcbPayload = [
+                    'id' => $userId,
+                    'name' => $name,
+                    'email' => $email,
+                    'mobile' => $phone,
+                    'gst_number' => $gstin,
+                    'status' => 'Active',
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+                $pcbInsert = [];
+                foreach ($pcbPayload as $k => $v) {
+                    if (in_array($k, $pcbCols)) {
+                        $pcbInsert[$k] = $v;
+                    }
+                }
+                try {
+                    DB::table('pcb_users')->insert($pcbInsert);
+                } catch (\Throwable $e) {
+                    // Ignore duplicate key if auto-incremented
+                }
+            }
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Client account created successfully.',
+                'user_id' => $userId,
+                'generated_password' => $password,
+                'data' => array_merge(['id' => $userId], $insertData)
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    // Get single client details with orders, transactions, and overview
+    public function showUser(Request $request, $id)
+    {
+        try {
+            $user = DB::table('users')->where('id', $id)->first();
+            if (!$user && Schema::hasTable('pcb_users')) {
+                $user = DB::table('pcb_users')->where('id', $id)->first();
+            }
+
+            if (!$user) {
+                return response()->json(['status' => false, 'message' => 'Client not found'], 404);
+            }
+
+            // Remove sensitive fields
+            unset($user->password, $user->password_hash, $user->remember_token);
+
+            // Fetch user orders with status and gerber file details
+            $statusTable = Schema::hasTable('pcb_order_statuses') ? 'pcb_order_statuses' : (Schema::hasTable('pcb_statuses') ? 'pcb_statuses' : (Schema::hasTable('statuses') ? 'statuses' : null));
+
+            $ordersQuery = DB::table('pcb_orders')->where('pcb_orders.user_id', $id);
+            $selectFields = ['pcb_orders.*'];
+
+            if ($statusTable) {
+                $ordersQuery->leftJoin($statusTable, 'pcb_orders.status_id', '=', "{$statusTable}.id");
+                $selectFields[] = "{$statusTable}.name as status_name";
+            }
+
+            if (Schema::hasTable('gerber_files')) {
+                $ordersQuery->leftJoin('gerber_files', 'pcb_orders.gerber_file_id', '=', 'gerber_files.id');
+                $selectFields[] = 'gerber_files.original_name as gerber_file_name';
+                $selectFields[] = 'gerber_files.file_name as gerber_file_sys_name';
+            }
+
+            $orders = $ordersQuery->select($selectFields)->orderBy('pcb_orders.created_at', 'desc')->get();
+
+            // Calculate Order Summary Stats
+            $ordersCount = $orders->count();
+            $totalSpent = $orders->sum('order_value');
+            $completedOrders = $orders->filter(function($o) {
+                $st = strtolower($o->status_name ?? $o->status ?? '');
+                return in_array($st, ['completed', 'shipped', 'delivered']);
+            })->count();
+            $pendingOrders = $orders->filter(function($o) {
+                $st = strtolower($o->status_name ?? $o->status ?? '');
+                return in_array($st, ['pending', 'in production', 'processing', 'under review']);
+            })->count();
+
+            // Fetch Payment Transactions (filter ONLY status = success, paid, fail, failed)
+            $transactions = [];
+            if (Schema::hasTable('payment_transactions')) {
+                $transactions = DB::table('payment_transactions')
+                    ->leftJoin('pcb_orders', 'payment_transactions.id', '=', 'pcb_orders.transaction_id')
+                    ->where('payment_transactions.user_id', $id)
+                    ->whereIn(DB::raw('LOWER(payment_transactions.status)'), ['success', 'paid', 'completed', 'fail', 'failed', 'failure'])
+                    ->select(
+                        'payment_transactions.*',
+                        'pcb_orders.id as pcb_order_id',
+                        'pcb_orders.order_number'
+                    )
+                    ->orderBy('payment_transactions.created_at', 'desc')
+                    ->get();
+            } else if (Schema::hasTable('pcb_payments')) {
+                $transactions = DB::table('pcb_payments')
+                    ->where('user_id', $id)
+                    ->whereIn(DB::raw('LOWER(status)'), ['success', 'paid', 'completed', 'fail', 'failed', 'failure'])
+                    ->orderBy('created_at', 'desc')
+                    ->get();
+            } else if (Schema::hasTable('payments')) {
+                $transactions = DB::table('payments')
+                    ->where('user_id', $id)
+                    ->whereIn(DB::raw('LOWER(status)'), ['success', 'paid', 'completed', 'fail', 'failed', 'failure'])
+                    ->orderBy('created_at', 'desc')
+                    ->get();
+            } else {
+                // Derived payment transactions from user orders
+                $transactions = DB::table('pcb_orders')
+                    ->where('user_id', $id)
+                    ->select(
+                        'id',
+                        DB::raw("CONCAT('TXN-', LPAD(id, 6, '0')) as transaction_number"),
+                        DB::raw("CONCAT('PAY-', id) as payment_id"),
+                        'id as pcb_order_id',
+                        'order_number',
+                        'order_value as amount',
+                        DB::raw("COALESCE(status, 'Paid') as status"),
+                        'created_at'
+                    )
+                    ->orderBy('created_at', 'desc')
+                    ->get();
+            }
+
+            // Fetch User Addresses if any
+            $addresses = [];
+            if (Schema::hasTable('user_addresses')) {
+                $addresses = DB::table('user_addresses')->where('user_id', $id)->get();
+            } else if (Schema::hasTable('addresses')) {
+                $addresses = DB::table('addresses')->where('user_id', $id)->get();
+            }
+
+            return response()->json([
+                'status' => true,
+                'data' => [
+                    'user' => $user,
+                    'orders' => $orders,
+                    'transactions' => $transactions,
+                    'addresses' => $addresses,
+                    'stats' => [
+                        'orders_count' => $ordersCount,
+                        'total_spent' => (float)$totalSpent,
+                        'completed_orders' => $completedOrders,
+                        'pending_orders' => $pendingOrders,
+                        'total_transactions' => count($transactions)
+                    ]
+                ]
             ]);
         } catch (\Throwable $th) {
             return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
@@ -230,28 +500,176 @@ class AdminController extends Controller
         }
     }
 
-    // Change user status (active/inactive)
+    // Update existing client details
+    public function updateUser(Request $request, $id)
+    {
+        try {
+            $user = DB::table('users')->where('id', $id)->first();
+            if (!$user) {
+                return response()->json(['status' => false, 'message' => 'Client not found.'], 404);
+            }
+
+            $firstName = $request->input('first_name', $user->first_name ?? '');
+            $lastName = $request->input('last_name', $user->last_name ?? '');
+            $name = $request->input('name');
+            if (empty($name)) {
+                $name = trim("{$firstName} {$lastName}");
+            }
+            $email = strtolower(trim($request->input('email', $user->email)));
+            $phone = $request->input('phone') ?: $request->input('phone_number', $user->phone_number ?? '');
+            $companyName = $request->input('company_name', $user->company_name ?? '');
+            $gstin = $request->input('gstin') ?: $request->input('gst_number', $user->gstin ?? '');
+            $status = $request->input('status', $user->status ?? 'Active');
+
+            $updateData = [
+                'name' => $name,
+                'first_name' => $firstName,
+                'last_name' => $lastName,
+                'email' => $email,
+                'phone_number' => $phone,
+                'company_name' => $companyName,
+                'gstin' => $gstin,
+                'status' => $status,
+                'updated_at' => date('Y-m-d H:i:s'),
+            ];
+
+            // If password is updated
+            $newPassword = $request->input('password');
+            if (!empty($newPassword)) {
+                $updateData['password'] = password_hash($newPassword, PASSWORD_BCRYPT);
+                $updateData['password_hash'] = password_hash($newPassword, PASSWORD_BCRYPT);
+            }
+
+            $columns = Schema::getColumnListing('users');
+            $filteredData = [];
+            foreach ($updateData as $key => $val) {
+                if (in_array($key, $columns)) {
+                    $filteredData[$key] = $val;
+                }
+            }
+
+            DB::table('users')->where('id', $id)->update($filteredData);
+
+            if (Schema::hasTable('pcb_users')) {
+                $pcbCols = Schema::getColumnListing('pcb_users');
+                $pcbPayload = [
+                    'name' => $name,
+                    'email' => $email,
+                    'mobile' => $phone,
+                    'gst_number' => $gstin,
+                    'status' => $status,
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ];
+                $pcbFiltered = [];
+                foreach ($pcbPayload as $k => $v) {
+                    if (in_array($k, $pcbCols)) {
+                        $pcbFiltered[$k] = $v;
+                    }
+                }
+                if (!empty($pcbFiltered)) {
+                    DB::table('pcb_users')->where('id', $id)->update($pcbFiltered);
+                }
+            }
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Client details updated successfully.'
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    // Change user status
     public function toggleUserStatus(Request $request, $id)
     {
         try {
             $status = $request->input('status');
-            if (!in_array($status, ['active', 'inactive'])) {
-                return response()->json(['status' => false, 'message' => 'Invalid status value.'], 400);
+            if (empty($status)) {
+                return response()->json(['status' => false, 'message' => 'Status is required.'], 400);
             }
 
             $user = DB::table('users')->where('id', $id)->first();
             if (!$user) {
-                return response()->json(['status' => false, 'message' => 'User not found.'], 404);
+                return response()->json(['status' => false, 'message' => 'Client not found.'], 404);
             }
 
             DB::table('users')->where('id', $id)->update([
                 'status' => $status,
-                'updated_at' => now()
+                'updated_at' => date('Y-m-d H:i:s')
             ]);
+
+            if (Schema::hasTable('pcb_users')) {
+                if (Schema::hasColumn('pcb_users', 'status')) {
+                    DB::table('pcb_users')->where('id', $id)->update([
+                        'status' => $status,
+                        'updated_at' => date('Y-m-d H:i:s')
+                    ]);
+                }
+            }
 
             return response()->json([
                 'status' => true,
-                'message' => "User status updated to {$status}."
+                'message' => "Client status updated to {$status}."
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    // Soft delete user and related records (orders, transactions, addresses)
+    public function deleteUser(Request $request, $id)
+    {
+        try {
+            $user = DB::table('users')->where('id', $id)->first();
+            if (!$user && Schema::hasTable('pcb_users')) {
+                $user = DB::table('pcb_users')->where('id', $id)->first();
+            }
+
+            if (!$user) {
+                return response()->json(['status' => false, 'message' => 'Client not found.'], 404);
+            }
+
+            $now = date('Y-m-d H:i:s');
+
+            if (Schema::hasColumn('users', 'deleted_at')) {
+                DB::table('users')->where('id', $id)->update(['deleted_at' => $now, 'status' => 'Deleted']);
+            } else {
+                DB::table('users')->where('id', $id)->update(['status' => 'Deleted']);
+            }
+
+            if (Schema::hasTable('pcb_users')) {
+                if (Schema::hasColumn('pcb_users', 'deleted_at')) {
+                    DB::table('pcb_users')->where('id', $id)->update(['deleted_at' => $now, 'status' => 'Deleted']);
+                } else {
+                    DB::table('pcb_users')->where('id', $id)->update(['status' => 'Deleted']);
+                }
+            }
+
+            // Soft delete pcb_orders
+            if (Schema::hasTable('pcb_orders')) {
+                if (Schema::hasColumn('pcb_orders', 'deleted_at')) {
+                    DB::table('pcb_orders')->where('user_id', $id)->update(['deleted_at' => $now]);
+                }
+            }
+
+            // Soft delete payment_transactions
+            if (Schema::hasTable('payment_transactions')) {
+                if (Schema::hasColumn('payment_transactions', 'deleted_at')) {
+                    DB::table('payment_transactions')->where('user_id', $id)->update(['deleted_at' => $now]);
+                }
+            }
+
+            // Soft delete user_addresses
+            if (Schema::hasTable('user_addresses')) {
+                if (Schema::hasColumn('user_addresses', 'deleted_at')) {
+                    DB::table('user_addresses')->where('user_id', $id)->update(['deleted_at' => $now]);
+                }
+            }
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Client account and all associated records soft deleted successfully.'
             ]);
         } catch (\Throwable $th) {
             return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
@@ -558,6 +976,30 @@ class AdminController extends Controller
         }
     }
 
+    public function showStaff(Request $request, $id)
+    {
+        try {
+            $admin = DB::table('admins')
+                ->leftJoin('roles', 'admins.role_id', '=', 'roles.id')
+                ->where('admins.id', $id)
+                ->select('admins.*', 'roles.name as role_name')
+                ->first();
+
+            if (!$admin) {
+                return response()->json(['status' => false, 'message' => 'Staff user not found.'], 404);
+            }
+
+            unset($admin->password_hash);
+
+            return response()->json([
+                'status' => true,
+                'data' => $admin
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
     public function createStaff(Request $request)
     {
         try {
@@ -567,6 +1009,7 @@ class AdminController extends Controller
             $password = $request->input('password');
             $roleId = $request->input('role_id');
             $status = $request->input('status', 'active');
+            $phoneVal = $request->input('phone') ?: ($request->input('mobile') ?: $request->input('phone_number'));
 
             if (empty($name) || empty($email) || empty($password)) {
                 return response()->json(['status' => false, 'message' => 'Name, email, and password are required.'], 400);
@@ -580,7 +1023,15 @@ class AdminController extends Controller
                 return response()->json(['status' => false, 'message' => 'An account with this username already exists.'], 422);
             }
 
-            $id = DB::table('admins')->insertGetId([
+            if (!Schema::hasColumn('admins', 'phone') && !Schema::hasColumn('admins', 'phone_number') && !Schema::hasColumn('admins', 'mobile')) {
+                try {
+                    Schema::table('admins', function (Blueprint $table) {
+                        $table->string('phone')->nullable()->after('email');
+                    });
+                } catch (\Throwable $e) {}
+            }
+
+            $insertData = [
                 'name' => $name,
                 'username' => $username ?: strtok($email, '@'),
                 'email' => $email,
@@ -589,7 +1040,19 @@ class AdminController extends Controller
                 'status' => $status,
                 'created_at' => now(),
                 'updated_at' => now()
-            ]);
+            ];
+
+            if ($phoneVal !== null) {
+                if (Schema::hasColumn('admins', 'phone')) {
+                    $insertData['phone'] = $phoneVal;
+                } elseif (Schema::hasColumn('admins', 'phone_number')) {
+                    $insertData['phone_number'] = $phoneVal;
+                } elseif (Schema::hasColumn('admins', 'mobile')) {
+                    $insertData['mobile'] = $phoneVal;
+                }
+            }
+
+            $id = DB::table('admins')->insertGetId($insertData);
 
             return response()->json([
                 'status' => true,
@@ -616,6 +1079,28 @@ class AdminController extends Controller
             if ($request->has('email')) $updateData['email'] = $request->input('email');
             if ($request->has('role_id')) $updateData['role_id'] = $request->input('role_id');
             if ($request->has('status')) $updateData['status'] = $request->input('status');
+            if ($request->has('phone') || $request->has('mobile') || $request->has('phone_number')) {
+                $phoneVal = $request->input('phone') ?: ($request->input('mobile') ?: $request->input('phone_number'));
+                if (!Schema::hasColumn('admins', 'phone') && !Schema::hasColumn('admins', 'phone_number') && !Schema::hasColumn('admins', 'mobile')) {
+                    try {
+                        Schema::table('admins', function (Blueprint $table) {
+                            $table->string('phone')->nullable()->after('email');
+                        });
+                    } catch (\Throwable $e) {}
+                }
+                if (Schema::hasColumn('admins', 'phone')) {
+                    $updateData['phone'] = $phoneVal;
+                } elseif (Schema::hasColumn('admins', 'phone_number')) {
+                    $updateData['phone_number'] = $phoneVal;
+                } elseif (Schema::hasColumn('admins', 'mobile')) {
+                    $updateData['mobile'] = $phoneVal;
+                }
+            }
+            if ($request->filled('password')) {
+                $updateData['password_hash'] = password_hash($request->input('password'), PASSWORD_BCRYPT);
+            }
+
+            DB::table('admins')->where('id', $id)->update($updateData);
             if ($request->filled('password')) {
                 $updateData['password_hash'] = password_hash($request->input('password'), PASSWORD_BCRYPT);
             }
@@ -664,11 +1149,44 @@ class AdminController extends Controller
                     ->where('role_permissions.role_id', $role->id)
                     ->select('permissions.id', 'permissions.name', 'permissions.slug', 'permissions.module')
                     ->get();
+
+                if ((isset($role->name) && strtolower($role->name) === 'super admin') || (int)$role->id === 1) {
+                    $role->users_count = DB::table('admins')
+                        ->where(function ($q) use ($role) {
+                            $q->where('role_id', $role->id)
+                              ->orWhereNull('role_id');
+                        })->count();
+                } else {
+                    $role->users_count = DB::table('admins')->where('role_id', $role->id)->count();
+                }
             }
 
             return response()->json([
                 'status' => true,
                 'data' => $roles
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function showRole(Request $request, $id)
+    {
+        try {
+            $role = DB::table('roles')->where('id', $id)->first();
+            if (!$role) {
+                return response()->json(['status' => false, 'message' => 'Role not found.'], 404);
+            }
+
+            $role->permissions = DB::table('role_permissions')
+                ->join('permissions', 'role_permissions.permission_id', '=', 'permissions.id')
+                ->where('role_permissions.role_id', $role->id)
+                ->select('permissions.id', 'permissions.name', 'permissions.slug', 'permissions.module')
+                ->get();
+
+            return response()->json([
+                'status' => true,
+                'data' => $role
             ]);
         } catch (\Throwable $th) {
             return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
@@ -699,11 +1217,8 @@ class AdminController extends Controller
                 return response()->json(['status' => false, 'message' => 'Role name is required.'], 400);
             }
 
-            $slug = \Illuminate\Support\Str::slug($name);
-
             $roleId = DB::table('roles')->insertGetId([
                 'name' => $name,
-                'slug' => $slug,
                 'description' => $description,
                 'created_at' => now(),
                 'updated_at' => now()
@@ -741,7 +1256,6 @@ class AdminController extends Controller
             if ($request->has('name')) {
                 DB::table('roles')->where('id', $id)->update([
                     'name' => $request->input('name'),
-                    'slug' => \Illuminate\Support\Str::slug($request->input('name')),
                     'description' => $request->input('description', $role->description),
                     'updated_at' => now()
                 ]);

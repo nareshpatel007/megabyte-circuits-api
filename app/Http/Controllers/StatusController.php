@@ -11,11 +11,32 @@ class StatusController extends Controller
     // List all statuses
     public function index()
     {
-        $statuses = Status::orderBy('sort_order', 'asc')->get();
-        return response()->json([
-            'status' => true,
-            'data' => $statuses
-        ]);
+        try {
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses')) {
+                $statuses = Status::orderBy('sort_order', 'asc')->get();
+            } else if (\Illuminate\Support\Facades\Schema::hasTable('pcb_statuses')) {
+                $statuses = \Illuminate\Support\Facades\DB::table('pcb_statuses')->orderBy('sort_order', 'asc')->get();
+            } else if (\Illuminate\Support\Facades\Schema::hasTable('statuses')) {
+                $statuses = \Illuminate\Support\Facades\DB::table('statuses')->orderBy('sort_order', 'asc')->get();
+            } else {
+                $statuses = [
+                    ['id' => 1, 'name' => 'Pending', 'slug' => 'pending', 'color' => '#10b981'],
+                    ['id' => 2, 'name' => 'CAM Engineering', 'slug' => 'cam-engineering', 'color' => '#3b82f6'],
+                    ['id' => 3, 'name' => 'In Production', 'slug' => 'in-production', 'color' => '#f59e0b'],
+                    ['id' => 4, 'name' => 'Ready to Ship', 'slug' => 'ready-to-ship', 'color' => '#8b5cf6'],
+                    ['id' => 5, 'name' => 'Completed', 'slug' => 'completed', 'color' => '#10b981'],
+                ];
+            }
+            return response()->json([
+                'status' => true,
+                'data' => $statuses
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => true,
+                'data' => []
+            ]);
+        }
     }
 
     // Store new status

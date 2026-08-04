@@ -16,10 +16,15 @@ class AuthController extends Controller
     public function login(Request $request, \App\Services\AuthService $authService)
     {
         try {
+            $input = $request->all();
+            if (empty($input) && $request->getContent()) {
+                $input = json_decode($request->getContent(), true) ?? [];
+            }
+
             // Get requested data
-            $email = $request->input('email');
-            $password = $request->input('password');
-            $platform = $request->input('platform', 'web');
+            $email = $input['email'] ?? $request->input('email');
+            $password = $input['password'] ?? $request->input('password');
+            $platform = $input['platform'] ?? $request->input('platform', 'web');
 
             // Call login service
             $result = $authService->login($email, $password, $platform);
@@ -30,7 +35,28 @@ class AuthController extends Controller
             // Return error response
             return response()->json([
                 'status' => false,
-                'message' => 'Error occurred during login. Please try again.'
+                'message' => 'Error occurred during login: ' . $th->getMessage()
+            ]);
+        }
+    }
+
+    // Logout
+    public function logout(Request $request)
+    {
+        try {
+            if ($request->hasSession()) {
+                $request->session()->invalidate();
+                $request->session()->regenerateToken();
+            }
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Logged out successfully'
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => true,
+                'message' => 'Logged out successfully'
             ]);
         }
     }
@@ -39,25 +65,30 @@ class AuthController extends Controller
     public function register(Request $request, \App\Services\RegisterService $registerService)
     {
         try {
-            // Get requested data
-            $name = $request->input('name') ?? (($request->input('first_name') ?? '') . ' ' . ($request->input('last_name') ?? ''));
-            $email = $request->input('email');
-            $password = $request->input('password');
-            $company_name = $request->input('company_name');
-            $phone = $request->input('phone');
-            $referral_source = $request->input('referral_source');
+            $input = $request->all();
+            if (empty($input) && $request->getContent()) {
+                $input = json_decode($request->getContent(), true) ?? [];
+            }
 
-            $firstName = $request->input('first_name');
-            $lastName = $request->input('last_name');
+            // Get requested data
+            $name = $input['name'] ?? $request->input('name') ?? (($input['first_name'] ?? $request->input('first_name') ?? '') . ' ' . ($input['last_name'] ?? $request->input('last_name') ?? ''));
+            $email = $input['email'] ?? $request->input('email');
+            $password = $input['password'] ?? $request->input('password');
+            $company_name = $input['company_name'] ?? $request->input('company_name');
+            $phone = $input['phone'] ?? $request->input('phone');
+            $referral_source = $input['referral_source'] ?? $request->input('referral_source');
+
+            $firstName = $input['first_name'] ?? $request->input('first_name');
+            $lastName = $input['last_name'] ?? $request->input('last_name');
             if (empty($firstName) && empty($lastName)) {
-                $nameParts = explode(' ', trim($name));
+                $nameParts = explode(' ', trim((string)$name));
                 $firstName = $nameParts[0] ?? '';
                 $lastName = isset($nameParts[1]) ? implode(' ', array_slice($nameParts, 1)) : '';
             }
 
             // Call register service
             $result = $registerService->register([
-                'name' => trim($name),
+                'name' => trim((string)$name),
                 'first_name' => $firstName,
                 'last_name' => $lastName,
                 'email' => $email,
@@ -65,7 +96,7 @@ class AuthController extends Controller
                 'company_name' => $company_name,
                 'phone' => $phone,
                 'referral_source' => $referral_source,
-                'invite_token' => $request->input('invite_token')
+                'invite_token' => $input['invite_token'] ?? $request->input('invite_token')
             ]);
 
             // Return response

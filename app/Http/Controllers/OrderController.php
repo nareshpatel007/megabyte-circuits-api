@@ -160,38 +160,104 @@ class OrderController extends Controller
 
     public function index(Request $request)
     {
-        $query = PcbOrder::with(['metas', 'statusDetails', 'statusHistories']);
+        try {
+            $withRelations = ['metas'];
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses') || \Illuminate\Support\Facades\Schema::hasTable('pcb_statuses')) {
+                $withRelations[] = 'statusDetails';
+            }
 
-        // Date Range Filtering
-        if ($request->filled('start_date')) {
-            $query->whereDate('created_at', '>=', $request->start_date);
+            $query = PcbOrder::with($withRelations);
+
+            // Date Range Filtering
+            if ($request->filled('start_date')) {
+                $query->whereDate('created_at', '>=', $request->start_date);
+            }
+            if ($request->filled('end_date')) {
+                $query->whereDate('created_at', '<=', $request->end_date);
+            }
+
+            // Sorting (Default: delivery_date desc)
+            $sortBy = $request->input('sort_by', 'delivery_date');
+            $sortOrder = strtolower($request->input('sort_order', 'desc')) === 'asc' ? 'asc' : 'desc';
+
+            if ($sortBy === 'delivery_date') {
+                $query->orderByRaw("COALESCE(delivery_date, created_at) {$sortOrder}");
+            } else {
+                $query->orderBy($sortBy, $sortOrder);
+            }
+
+            $orders = $query->get();
+
+            $orders->transform(function ($order) {
+                if (isset($order->statusDetails) && !empty($order->statusDetails->name)) {
+                    $order->status = $order->statusDetails->name;
+                } else if (empty($order->status)) {
+                    $order->status = 'Pending';
+                }
+                return $order;
+            });
+
+            return response()->json([
+                'status' => true,
+                'data' => $orders
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => false,
+                'message' => $th->getMessage(),
+                'data' => []
+            ], 500);
         }
-        if ($request->filled('end_date')) {
-            $query->whereDate('created_at', '<=', $request->end_date);
-        }
-
-        // Sorting (Default: delivery_date desc)
-        $sortBy = $request->input('sort_by', 'delivery_date');
-        $sortOrder = strtolower($request->input('sort_order', 'desc')) === 'asc' ? 'asc' : 'desc';
-
-        if ($sortBy === 'delivery_date') {
-            // Sort by delivery_date desc, fallback to created_at desc if delivery_date is null
-            $query->orderByRaw("COALESCE(delivery_date, created_at) {$sortOrder}");
-        } else {
-            $query->orderBy($sortBy, $sortOrder);
-        }
-
-        $orders = $query->get();
-        
-        return response()->json([
-            'status' => true,
-            'data' => $orders
-        ]);
     }
 
     public function show($id)
     {
-        $order = PcbOrder::with(['metas', 'statusDetails', 'statusHistories', 'user'])->findOrFail($id);
+        $withRelations = ['metas'];
+        if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses') || \Illuminate\Support\Facades\Schema::hasTable('pcb_statuses')) {
+            $withRelations[] = 'statusDetails';
+        }
+        if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_status_histories')) {
+            $withRelations[] = 'statusHistories';
+        }
+        if (\Illuminate\Support\Facades\Schema::hasTable('users') || \Illuminate\Support\Facades\Schema::hasTable('pcb_users')) {
+            $withRelations[] = 'user';
+        }
+
+        $orderQuery = PcbOrder::with($withRelations)
+            ->leftJoin('user_addresses as ship', 'pcb_orders.shipping_address_id', '=', 'ship.id')
+            ->leftJoin('user_addresses as bill', 'pcb_orders.billing_address_id', '=', 'bill.id')
+            ->where(function ($q) use ($id) {
+                if (is_numeric($id)) {
+                    $q->where('pcb_orders.id', $id)->orWhere('pcb_orders.order_number', $id);
+                } else {
+                    $q->where('pcb_orders.order_number', $id);
+                }
+            })
+            ->select(
+                'pcb_orders.*',
+                'ship.first_name as shipping_first_name',
+                'ship.last_name as shipping_last_name',
+                'ship.company_name as shipping_company',
+                'ship.building_no as shipping_building_no',
+                'ship.street_address as shipping_street',
+                'ship.city as shipping_city',
+                'ship.state as shipping_state',
+                'ship.postal_code as shipping_postal',
+                'ship.country as shipping_country',
+                'ship.mobile as shipping_mobile',
+                'bill.first_name as billing_first_name',
+                'bill.last_name as billing_last_name',
+                'bill.company_name as billing_company',
+                'bill.building_no as billing_building_no',
+                'bill.street_address as billing_street',
+                'bill.city as billing_city',
+                'bill.state as billing_state',
+                'bill.postal_code as billing_postal',
+                'bill.country as billing_country',
+                'bill.mobile as billing_mobile'
+            );
+
+        $order = $orderQuery->firstOrFail();
         
         // Also load internal notes if table exists
         if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_notes')) {
@@ -209,6 +275,39 @@ class OrderController extends Controller
             $order->notes = [];
         }
 
+        // Also load activity logs if table exists
+        if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_logs')) {
+            $logsQuery = \Illuminate\Support\Facades\DB::table('pcb_order_logs')
+                ->where('pcb_order_logs.pcb_order_id', $id)
+                ->orWhere('pcb_order_logs.order_number', $order->order_number);
+
+            if (\Illuminate\Support\Facades\Schema::hasTable('admins')) {
+                $logsQuery->leftJoin('admins', 'pcb_order_logs.admin_id', '=', 'admins.id');
+            }
+            if (\Illuminate\Support\Facades\Schema::hasTable('users')) {
+                $logsQuery->leftJoin('users', 'pcb_order_logs.user_id', '=', 'users.id');
+            }
+
+            $order->logs = $logsQuery->select(
+                'pcb_order_logs.*',
+                \Illuminate\Support\Facades\DB::raw('COALESCE(admins.name, users.name, NULL) as resolved_user_name'),
+                \Illuminate\Support\Facades\DB::raw('admins.name as admin_name'),
+                \Illuminate\Support\Facades\DB::raw('users.name as user_name')
+            )->orderBy('pcb_order_logs.created_at', 'desc')->get();
+        } else {
+            $order->logs = [];
+        }
+
+        $previewMeta = $order->metas->where('meta_key', 'preview_data')->first();
+        if ($previewMeta) {
+            $order->gerber_preview_data = $previewMeta->meta_value;
+        } else if (!empty($order->gerber_file_id) && \Illuminate\Support\Facades\Schema::hasTable('gerber_files')) {
+            $gf = \Illuminate\Support\Facades\DB::table('gerber_files')->where('id', $order->gerber_file_id)->first();
+            if ($gf && !empty($gf->preview_data)) {
+                $order->gerber_preview_data = $gf->preview_data;
+            }
+        }
+
         return response()->json([
             'status' => true,
             'data' => $order
@@ -218,7 +317,13 @@ class OrderController extends Controller
     public function update(Request $request, $id)
     {
         try {
-            $order = PcbOrder::findOrFail($id);
+            $order = PcbOrder::where(function ($q) use ($id) {
+                if (is_numeric($id)) {
+                    $q->where('id', $id)->orWhere('order_number', $id);
+                } else {
+                    $q->where('order_number', $id);
+                }
+            })->firstOrFail();
             $adminId = $request->input('admin_id') ?: $request->attributes->get('admin_id');
             $remark = $request->input('remark', null);
             
@@ -234,10 +339,20 @@ class OrderController extends Controller
                 $order->delivery_date = $request->delivery_date;
             }
 
+            $oldCompletedQty = $order->completed_qty ?? 0;
+            $qtyUpdated = false;
+            if ($request->has('completed_qty')) {
+                $newCompletedQty = intval($request->completed_qty);
+                if ($newCompletedQty !== $oldCompletedQty) {
+                    $order->completed_qty = $newCompletedQty;
+                    $qtyUpdated = true;
+                }
+            }
+
             $order->save();
 
-            // Create status change history log with logged-in admin ID & timestamp
-            if ($request->has('status')) {
+            // 1. Create status change history log in pcb_order_status_histories
+            if ($request->has('status') && \Illuminate\Support\Facades\Schema::hasTable('pcb_order_status_histories')) {
                 PcbOrderStatusHistory::create([
                     'pcb_order_id' => $order->id,
                     'admin_id' => $adminId ?: 1,
@@ -245,6 +360,63 @@ class OrderController extends Controller
                     'remark' => $remark,
                     'created_at' => now()
                 ]);
+            }
+
+            // 2. Create activity log in pcb_order_logs with admin_id for status or quantity updates
+            if (($request->has('status') || $qtyUpdated) && \Illuminate\Support\Facades\Schema::hasTable('pcb_order_logs')) {
+                $statusName = $order->status ?? 'Pending';
+                
+                // Fetch admin user details for description and log record
+                $adminUser = null;
+                $effectiveAdminId = $adminId ?: 1;
+                if (\Illuminate\Support\Facades\Schema::hasTable('admins')) {
+                    $adminUser = \Illuminate\Support\Facades\DB::table('admins')->where('id', $effectiveAdminId)->first();
+                }
+                $adminName = $adminUser ? $adminUser->name : "Admin #{$effectiveAdminId}";
+
+                if ($qtyUpdated && $request->has('status')) {
+                    $actionName = "Partial Delivery / Status Updated";
+                    $descText = "Completed quantity updated from {$oldCompletedQty} to {$order->completed_qty} Pcs. Status set to '{$statusName}' by {$adminName}." . ($remark ? " Remark: {$remark}" : "");
+                } elseif ($qtyUpdated) {
+                    $actionName = "Quantity Updated";
+                    $descText = "Completed quantity updated from {$oldCompletedQty} to {$order->completed_qty} Pcs by {$adminName}." . ($remark ? " Remark: {$remark}" : "");
+                } else {
+                    $actionName = "Status Updated: {$statusName}";
+                    $descText = $remark ? "Order status updated to '{$statusName}' by {$adminName}. Remark: {$remark}" : "Order status updated to '{$statusName}' by {$adminName}.";
+                }
+
+                \Illuminate\Support\Facades\DB::table('pcb_order_logs')->insert([
+                    'pcb_order_id' => $order->id,
+                    'order_number' => $order->order_number,
+                    'user_id' => null, // Manual admin action
+                    'admin_id' => $effectiveAdminId,
+                    'status' => $statusName,
+                    'action' => $actionName,
+                    'description' => $descText,
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
+            }
+
+            // Reload fresh order logs for response
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_logs')) {
+                $logsQuery = \Illuminate\Support\Facades\DB::table('pcb_order_logs')
+                    ->where('pcb_order_logs.pcb_order_id', $order->id)
+                    ->orWhere('pcb_order_logs.order_number', $order->order_number);
+
+                if (\Illuminate\Support\Facades\Schema::hasTable('admins')) {
+                    $logsQuery->leftJoin('admins', 'pcb_order_logs.admin_id', '=', 'admins.id');
+                }
+                if (\Illuminate\Support\Facades\Schema::hasTable('users')) {
+                    $logsQuery->leftJoin('users', 'pcb_order_logs.user_id', '=', 'users.id');
+                }
+
+                $order->logs = $logsQuery->select(
+                    'pcb_order_logs.*',
+                    \Illuminate\Support\Facades\DB::raw('COALESCE(admins.name, users.name, NULL) as resolved_user_name'),
+                    \Illuminate\Support\Facades\DB::raw('admins.name as admin_name'),
+                    \Illuminate\Support\Facades\DB::raw('users.name as user_name')
+                )->orderBy('pcb_order_logs.created_at', 'desc')->get();
             }
 
             return response()->json([
@@ -323,6 +495,44 @@ class OrderController extends Controller
         try {
             \Illuminate\Support\Facades\DB::table('pcb_order_notes')->where('id', $noteId)->delete();
             return response()->json(['status' => true, 'message' => 'Note deleted.']);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function getLogs($id)
+    {
+        try {
+            $order = PcbOrder::where(function ($q) use ($id) {
+                if (is_numeric($id)) {
+                    $q->where('id', $id)->orWhere('order_number', $id);
+                } else {
+                    $q->where('order_number', $id);
+                }
+            })->first();
+
+            $orderDbId = $order ? $order->id : (is_numeric($id) ? $id : 0);
+
+            if (!\Illuminate\Support\Facades\Schema::hasTable('pcb_order_logs')) {
+                return response()->json(['status' => true, 'data' => []]);
+            }
+
+            $logs = \Illuminate\Support\Facades\DB::table('pcb_order_logs')
+                ->leftJoin('admins', 'pcb_order_logs.admin_id', '=', 'admins.id')
+                ->leftJoin('users', 'pcb_order_logs.user_id', '=', 'users.id')
+                ->where('pcb_order_logs.pcb_order_id', $orderDbId)
+                ->select(
+                    'pcb_order_logs.*',
+                    \Illuminate\Support\Facades\DB::raw('admins.name as admin_name'),
+                    \Illuminate\Support\Facades\DB::raw('users.name as user_name')
+                )
+                ->orderBy('pcb_order_logs.created_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'status' => true,
+                'data' => $logs
+            ]);
         } catch (\Throwable $th) {
             return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
         }

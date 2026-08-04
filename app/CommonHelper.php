@@ -41,19 +41,25 @@ class CommonHelper
 
     public static function logActivity($userId, $action, $description = null, $request = null, $credits = null)
     {
-        $ip = ($request instanceof \Illuminate\Http\Request) ? $request->ip() : request()->ip();
-        $userAgent = ($request instanceof \Illuminate\Http\Request) ? $request->userAgent() : request()->userAgent();
-        \Illuminate\Support\Facades\DB::table('activity_logs')->insert([
-            'user_id' => $userId,
-            'action' => $action,
-            'ip_address' => $ip,
-            'user_agent' => $userAgent,
-            'log_data' => json_encode([
-                'description' => $description,
-                'credits' => $credits
-            ]),
-            'created_at' => date('Y-m-d H:i:s')
-        ]);
+        try {
+            if (\Illuminate\Support\Facades\Schema::hasTable('activity_logs')) {
+                $ip = ($request instanceof \Illuminate\Http\Request) ? $request->ip() : request()->ip();
+                $userAgent = ($request instanceof \Illuminate\Http\Request) ? $request->userAgent() : request()->userAgent();
+                \Illuminate\Support\Facades\DB::table('activity_logs')->insert([
+                    'user_id' => $userId,
+                    'action' => $action,
+                    'ip_address' => $ip,
+                    'user_agent' => $userAgent,
+                    'log_data' => json_encode([
+                        'description' => $description,
+                        'credits' => $credits
+                    ]),
+                    'created_at' => date('Y-m-d H:i:s')
+                ]);
+            }
+        } catch (\Throwable $e) {
+            // Ignore activity log failure if table is missing
+        }
     }
 
     // Use credits directly for user

@@ -54,7 +54,7 @@ final class Lines
      * @param string   $line
      * @param string[] $buffer
      *
-     * @return array{bool,string,string[]}
+     * @return array{bool,string, string[]}
      */
     private static function multilineProcess(bool $multiline, string $line, array $buffer)
     {
@@ -120,7 +120,7 @@ final class Lines
      */
     private static function isCommentOrWhitespace(string $line)
     {
-        $line = \trim($line);
+        $line = \trim($line, " \n\r\t\0\x0B");
 
         return $line === '' || (isset($line[0]) && $line[0] === '#');
     }

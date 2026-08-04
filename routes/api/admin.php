@@ -20,17 +20,26 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::get('orders', [OrderController::class, 'index']);
         Route::get('orders/{id}', [OrderController::class, 'show']);
         Route::put('orders/{id}', [OrderController::class, 'update']);
+        Route::get('orders/{id}/logs', [OrderController::class, 'getLogs']);
         Route::get('orders/{id}/notes', [OrderController::class, 'getNotes']);
         Route::post('orders/{id}/notes', [OrderController::class, 'addNote']);
         Route::delete('orders/notes/{noteId}', [OrderController::class, 'deleteNote']);
 
         // User & Role Management
+        Route::get('users', [AdminController::class, 'users']);
+        Route::post('users', [AdminController::class, 'createUser']);
+        Route::get('users/{id}', [AdminController::class, 'showUser']);
+        Route::put('users/{id}', [AdminController::class, 'updateUser']);
+        Route::delete('users/{id}', [AdminController::class, 'deleteUser']);
+        Route::put('users/{id}/status', [AdminController::class, 'toggleUserStatus']);
         Route::get('staff', [AdminController::class, 'listStaff']);
+        Route::get('staff/{id}', [AdminController::class, 'showStaff']);
         Route::post('staff', [AdminController::class, 'createStaff']);
         Route::put('staff/{id}', [AdminController::class, 'updateStaff']);
         Route::delete('staff/{id}', [AdminController::class, 'deleteStaff']);
 
         Route::get('roles', [AdminController::class, 'listRoles']);
+        Route::get('roles/{id}', [AdminController::class, 'showRole']);
         Route::post('roles', [AdminController::class, 'createRole']);
         Route::put('roles/{id}', [AdminController::class, 'updateRole']);
         Route::delete('roles/{id}', [AdminController::class, 'deleteRole']);

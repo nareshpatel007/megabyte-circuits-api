@@ -9,7 +9,7 @@ class Status extends Model
 {
     use HasFactory;
 
-    protected $table = 'pcb_statuses';
+    protected $table = 'pcb_order_statuses';
 
     protected $fillable = [
         'name',
