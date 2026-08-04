@@ -537,4 +537,175 @@ class OrderController extends Controller
             return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
         }
     }
+
+    /**
+     * Create a new PCB Order manually from Admin Panel
+     */
+    public function createAdminOrder(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'board_name' => 'required|string|max:200',
+                'user_id' => 'nullable|integer',
+                'customer_name' => 'nullable|string|max:200',
+                'user_email' => 'nullable|email|max:200',
+                'user_mobile' => 'nullable|string|max:50',
+                'company_name' => 'nullable|string|max:200',
+                'unit_price' => 'nullable|numeric|min:0',
+                'order_value' => 'nullable|numeric|min:0',
+                'delivery_date' => 'nullable|date',
+                'payment_status' => 'nullable|string',
+                'payment_method' => 'nullable|string',
+                'gerber_file' => 'nullable|file|mimes:zip,gz,rar,7z|max:102400',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Validation failed',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $userId = $request->input('user_id');
+            if (empty($userId) || $userId == 0) {
+                $userId = null;
+            }
+
+            // Generate unique sequential order number (e.g. M0005)
+            $lastOrder = PcbOrder::withTrashed()->orderBy('id', 'desc')->first();
+            $nextId = $lastOrder ? ($lastOrder->id + 1) : 1;
+            $orderNumber = 'M' . str_pad($nextId, 4, '0', STR_PAD_LEFT);
+
+            // Handle Gerber file upload
+            $gerberFileId = null;
+            $gerberFileUrl = null;
+            $gerberFileName = null;
+            $gerberFileSize = null;
+
+            if ($request->hasFile('gerber_file')) {
+                $file = $request->file('gerber_file');
+                $originalName = $file->getClientOriginalName();
+                $fileName = time() . '_' . Str::random(10) . '.' . $file->getClientOriginalExtension();
+                $filePath = $file->storeAs('gerber-files', $fileName, 'public');
+                $gerberFileUrl = Storage::url($filePath);
+                $gerberFileSize = $this->formatFileSize($file->getSize());
+
+                if (\Illuminate\Support\Facades\Schema::hasTable('gerber_files')) {
+                    $gerberFileId = \Illuminate\Support\Facades\DB::table('gerber_files')->insertGetId([
+                        'user_id' => $userId ?? 0, // store as client_id = 0 if guest/null
+                        'original_name' => $originalName,
+                        'file_name' => $fileName,
+                        'file_path' => $filePath,
+                        'file_url' => $gerberFileUrl,
+                        'file_size' => $gerberFileSize,
+                        'board_name' => $request->input('board_name', pathinfo($originalName, PATHINFO_FILENAME)),
+                        'preview_data' => $request->input('preview_data', null),
+                        'created_at' => date('Y-m-d H:i:s'),
+                        'updated_at' => date('Y-m-d H:i:s')
+                    ]);
+                }
+                $gerberFileName = $originalName;
+            } else if ($request->filled('gerber_file_id')) {
+                $gerberFileId = $request->input('gerber_file_id');
+            }
+
+            // Handle Manual Payment
+            $transactionId = null;
+            $isPaid = strtolower($request->input('payment_status', 'pending')) === 'completed' || strtolower($request->input('payment_status', 'pending')) === 'paid';
+
+            if ($isPaid && \Illuminate\Support\Facades\Schema::hasTable('payment_transactions')) {
+                $orderVal = floatval($request->input('order_value', 0));
+                $payMethod = $request->input('payment_method', 'Manual / Admin');
+                $txnNum = 'TXN-MANUAL-' . strtoupper(Str::random(8));
+
+                $transactionId = \Illuminate\Support\Facades\DB::table('payment_transactions')->insertGetId([
+                    'user_id' => $userId,
+                    'transaction_number' => $txnNum,
+                    'amount' => $orderVal,
+                    'currency' => 'INR',
+                    'status' => 'success',
+                    'payment_method' => $payMethod,
+                    'payload' => json_encode(['note' => 'Manual payment recorded by admin', 'order_number' => $orderNumber]),
+                    'created_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s')
+                ]);
+            }
+
+            // Find status id if available
+            $statusId = null;
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses')) {
+                $st = \Illuminate\Support\Facades\DB::table('pcb_order_statuses')->where('name', 'Pending')->first();
+                if ($st) {
+                    $statusId = $st->id;
+                }
+            }
+
+            // Create Order Record
+            $orderData = [
+                'user_id' => $userId,
+                'order_number' => $orderNumber,
+                'status_id' => $statusId,
+                'gerber_file_id' => $gerberFileId,
+                'transaction_id' => $transactionId,
+                'unit_price' => floatval($request->input('unit_price', 0)),
+                'order_value' => floatval($request->input('order_value', 0)),
+                'delivery_date' => $request->input('delivery_date') ?: null,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s')
+            ];
+
+            if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'board_name')) {
+                $orderData['board_name'] = $request->input('board_name');
+            }
+            if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'customer_name')) {
+                $orderData['customer_name'] = $request->input('customer_name');
+            }
+            if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'user_email')) {
+                $orderData['user_email'] = $request->input('user_email');
+            }
+            if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'user_mobile')) {
+                $orderData['user_mobile'] = $request->input('user_mobile');
+            }
+
+            $orderId = \Illuminate\Support\Facades\DB::table('pcb_orders')->insertGetId($orderData);
+
+            // Store Metadata
+            $allParams = $request->all();
+            unset($allParams['gerber_file']);
+
+            if ($gerberFileUrl) {
+                $allParams['gerber_file_url'] = $gerberFileUrl;
+                $allParams['gerber_file_name'] = $gerberFileName;
+                $allParams['gerber_file_size'] = $gerberFileSize;
+            }
+
+            foreach ($allParams as $key => $value) {
+                if ($value !== null && $value !== '') {
+                    PcbOrderMeta::create([
+                        'pcb_order_id' => $orderId,
+                        'meta_key' => $key,
+                        'meta_value' => is_array($value) ? json_encode($value) : (string)$value,
+                    ]);
+                }
+            }
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Order created successfully',
+                'data' => [
+                    'id' => $orderId,
+                    'order_number' => $orderNumber,
+                    'order_value' => $request->input('order_value'),
+                    'transaction_id' => $transactionId
+                ]
+            ], 201);
+
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to create order: ' . $th->getMessage()
+            ], 500);
+        }
+    }
 }
