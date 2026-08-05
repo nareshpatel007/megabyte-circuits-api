@@ -1355,9 +1355,22 @@ class AdminController extends Controller
             $payments = $query->skip(($page - 1) * $perPage)->take($perPage)->get();
 
             // Total statistics
-            $totalAmount = DB::table('payment_transactions')
-                ->where('status', 'success')
+            $statsQuery = DB::table('payment_transactions');
+            if (Schema::hasColumn('payment_transactions', 'deleted_at')) {
+                $statsQuery->whereNull('deleted_at');
+            }
+
+            $totalAmount = (clone $statsQuery)
+                ->whereIn(DB::raw('LOWER(status)'), ['success', 'paid', 'completed'])
                 ->sum('amount');
+
+            $totalCompletedCount = (clone $statsQuery)
+                ->whereIn(DB::raw('LOWER(status)'), ['success', 'paid', 'completed'])
+                ->count();
+
+            $totalFailedCount = (clone $statsQuery)
+                ->whereIn(DB::raw('LOWER(status)'), ['failed', 'failure', 'fail'])
+                ->count();
 
             return response()->json([
                 'status' => true,
@@ -1367,7 +1380,9 @@ class AdminController extends Controller
                     'per_page' => $perPage,
                     'total' => $total,
                     'last_page' => ceil($total / $perPage) ?: 1,
-                    'total_completed_amount' => (float)$totalAmount
+                    'total_completed_amount' => (float)$totalAmount,
+                    'total_completed_count' => (int)$totalCompletedCount,
+                    'total_failed_count' => (int)$totalFailedCount
                 ]
             ]);
         } catch (\Throwable $th) {

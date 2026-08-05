@@ -70,7 +70,7 @@ return [
     |
     */
 
-    'timezone' => 'Asia/Kolkata',
+    'timezone' => env('APP_TIMEZONE', 'Asia/Kolkata'),
 
     /*
     |--------------------------------------------------------------------------
@@ -180,11 +180,4 @@ return [
     | the aliases are "lazy" loaded so they don't hinder performance.
     |
     */
-
-    'aliases' => Facade::defaultAliases()->merge([
-        'ViatorHelper' => App\ViatorHelper::class,
-        'GptHelper' => App\GptHelper::class,
-        'MailHelper' => App\MailHelper::class,
-        'Pdf' => Barryvdh\DomPDF\Facade\Pdf::class,
-    ])->toArray(),
 ];
