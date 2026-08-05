@@ -10,8 +10,22 @@ use Illuminate\Support\Str;
 
 class CheckoutController extends Controller
 {
-    private $razorpayKey = 'rzp_test_SQxqJOMmeLZK9n';
-    private $razorpaySecret = '9Y3M6fGuUUp7zxevkNkqeMDV';
+    private $razorpayKey;
+    private $razorpaySecret;
+
+    public function __construct()
+    {
+        $mode = env('RAZORPAY_MODE', config('services.razorpay.mode', 'sandbox'));
+        $isLive = in_array(strtolower((string)$mode), ['live', 'production']);
+
+        if ($isLive) {
+            $this->razorpayKey = env('RAZORPAY_LIVE_KEY_ID') ?: config('services.razorpay.key_id');
+            $this->razorpaySecret = env('RAZORPAY_LIVE_KEY_SECRET') ?: config('services.razorpay.key_secret');
+        } else {
+            $this->razorpayKey = env('RAZORPAY_TEST_KEY_ID') ?: (config('services.razorpay.key_id') ?: 'rzp_test_SQxqJOMmeLZK9n');
+            $this->razorpaySecret = env('RAZORPAY_TEST_KEY_SECRET') ?: (config('services.razorpay.key_secret') ?: '9Y3M6fGuUUp7zxevkNkqeMDV');
+        }
+    }
 
     // Get active (non-soft-deleted) saved addresses for user
     public function getAddresses(Request $request)

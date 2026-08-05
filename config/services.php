@@ -39,8 +39,13 @@ return [
         'url_endpoint' => env('IMAGEKIT_URL_ENDPOINT'),
     ],
     'razorpay' => [
+        'mode' => env('RAZORPAY_MODE', 'sandbox'),
         'key_id' => env('RAZORPAY_KEY_ID'),
         'key_secret' => env('RAZORPAY_KEY_SECRET'),
+        'test_key_id' => env('RAZORPAY_TEST_KEY_ID'),
+        'test_key_secret' => env('RAZORPAY_TEST_KEY_SECRET'),
+        'live_key_id' => env('RAZORPAY_LIVE_KEY_ID'),
+        'live_key_secret' => env('RAZORPAY_LIVE_KEY_SECRET'),
     ],
     'openai' => [
         'key' => env('OPENAI_API_KEY'),
