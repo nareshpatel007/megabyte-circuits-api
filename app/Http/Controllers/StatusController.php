@@ -46,21 +46,30 @@ class StatusController extends Controller
             'name' => 'required|string|max:255',
         ]);
 
+        $hasSlug = \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_statuses', 'slug');
+        $hasColor = \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_statuses', 'color');
+        $hasSort = \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_statuses', 'sort_order');
+
         $slug = Str::slug($request->name);
-        $count = Status::where('slug', $slug)->count();
-        if ($count > 0) {
-            $slug = $slug . '-' . time();
+        if ($hasSlug) {
+            $count = Status::where('slug', $slug)->count();
+            if ($count > 0) {
+                $slug = $slug . '-' . time();
+            }
         }
 
-        $maxSort = Status::max('sort_order') ?? 0;
+        $maxSort = $hasSort ? (Status::max('sort_order') ?? 0) : 0;
 
-        $status = Status::create([
+        $insertData = [
             'name' => $request->name,
-            'slug' => $slug,
-            'sort_order' => $request->sort_order ?? ($maxSort + 1),
-            'color' => $request->color ?? '#10b981',
-            'is_active' => $request->is_active ?? true,
-        ]);
+            'label' => $request->name,
+        ];
+        if ($hasSlug) $insertData['slug'] = $slug;
+        if ($hasSort) $insertData['sort_order'] = $request->sort_order ?? ($maxSort + 1);
+        if ($hasColor) $insertData['color'] = $request->color ?? '#10b981';
+
+        $id = \Illuminate\Support\Facades\DB::table('pcb_order_statuses')->insertGetId($insertData);
+        $status = \Illuminate\Support\Facades\DB::table('pcb_order_statuses')->where('id', $id)->first();
 
         return response()->json([
             'status' => true,
@@ -81,21 +90,26 @@ class StatusController extends Controller
             ], 404);
         }
 
+        $hasSlug = \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_statuses', 'slug');
+        $hasColor = \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_statuses', 'color');
+        $hasSort = \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_statuses', 'sort_order');
+
         if ($request->has('name')) {
             $status->name = $request->name;
-            $status->slug = Str::slug($request->name);
+            if (isset($status->label)) {
+                $status->label = $request->name;
+            }
+            if ($hasSlug) {
+                $status->slug = Str::slug($request->name);
+            }
         }
 
-        if ($request->has('sort_order')) {
+        if ($request->has('sort_order') && $hasSort) {
             $status->sort_order = $request->sort_order;
         }
 
-        if ($request->has('color')) {
+        if ($request->has('color') && $hasColor) {
             $status->color = $request->color;
-        }
-
-        if ($request->has('is_active')) {
-            $status->is_active = $request->is_active;
         }
 
         $status->save();

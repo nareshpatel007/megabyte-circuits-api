@@ -394,16 +394,6 @@ class CheckoutController extends Controller
                         'description' => "Payment of ₹" . number_format($itemPrice, 2) . " verified via Razorpay ID '{$razorpayPaymentId}' (Txn Ref: {$transactionNumber}).",
                         'created_at' => date('Y-m-d H:i:s', strtotime('+1 second')),
                         'updated_at' => date('Y-m-d H:i:s', strtotime('+1 second'))
-                    ],
-                    [
-                        'pcb_order_id' => $orderId,
-                        'order_number' => $orderNumber,
-                        'user_id' => $userId,
-                        'status' => 'Pending',
-                        'action' => 'CAM Queue',
-                        'description' => "Order queued for Gerber engineering review and DFM manufacturing verification.",
-                        'created_at' => date('Y-m-d H:i:s', strtotime('+2 seconds')),
-                        'updated_at' => date('Y-m-d H:i:s', strtotime('+2 seconds'))
                     ]
                 ];
 
