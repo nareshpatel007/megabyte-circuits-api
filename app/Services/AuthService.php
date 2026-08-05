@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use DB;
+use Illuminate\Support\Facades\DB;
 use Firebase\JWT\JWT;
 use Exception;
 
@@ -12,12 +12,12 @@ class AuthService
     public function login($email, $password, $platform = 'web')
     {
         // If email is empty
-        if(empty($email)) {
+        if (empty($email)) {
             return [
                 'status' => false,
                 'message' => 'Email address is required.'
             ];
-        } else if(empty($password)) {
+        } else if (empty($password)) {
             return [
                 'status' => false,
                 'message' => 'Password is required.'
@@ -28,7 +28,7 @@ class AuthService
         $user = DB::table('users')->where('email', $email)->first();
 
         // If user not found
-        if(empty($user)) {
+        if (empty($user)) {
             return [
                 'status' => false,
                 'message' => 'User not found. Please register first.'
@@ -36,7 +36,7 @@ class AuthService
         }
 
         // Check status
-        if(isset($user->status) && $user->status !== 'active') {
+        if (isset($user->status) && $user->status !== 'active') {
             return [
                 'status' => false,
                 'message' => 'Your account is inactive.'
@@ -57,7 +57,7 @@ class AuthService
             $password_correct = true;
         }
 
-        if($password_correct) {
+        if ($password_correct) {
             // Update last login
             DB::table('users')->where('id', $user->id)->update([
                 'last_login_at' => date('Y-m-d H:i:s'),

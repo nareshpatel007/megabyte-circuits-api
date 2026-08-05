@@ -6,8 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\CommonHelper as CommonHelper;
 use App\MailHelper as MailHelper;
-use DB;
-use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\DB;
 
 class CronController extends Controller
 {
@@ -18,7 +17,7 @@ class CronController extends Controller
         if (!app()->runningInConsole()) {
             $cron_key = config('cron.secret_key');
             $request_key = $request->header('X-Cron-Token') ?? $request->query('token') ?? $request->bearerToken();
-            
+
             if (empty($cron_key) || $request_key !== $cron_key) {
                 return response()->json([
                     'success' => false,
@@ -34,7 +33,7 @@ class CronController extends Controller
             // Fetch queued emails that are ready to be sent (including scheduled checks)
             $queued_emails = DB::table('email_queue')
                 ->where('is_sent', 0)
-                ->where(function($query) {
+                ->where(function ($query) {
                     $query->whereNull('scheduled_at')->orWhere('scheduled_at', '<=', date('Y-m-d H:i:s'));
                 })
                 ->orderBy('id', 'ASC')
@@ -43,7 +42,7 @@ class CronController extends Controller
                 ->toArray();
 
             // If no queued emails
-            if(empty($queued_emails)) {
+            if (empty($queued_emails)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'No queued emails found.'
@@ -51,7 +50,7 @@ class CronController extends Controller
             }
 
             // Loop queued emails
-            foreach($queued_emails as $row) {
+            foreach ($queued_emails as $row) {
                 // Filter value
                 $send_to = trim(strtolower($row->to));
                 $template_path = $row->template_path;
@@ -83,7 +82,7 @@ class CronController extends Controller
                     ->first();
 
                 // If unsubscribe email found
-                if(!empty($unsubscribe_email)) {
+                if (!empty($unsubscribe_email)) {
                     DB::table('email_queue')->where('id', $row->id)->update([
                         'is_sent' => 1,
                         'remark' => 'Unsubscribe email found'
@@ -98,7 +97,7 @@ class CronController extends Controller
                 $payload_data['track_id'] = $track_id;
 
                 // If attachments exist
-                if(!empty($payload_data['attachments'])) {
+                if (!empty($payload_data['attachments'])) {
                     // Define array
                     $new_attachments = [];
 
@@ -106,7 +105,7 @@ class CronController extends Controller
                     $payload_data['attachments'] = array_filter($payload_data['attachments']);
 
                     // Loop every attachment
-                    foreach($payload_data['attachments'] as $key => $attachment) {
+                    foreach ($payload_data['attachments'] as $key => $attachment) {
                         // If attachment is valid
                         if (strpos($attachment, 'https://') !== false) {
                             $new_attachments[] = $attachment;
@@ -121,7 +120,7 @@ class CronController extends Controller
                 }
 
                 // If need CC for this email
-                if($need_cc) {
+                if ($need_cc) {
                     $payload_data['cc'] = $cc_email;
                 }
 
@@ -147,7 +146,7 @@ class CronController extends Controller
                             'attachments' => !empty($payload_data['attachments']) ? json_encode($payload_data['attachments']) : '[]',
                             'payload_data' => $row->data,
                             'created_at' => date('Y-m-d H:i:s')
-                        ]); 
+                        ]);
                     } else {
                         // Update is_sent with specific error message
                         $error_msg = is_array($result) ? ($result['message'] ?? 'Failed to send email') : 'Unknown failure';

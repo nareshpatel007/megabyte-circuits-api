@@ -5,7 +5,6 @@ namespace App;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Config;
 use App\Mail\SendMail;
-use DB;
 
 class MailHelper
 {

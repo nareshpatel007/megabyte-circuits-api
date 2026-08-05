@@ -3,7 +3,6 @@
 namespace App;
 
 use Illuminate\Http\Request;
-use DB;
 
 class CommonHelper
 {
@@ -72,7 +71,7 @@ class CommonHelper
                 'available_credits' => $newCredits,
                 'updated_at' => date('Y-m-d H:i:s')
             ]);
-            
+
             // Log credit usage activity
             \Illuminate\Support\Facades\DB::table('activity_logs')->insert([
                 'user_id' => $userId,
