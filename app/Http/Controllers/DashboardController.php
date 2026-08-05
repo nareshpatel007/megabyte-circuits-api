@@ -72,13 +72,34 @@ class DashboardController extends Controller
                 $order->meta = $metas;
             }
 
+            // Fetch status breakdown counts and percentage distribution
+            $statusCounts = DB::table('pcb_orders')
+                ->leftJoin('pcb_order_statuses', 'pcb_orders.status_id', '=', 'pcb_order_statuses.id')
+                ->where('pcb_orders.user_id', $userId)
+                ->whereNull('pcb_orders.deleted_at')
+                ->select(DB::raw('COALESCE(pcb_order_statuses.name, "Pending") as status_name'), DB::raw('count(*) as count'))
+                ->groupBy('status_name')
+                ->get();
+
+            $statusBreakdown = [];
+            foreach ($statusCounts as $row) {
+                $count = (int)$row->count;
+                $pct = $totalOrders > 0 ? round(($count / $totalOrders) * 100, 1) : 0;
+                $statusBreakdown[] = [
+                    'status_name' => $row->status_name,
+                    'count' => $count,
+                    'percentage' => $pct
+                ];
+            }
+
             return response()->json([
                 'status' => true,
                 'metrics' => [
                     'total_orders' => $totalOrders,
                     'pending_orders' => $pendingOrders,
                     'gerber_files_count' => $totalGerberFiles,
-                    'total_spent' => (float)$totalSpent
+                    'total_spent' => (float)$totalSpent,
+                    'status_breakdown' => $statusBreakdown
                 ],
                 'recent_orders' => $recentOrders
             ]);
