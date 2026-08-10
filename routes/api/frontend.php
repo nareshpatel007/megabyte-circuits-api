@@ -10,6 +10,7 @@ use App\Http\Controllers\OrderController;
 use App\Http\Controllers\FileUploadController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\CheckoutController;
+use App\Http\Controllers\GoogleController;
 
 // File Upload (Public for testing)
 Route::post('upload', [FileUploadController::class, 'upload']);
@@ -21,6 +22,8 @@ Route::prefix('orders/')->group(function () {
 
 // Auth Routes
 Route::prefix('auth/')->group(function () {
+    Route::get('google', [GoogleController::class, 'redirect']);
+    Route::get('google/callback', [GoogleController::class, 'callback']);
     Route::post('login', [AuthController::class, 'login']);
     Route::post('register', [AuthController::class, 'register']);
     Route::post('google-login', [AuthController::class, 'googleLogin']);
