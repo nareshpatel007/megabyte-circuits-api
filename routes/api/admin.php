@@ -45,6 +45,7 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::put('roles/{id}', [AdminController::class, 'updateRole']);
         Route::delete('roles/{id}', [AdminController::class, 'deleteRole']);
         Route::get('permissions', [AdminController::class, 'listPermissions']);
+        Route::get('my-permissions', [AdminController::class, 'myPermissions']);
 
         // Blog Management
         Route::get('blogs', [BlogController::class, 'index']);

@@ -1178,9 +1178,72 @@ class AdminController extends Controller
     {
         try {
             $permissions = DB::table('permissions')->get();
+            
+            // Group permissions by module for convenience
+            $grouped = [];
+            foreach ($permissions as $perm) {
+                $grouped[$perm->module][] = $perm;
+            }
+
             return response()->json([
                 'status' => true,
-                'data' => $permissions
+                'data' => $permissions,
+                'grouped' => $grouped
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function myPermissions(Request $request)
+    {
+        try {
+            $authHeader = $request->header('Authorization');
+            $token = str_replace('Bearer ', '', $authHeader);
+            $secret = env('JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
+            $decoded = JWT::decode($token, new \Firebase\JWT\Key($secret, 'HS256'));
+            $adminId = $decoded->admin_id ?? null;
+
+            if (!$adminId) {
+                return response()->json(['status' => false, 'message' => 'Unauthorized admin.'], 401);
+            }
+
+            $admin = DB::table('admins')->where('id', $adminId)->first();
+            if (!$admin) {
+                return response()->json(['status' => false, 'message' => 'Admin account not found.'], 404);
+            }
+
+            $isSuperAdmin = false;
+            $permissions = [];
+
+            if (!empty($admin->role_id) && Schema::hasTable('roles')) {
+                $role = DB::table('roles')->where('id', $admin->role_id)->first();
+                if ($role) {
+                    if (strtolower($role->name) === 'super admin' || (int)$role->id === 1) {
+                        $isSuperAdmin = true;
+                    }
+                }
+
+                $permissions = DB::table('role_permissions')
+                    ->join('permissions', 'role_permissions.permission_id', '=', 'permissions.id')
+                    ->where('role_permissions.role_id', $admin->role_id)
+                    ->pluck('permissions.slug')
+                    ->toArray();
+            } else {
+                // If role_id is null/empty or 1, default Super Admin access
+                if (empty($admin->role_id) || (int)$admin->id === 1) {
+                    $isSuperAdmin = true;
+                }
+            }
+
+            if ($isSuperAdmin) {
+                $permissions = DB::table('permissions')->pluck('slug')->toArray();
+            }
+
+            return response()->json([
+                'status' => true,
+                'is_super_admin' => $isSuperAdmin,
+                'permissions' => array_values(array_unique($permissions))
             ]);
         } catch (\Throwable $th) {
             return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
@@ -1192,7 +1255,7 @@ class AdminController extends Controller
         try {
             $name = $request->input('name');
             $description = $request->input('description');
-            $permissionIds = $request->input('permission_ids', []);
+            $rawPermissions = $request->input('permissions') ?: $request->input('permission_ids', []);
 
             if (empty($name)) {
                 return response()->json(['status' => false, 'message' => 'Role name is required.'], 400);
@@ -1205,7 +1268,22 @@ class AdminController extends Controller
                 'updated_at' => now()
             ]);
 
-            if (is_array($permissionIds)) {
+            if (is_array($rawPermissions) && !empty($rawPermissions)) {
+                $permissionIds = [];
+
+                foreach ($rawPermissions as $item) {
+                    if (is_numeric($item)) {
+                        $permissionIds[] = (int)$item;
+                    } elseif (is_string($item)) {
+                        $perm = DB::table('permissions')->where('slug', $item)->orWhere('name', $item)->first();
+                        if ($perm) {
+                            $permissionIds[] = $perm->id;
+                        }
+                    }
+                }
+
+                $permissionIds = array_unique($permissionIds);
+
                 foreach ($permissionIds as $pId) {
                     DB::table('role_permissions')->insert([
                         'role_id' => $roleId,
@@ -1242,9 +1320,31 @@ class AdminController extends Controller
                 ]);
             }
 
-            if ($request->has('permission_ids') && is_array($request->input('permission_ids'))) {
+            $rawPermissions = null;
+            if ($request->has('permissions')) {
+                $rawPermissions = $request->input('permissions');
+            } elseif ($request->has('permission_ids')) {
+                $rawPermissions = $request->input('permission_ids');
+            }
+
+            if (is_array($rawPermissions)) {
                 DB::table('role_permissions')->where('role_id', $id)->delete();
-                foreach ($request->input('permission_ids') as $pId) {
+
+                $permissionIds = [];
+                foreach ($rawPermissions as $item) {
+                    if (is_numeric($item)) {
+                        $permissionIds[] = (int)$item;
+                    } elseif (is_string($item)) {
+                        $perm = DB::table('permissions')->where('slug', $item)->orWhere('name', $item)->first();
+                        if ($perm) {
+                            $permissionIds[] = $perm->id;
+                        }
+                    }
+                }
+
+                $permissionIds = array_unique($permissionIds);
+
+                foreach ($permissionIds as $pId) {
                     DB::table('role_permissions')->insert([
                         'role_id' => $id,
                         'permission_id' => $pId,
