@@ -77,5 +77,10 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::delete('inventory/{id}', [\App\Http\Controllers\InventoryController::class, 'destroy']);
         Route::post('inventory/{id}/stock', [\App\Http\Controllers\InventoryController::class, 'adjustStock']);
         Route::get('inventory/{id}/logs', [\App\Http\Controllers\InventoryController::class, 'getLogs']);
+
+        // PCB Pricing Calculations Management
+        Route::get('pcb-pricing', [\App\Http\Controllers\PcbPricingController::class, 'getPricingConfig']);
+        Route::post('pcb-pricing', [\App\Http\Controllers\PcbPricingController::class, 'updatePricingConfig']);
+        Route::post('pcb-pricing/reset', [\App\Http\Controllers\PcbPricingController::class, 'resetPricingConfig']);
     });
 });

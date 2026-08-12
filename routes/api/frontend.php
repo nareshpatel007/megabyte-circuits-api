@@ -15,6 +15,9 @@ use App\Http\Controllers\GoogleController;
 // File Upload (Public for testing)
 Route::post('upload', [FileUploadController::class, 'upload']);
 
+// PCB Pricing Calculations (Public)
+Route::get('pcb-pricing', [\App\Http\Controllers\PcbPricingController::class, 'getPricingConfig']);
+
 // PCB Orders
 Route::prefix('orders/')->group(function () {
     Route::post('submit', [OrderController::class, 'store']);
