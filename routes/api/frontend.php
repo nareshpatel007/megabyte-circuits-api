@@ -57,6 +57,7 @@ Route::prefix('dashboard/')->group(function () {
     Route::get('gerber-files', [DashboardController::class, 'gerberFiles']);
     Route::post('delete-gerber', [DashboardController::class, 'deleteGerberFile']);
     Route::get('payments', [DashboardController::class, 'payments']);
+    Route::get('search', [DashboardController::class, 'search']);
 });
 
 // Frontend API Routes (Protected by API token)

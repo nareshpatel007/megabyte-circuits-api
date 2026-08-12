@@ -363,4 +363,103 @@ class DashboardController extends Controller
             return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
         }
     }
+
+    // Global Search (User Scoped)
+    public function search(Request $request)
+    {
+        try {
+            $userId = $request->input('user_id');
+            $q = trim($request->input('q') ?? $request->input('search') ?? '');
+
+            if (!$userId) {
+                return response()->json(['status' => false, 'message' => 'User ID is required'], 400);
+            }
+
+            if (empty($q)) {
+                return response()->json([
+                    'status' => true,
+                    'orders' => [],
+                    'gerber_files' => [],
+                    'payments' => []
+                ]);
+            }
+
+            $searchPattern = '%' . $q . '%';
+
+            // 1. Search User's Orders
+            $orders = DB::table('pcb_orders')
+                ->leftJoin('pcb_order_statuses', 'pcb_orders.status_id', '=', 'pcb_order_statuses.id')
+                ->leftJoin('gerber_files', 'pcb_orders.gerber_file_id', '=', 'gerber_files.id')
+                ->leftJoin('pcb_order_meta', 'pcb_orders.id', '=', 'pcb_order_meta.pcb_order_id')
+                ->where('pcb_orders.user_id', $userId)
+                ->whereNull('pcb_orders.deleted_at')
+                ->where(function($query) use ($searchPattern) {
+                    $query->where('pcb_orders.order_number', 'LIKE', $searchPattern)
+                          ->orWhere('gerber_files.original_name', 'LIKE', $searchPattern)
+                          ->orWhere('pcb_order_statuses.name', 'LIKE', $searchPattern)
+                          ->orWhere('pcb_order_meta.meta_value', 'LIKE', $searchPattern);
+                })
+                ->select(
+                    'pcb_orders.id',
+                    'pcb_orders.order_number',
+                    'pcb_orders.order_value',
+                    'pcb_orders.status_id',
+                    'pcb_order_statuses.name as status_name',
+                    'pcb_orders.created_at',
+                    'pcb_orders.gerber_file_id',
+                    'gerber_files.original_name as gerber_name'
+                )
+                ->distinct()
+                ->orderBy('pcb_orders.created_at', 'desc')
+                ->limit(10)
+                ->get();
+
+            // 2. Search User's Gerber Files
+            $gerberFiles = DB::table('gerber_files')
+                ->where('user_id', $userId)
+                ->whereNull('deleted_at')
+                ->where(function($query) use ($searchPattern) {
+                    $query->where('original_name', 'LIKE', $searchPattern)
+                          ->orWhere('board_name', 'LIKE', $searchPattern);
+                })
+                ->select('id', 'original_name', 'board_name', 'file_size', 'created_at', 'file_url')
+                ->orderBy('created_at', 'desc')
+                ->limit(10)
+                ->get();
+
+            // 3. Search User's Payments
+            $payments = DB::table('payment_transactions')
+                ->leftJoin('pcb_orders', 'pcb_orders.transaction_id', '=', 'payment_transactions.id')
+                ->where('payment_transactions.user_id', $userId)
+                ->where(function($query) use ($searchPattern) {
+                    $query->where('payment_transactions.transaction_number', 'LIKE', $searchPattern)
+                          ->orWhere('payment_transactions.razorpay_payment_id', 'LIKE', $searchPattern)
+                          ->orWhere('payment_transactions.razorpay_order_id', 'LIKE', $searchPattern)
+                          ->orWhere('payment_transactions.status', 'LIKE', $searchPattern)
+                          ->orWhere('pcb_orders.order_number', 'LIKE', $searchPattern);
+                })
+                ->select(
+                    'payment_transactions.id',
+                    'payment_transactions.transaction_number',
+                    'payment_transactions.razorpay_payment_id',
+                    'payment_transactions.amount',
+                    'payment_transactions.status',
+                    'payment_transactions.created_at',
+                    'pcb_orders.order_number'
+                )
+                ->distinct()
+                ->orderBy('payment_transactions.created_at', 'desc')
+                ->limit(10)
+                ->get();
+
+            return response()->json([
+                'status' => true,
+                'orders' => $orders,
+                'gerber_files' => $gerberFiles,
+                'payments' => $payments
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
 }
