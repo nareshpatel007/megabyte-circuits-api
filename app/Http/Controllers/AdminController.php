@@ -1393,14 +1393,54 @@ class AdminController extends Controller
             $mobileCol = in_array('mobile', $userColumns) ? 'mobile' : (in_array('phone_number', $userColumns) ? 'phone_number' : null);
             $mobileSelect = $mobileCol ? "{$userTable}.{$mobileCol} as user_mobile" : DB::raw("NULL as user_mobile");
 
+            $ordersTable = Schema::hasTable('pcb_orders') ? 'pcb_orders' : (Schema::hasTable('orders') ? 'orders' : null);
+
             $query = DB::table('payment_transactions')
-                ->leftJoin($userTable, 'payment_transactions.user_id', '=', "{$userTable}.id")
-                ->select(
+                ->leftJoin($userTable, 'payment_transactions.user_id', '=', "{$userTable}.id");
+
+            if ($ordersTable) {
+                $gerberTable = Schema::hasTable('gerber_files') ? 'gerber_files' : null;
+                $hasGerberCol = $gerberTable && Schema::hasColumn($ordersTable, 'gerber_file_id');
+
+                $query->leftJoin($ordersTable, 'payment_transactions.id', '=', "{$ordersTable}.transaction_id");
+
+                if ($hasGerberCol) {
+                    $query->leftJoin($gerberTable, "{$ordersTable}.gerber_file_id", '=', "{$gerberTable}.id")
+                        ->select(
+                            'payment_transactions.*',
+                            "{$userTable}.name as user_name",
+                            "{$userTable}.email as user_email",
+                            "{$ordersTable}.id as order_id",
+                            "{$ordersTable}.order_number as order_number",
+                            "{$ordersTable}.status as order_status",
+                            "{$ordersTable}.order_value as order_value",
+                            "{$ordersTable}.delivery_date as order_delivery_date",
+                            "{$ordersTable}.created_at as order_created_at",
+                            "{$gerberTable}.original_name as gerber_file_name",
+                            $mobileSelect
+                        );
+                } else {
+                    $query->select(
+                        'payment_transactions.*',
+                        "{$userTable}.name as user_name",
+                        "{$userTable}.email as user_email",
+                        "{$ordersTable}.id as order_id",
+                        "{$ordersTable}.order_number as order_number",
+                        "{$ordersTable}.status as order_status",
+                        "{$ordersTable}.order_value as order_value",
+                        "{$ordersTable}.delivery_date as order_delivery_date",
+                        "{$ordersTable}.created_at as order_created_at",
+                        $mobileSelect
+                    );
+                }
+            } else {
+                $query->select(
                     'payment_transactions.*',
                     "{$userTable}.name as user_name",
                     "{$userTable}.email as user_email",
                     $mobileSelect
                 );
+            }
 
             // Filter for completed/successful payments
             $statusFilter = $request->input('status', 'success');
@@ -1408,15 +1448,18 @@ class AdminController extends Controller
                 $query->where('payment_transactions.status', $statusFilter);
             }
 
-            // Search filter (Transaction #, Razorpay Payment ID, Razorpay Order ID, Customer Name/Email)
+            // Search filter (Transaction #, Razorpay Payment ID, Razorpay Order ID, Customer Name/Email, Order Number)
             if ($request->filled('search')) {
                 $search = trim($request->input('search'));
-                $query->where(function ($q) use ($search, $userTable, $mobileCol) {
+                $query->where(function ($q) use ($search, $userTable, $mobileCol, $ordersTable) {
                     $q->where('payment_transactions.transaction_number', 'LIKE', "%{$search}%")
                         ->orWhere('payment_transactions.razorpay_payment_id', 'LIKE', "%{$search}%")
                         ->orWhere('payment_transactions.razorpay_order_id', 'LIKE', "%{$search}%")
                         ->orWhere("{$userTable}.name", 'LIKE', "%{$search}%")
                         ->orWhere("{$userTable}.email", 'LIKE', "%{$search}%");
+                    if ($ordersTable) {
+                        $q->orWhere("{$ordersTable}.order_number", 'LIKE', "%{$search}%");
+                    }
                     if ($mobileCol) {
                         $q->orWhere("{$userTable}.{$mobileCol}", 'LIKE', "%{$search}%");
                     }

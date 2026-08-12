@@ -176,6 +176,31 @@ class OrderController extends Controller
                 $query->whereDate('created_at', '<=', $request->end_date);
             }
 
+            // Search Filter (by Order #, Board Name, Email, Mobile, Customer Name, Metas, Razorpay Payment IDs)
+            if ($request->filled('search')) {
+                $search = trim($request->input('search'));
+                $query->where(function ($q) use ($search) {
+                    $q->where('order_number', 'LIKE', "%{$search}%")
+                        ->orWhere('user_email', 'LIKE', "%{$search}%")
+                        ->orWhere('user_mobile', 'LIKE', "%{$search}%")
+                        ->orWhere('customer_name', 'LIKE', "%{$search}%");
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'board_name')) {
+                        $q->orWhere('board_name', 'LIKE', "%{$search}%");
+                    }
+                    $q->orWhereHas('metas', function ($mq) use ($search) {
+                        $mq->where('meta_value', 'LIKE', "%{$search}%");
+                    });
+                    if (\Illuminate\Support\Facades\Schema::hasTable('payment_transactions')) {
+                        $q->orWhereIn('transaction_id', function ($tq) use ($search) {
+                            $tq->select('id')->from('payment_transactions')
+                                ->where('transaction_number', 'LIKE', "%{$search}%")
+                                ->orWhere('razorpay_payment_id', 'LIKE', "%{$search}%")
+                                ->orWhere('razorpay_order_id', 'LIKE', "%{$search}%");
+                        });
+                    }
+                });
+            }
+
             // Sorting (Default: delivery_date desc)
             $sortBy = $request->input('sort_by', 'delivery_date');
             $sortOrder = strtolower($request->input('sort_order', 'desc')) === 'asc' ? 'asc' : 'desc';
