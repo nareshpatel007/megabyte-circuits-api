@@ -72,6 +72,24 @@ class DashboardController extends Controller
                 $order->meta = $metas;
             }
 
+            // Recent 5 Payments (Only success & failed transactions)
+            $recentPayments = DB::table('payment_transactions')
+                ->leftJoin('pcb_orders', 'pcb_orders.transaction_id', '=', 'payment_transactions.id')
+                ->where('payment_transactions.user_id', $userId)
+                ->whereIn('payment_transactions.status', ['success', 'failed', 'failure', 'paid'])
+                ->select(
+                    'payment_transactions.id',
+                    'payment_transactions.transaction_number',
+                    'payment_transactions.razorpay_payment_id',
+                    'payment_transactions.amount',
+                    'payment_transactions.status',
+                    'payment_transactions.created_at',
+                    'pcb_orders.order_number'
+                )
+                ->orderBy('payment_transactions.created_at', 'desc')
+                ->limit(5)
+                ->get();
+
             return response()->json([
                 'status' => true,
                 'metrics' => [
@@ -80,7 +98,8 @@ class DashboardController extends Controller
                     'gerber_files_count' => $totalGerberFiles,
                     'total_spent' => (float)$totalSpent
                 ],
-                'recent_orders' => $recentOrders
+                'recent_orders' => $recentOrders,
+                'recent_payments' => $recentPayments
             ]);
         } catch (\Throwable $th) {
             return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
