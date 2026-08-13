@@ -94,6 +94,8 @@ class AuthController extends Controller
                 'email' => $email,
                 'password' => $password,
                 'company_name' => $company_name,
+                'country' => $input['country'] ?? $request->input('country'),
+                'gst_number' => $input['gst_number'] ?? $request->input('gst_number'),
                 'phone' => $phone,
                 'referral_source' => $referral_source,
                 'invite_token' => $input['invite_token'] ?? $request->input('invite_token')

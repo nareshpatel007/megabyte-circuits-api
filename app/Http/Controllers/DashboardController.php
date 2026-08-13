@@ -244,8 +244,36 @@ class DashboardController extends Controller
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
+                    'company_name' => $user->company_name ?? null,
+                    'country' => $user->country ?? null,
+                    'gst_number' => $user->gst_number ?? null,
                     'created_at' => $user->created_at ?? null
                 ]
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    // Update User GST Number API
+    public function updateGst(Request $request)
+    {
+        try {
+            $userId = $request->input('user_id');
+            $gstNumber = $request->input('gst_number');
+
+            if (!$userId) {
+                return response()->json(['status' => false, 'message' => 'User ID is required'], 400);
+            }
+
+            DB::table('users')->where('id', $userId)->update([
+                'gst_number' => $gstNumber,
+                'updated_at' => date('Y-m-d H:i:s')
+            ]);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'GST Number updated successfully'
             ]);
         } catch (\Throwable $th) {
             return response()->json(['status' => false, 'message' => $th->getMessage()], 500);

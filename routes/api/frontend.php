@@ -55,6 +55,7 @@ Route::prefix('dashboard/')->group(function () {
     Route::get('overview', [DashboardController::class, 'overview']);
     Route::get('sidebar-counts', [DashboardController::class, 'sidebarCounts']);
     Route::get('account', [DashboardController::class, 'accountDetails']);
+    Route::post('update-gst', [DashboardController::class, 'updateGst']);
     Route::get('orders', [DashboardController::class, 'orders']);
     Route::get('order-details', [DashboardController::class, 'orderDetails']);
     Route::get('gerber-files', [DashboardController::class, 'gerberFiles']);

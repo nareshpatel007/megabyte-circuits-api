@@ -93,6 +93,15 @@ class RegisterService
                 'updated_at' => date('Y-m-d H:i:s')
             ];
 
+            if (!empty($company_name)) {
+                $user_data['company_name'] = $company_name;
+            }
+            if (!empty($userdata['country'])) {
+                $user_data['country'] = $userdata['country'];
+            }
+            if (!empty($userdata['gst_number'])) {
+                $user_data['gst_number'] = $userdata['gst_number'];
+            }
             if (!empty($phone)) {
                 $user_data['phone_number'] = $phone;
             }

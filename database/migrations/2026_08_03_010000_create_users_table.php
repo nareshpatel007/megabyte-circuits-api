@@ -30,6 +30,7 @@ return new class extends Migration
                 $table->integer('total_bonus_credits')->default(50);
                 $table->string('status')->default('active');
                 $table->string('country')->nullable();
+                $table->string('gst_number')->nullable();
                 $table->string('avatar')->nullable();
                 $table->string('api_key')->nullable();
                 $table->timestamp('last_login_at')->nullable();
