@@ -176,12 +176,22 @@ class CheckoutController extends Controller
                     'updated_at' => date('Y-m-d H:i:s')
                 ]);
 
+                $logoPath = public_path('images/logo.png');
+                $companyLogo = url('/images/logo.png');
+                if (file_exists($logoPath)) {
+                    $type = pathinfo($logoPath, PATHINFO_EXTENSION);
+                    $data = file_get_contents($logoPath);
+                    $companyLogo = 'data:image/' . ($type === 'svg' ? 'svg+xml' : $type) . ';base64,' . base64_encode($data);
+                }
+
                 return response()->json([
                     'status' => true,
                     'key' => $this->razorpayKey,
                     'order_id' => $razorpayOrder['id'],
                     'amount' => $amountInPaise,
-                    'currency' => $currency
+                    'currency' => $currency,
+                    'company_name' => config('app.name', 'Megabyte Circuit'),
+                    'company_logo' => $companyLogo
                 ]);
             } else {
                 return response()->json([
