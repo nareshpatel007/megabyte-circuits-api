@@ -376,6 +376,21 @@ class OrderController extends Controller
 
             $order->save();
 
+            // Handle updating order metas
+            if ($request->has('metas') && is_array($request->input('metas'))) {
+                foreach ($request->input('metas') as $mKey => $mValue) {
+                    PcbOrderMeta::updateOrCreate(
+                        ['pcb_order_id' => $order->id, 'meta_key' => $mKey],
+                        ['meta_value' => (string)$mValue]
+                    );
+                }
+            } elseif ($request->has('meta_key')) {
+                PcbOrderMeta::updateOrCreate(
+                    ['pcb_order_id' => $order->id, 'meta_key' => $request->input('meta_key')],
+                    ['meta_value' => (string)$request->input('meta_value', '')]
+                );
+            }
+
             // 1. Create status change history log in pcb_order_status_histories
             if ($request->has('status') && \Illuminate\Support\Facades\Schema::hasTable('pcb_order_status_histories')) {
                 PcbOrderStatusHistory::create([
