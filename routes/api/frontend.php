@@ -23,6 +23,12 @@ Route::prefix('orders/')->group(function () {
     Route::post('submit', [OrderController::class, 'store']);
 });
 
+// DigiKey Products API (DB stored)
+Route::get('digikey/products', [\App\Http\Controllers\DigiKeyProductsController::class, 'index']);
+Route::get('digikey/products/{partNumber}', [\App\Http\Controllers\DigiKeyProductsController::class, 'show']);
+Route::post('digikey/sync', [\App\Http\Controllers\DigiKeyProductsController::class, 'triggerSync']);
+
+
 // Auth Routes
 Route::prefix('auth/')->group(function () {
     Route::get('google', [GoogleController::class, 'redirect']);

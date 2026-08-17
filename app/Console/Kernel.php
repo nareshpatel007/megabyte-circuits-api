@@ -13,7 +13,9 @@ class Kernel extends ConsoleKernel
     protected function schedule(Schedule $schedule): void
     {
         $schedule->command('gerber:clean-unattached')->dailyAt('00:00');
+        $schedule->command('digikey:sync')->dailyAt('01:00');
     }
+
 
     /**
      * Register the commands for the application.
