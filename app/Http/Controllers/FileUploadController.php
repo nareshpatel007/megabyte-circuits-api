@@ -100,4 +100,45 @@ class FileUploadController extends Controller
             return '0 bytes';
         }
     }
+
+    public function updatePreview(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'gerber_file_id' => 'required|integer',
+                'preview_data' => 'required|string',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Validation failed',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $gerberFileId = $request->input('gerber_file_id');
+            $previewData = $request->input('preview_data');
+
+            $updated = DB::table('gerber_files')
+                ->where('id', $gerberFileId)
+                ->update([
+                    'preview_data' => $previewData,
+                    'updated_at' => date('Y-m-d H:i:s')
+                ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Gerber preview updated successfully',
+                'updated' => (bool)$updated
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to update preview',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 }
+
