@@ -302,13 +302,21 @@ class CheckoutController extends Controller
                     $nextSuffix = $repeatCount + 1;
                     $orderNumber = $parentOrderNumber . '-' . $nextSuffix;
                 } else {
-                    // Standard Order: Generate M00001, M00002...
-                    $latestOrder = DB::table('pcb_orders')
+                    // Standard Order: Generate M00001, M00002... (+1 of last generated order number)
+                    $lastOrder = DB::table('pcb_orders')
+                        ->where('order_number', 'LIKE', 'M%')
                         ->where('order_number', 'NOT LIKE', '%-%')
                         ->orderBy('id', 'desc')
                         ->first();
-                    $nextId = $latestOrder ? ($latestOrder->id + 1) : (DB::table('pcb_orders')->max('id') + 1);
-                    $orderNumber = 'M' . str_pad($nextId, 5, '0', STR_PAD_LEFT);
+
+                    $nextNum = 1;
+                    if ($lastOrder && !empty($lastOrder->order_number)) {
+                        $num = (int) preg_replace('/[^0-9]/', '', $lastOrder->order_number);
+                        $nextNum = $num > 0 ? ($num + 1) : ((DB::table('pcb_orders')->max('id') ?? 0) + 1);
+                    } else {
+                        $nextNum = (DB::table('pcb_orders')->max('id') ?? 0) + 1;
+                    }
+                    $orderNumber = 'M' . str_pad($nextNum, 5, '0', STR_PAD_LEFT);
                 }
 
                 $boardName = $item['gerberFileName'] ?? $item['boardName'] ?? ($item['productType'] === 'stencil' ? 'SMT Stencil' : 'Standard PCB');

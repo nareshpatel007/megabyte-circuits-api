@@ -612,16 +612,29 @@ class OrderController extends Controller
                 $userId = null;
             }
 
-            // Generate unique sequential order number (e.g. M00001, M00002 matching quote checkout)
-            $latestPcbOrder = \Illuminate\Support\Facades\DB::table('pcb_orders')
+            // Generate unique sequential order number (+1 of last generated order number, e.g. M00001 -> M00002)
+            $lastOrder = \Illuminate\Support\Facades\DB::table('pcb_orders')
+                ->where('order_number', 'LIKE', 'M%')
                 ->where('order_number', 'NOT LIKE', '%-%')
                 ->orderBy('id', 'desc')
                 ->first();
-            $maxPcbId = \Illuminate\Support\Facades\DB::table('pcb_orders')->max('id') ?? 0;
-            $maxOrdersId = \Illuminate\Support\Facades\Schema::hasTable('orders') ? (\Illuminate\Support\Facades\DB::table('orders')->max('id') ?? 0) : 0;
-            $highestId = max($maxPcbId, $maxOrdersId);
-            $nextId = $latestPcbOrder ? max($latestPcbOrder->id + 1, $highestId + 1) : ($highestId + 1);
-            $orderNumber = 'M' . str_pad($nextId, 5, '0', STR_PAD_LEFT);
+
+            $nextNumber = 1;
+            if ($lastOrder && !empty($lastOrder->order_number)) {
+                $numericPart = (int) preg_replace('/[^0-9]/', '', $lastOrder->order_number);
+                if ($numericPart > 0) {
+                    $nextNumber = $numericPart + 1;
+                } else {
+                    $maxPcbId = \Illuminate\Support\Facades\DB::table('pcb_orders')->max('id') ?? 0;
+                    $maxOrdersId = \Illuminate\Support\Facades\Schema::hasTable('orders') ? (\Illuminate\Support\Facades\DB::table('orders')->max('id') ?? 0) : 0;
+                    $nextNumber = max($maxPcbId, $maxOrdersId) + 1;
+                }
+            } else {
+                $maxPcbId = \Illuminate\Support\Facades\DB::table('pcb_orders')->max('id') ?? 0;
+                $maxOrdersId = \Illuminate\Support\Facades\Schema::hasTable('orders') ? (\Illuminate\Support\Facades\DB::table('orders')->max('id') ?? 0) : 0;
+                $nextNumber = max($maxPcbId, $maxOrdersId) + 1;
+            }
+            $orderNumber = 'M' . str_pad($nextNumber, 5, '0', STR_PAD_LEFT);
 
             // Handle Gerber file upload
             $gerberFileId = null;
