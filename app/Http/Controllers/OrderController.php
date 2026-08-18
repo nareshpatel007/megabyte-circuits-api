@@ -612,10 +612,16 @@ class OrderController extends Controller
                 $userId = null;
             }
 
-            // Generate unique sequential order number (e.g. M0005)
-            $lastOrder = PcbOrder::withTrashed()->orderBy('id', 'desc')->first();
-            $nextId = $lastOrder ? ($lastOrder->id + 1) : 1;
-            $orderNumber = 'M' . str_pad($nextId, 4, '0', STR_PAD_LEFT);
+            // Generate unique sequential order number (e.g. M00001, M00002 matching quote checkout)
+            $latestPcbOrder = \Illuminate\Support\Facades\DB::table('pcb_orders')
+                ->where('order_number', 'NOT LIKE', '%-%')
+                ->orderBy('id', 'desc')
+                ->first();
+            $maxPcbId = \Illuminate\Support\Facades\DB::table('pcb_orders')->max('id') ?? 0;
+            $maxOrdersId = \Illuminate\Support\Facades\Schema::hasTable('orders') ? (\Illuminate\Support\Facades\DB::table('orders')->max('id') ?? 0) : 0;
+            $highestId = max($maxPcbId, $maxOrdersId);
+            $nextId = $latestPcbOrder ? max($latestPcbOrder->id + 1, $highestId + 1) : ($highestId + 1);
+            $orderNumber = 'M' . str_pad($nextId, 5, '0', STR_PAD_LEFT);
 
             // Handle Gerber file upload
             $gerberFileId = null;
@@ -648,6 +654,14 @@ class OrderController extends Controller
                 $gerberFileName = $originalName;
             } else if ($request->filled('gerber_file_id')) {
                 $gerberFileId = $request->input('gerber_file_id');
+                if ($request->filled('preview_data') && \Illuminate\Support\Facades\Schema::hasTable('gerber_files')) {
+                    \Illuminate\Support\Facades\DB::table('gerber_files')
+                        ->where('id', $gerberFileId)
+                        ->update([
+                            'preview_data' => $request->input('preview_data'),
+                            'updated_at' => date('Y-m-d H:i:s')
+                        ]);
+                }
             }
 
             // Handle Manual Payment
