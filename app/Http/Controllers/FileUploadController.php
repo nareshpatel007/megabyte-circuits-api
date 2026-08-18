@@ -140,5 +140,38 @@ class FileUploadController extends Controller
             ], 500);
         }
     }
+
+    public function delete(Request $request)
+    {
+        try {
+            $gerberFileId = $request->input('gerber_file_id') ?? $request->input('id');
+            if (!$gerberFileId) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'No gerber_file_id provided'
+                ], 400);
+            }
+
+            $file = DB::table('gerber_files')->where('id', $gerberFileId)->first();
+            if ($file) {
+                if ($file->file_path && Storage::disk('public')->exists($file->file_path)) {
+                    Storage::disk('public')->delete($file->file_path);
+                }
+                DB::table('gerber_files')->where('id', $gerberFileId)->delete();
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Gerber file deleted successfully'
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to delete file',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 }
+
 

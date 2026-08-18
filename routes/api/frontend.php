@@ -15,6 +15,7 @@ use App\Http\Controllers\GoogleController;
 // File Upload (Public for testing)
 Route::post('upload', [FileUploadController::class, 'upload']);
 Route::post('upload/preview', [FileUploadController::class, 'updatePreview']);
+Route::post('upload/delete', [FileUploadController::class, 'delete']);
 
 // PCB Pricing Calculations (Public)
 Route::get('pcb-pricing', [\App\Http\Controllers\PcbPricingController::class, 'getPricingConfig']);
