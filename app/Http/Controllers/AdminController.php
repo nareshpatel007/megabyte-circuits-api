@@ -996,11 +996,26 @@ class AdminController extends Controller
                 return response()->json(['status' => false, 'message' => 'Name, email, and password are required.'], 400);
             }
 
+            // Auto-generate username if not provided
+            if (empty($username)) {
+                $baseUsername = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', strtok($email, '@')));
+                if (empty($baseUsername)) {
+                    $baseUsername = 'staff';
+                }
+                $generatedUsername = $baseUsername;
+                $counter = 1;
+                while (DB::table('admins')->where('username', $generatedUsername)->exists()) {
+                    $generatedUsername = $baseUsername . $counter;
+                    $counter++;
+                }
+                $username = $generatedUsername;
+            }
+
             // Check duplicate email / username
             if (DB::table('admins')->where('email', $email)->exists()) {
                 return response()->json(['status' => false, 'message' => 'An account with this email already exists.'], 422);
             }
-            if ($username && DB::table('admins')->where('username', $username)->exists()) {
+            if (DB::table('admins')->where('username', $username)->exists()) {
                 return response()->json(['status' => false, 'message' => 'An account with this username already exists.'], 422);
             }
 
