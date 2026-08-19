@@ -45,47 +45,91 @@ class FileUploadController extends Controller
             $zipFileUrl = null;
             $zipFilePath = null;
 
-            // If RAR file, convert to ZIP or extract to ZIP format if unrar / RarArchive is available
+            // If RAR file, convert to ZIP or extract to ZIP format
             if ($originalExtension === 'rar') {
                 try {
                     $realPath = $file->getRealPath();
-                    $rarEntries = [];
+                    $tempDir = storage_path('app/temp_rar_' . time() . '_' . Str::random(5));
+                    if (!file_exists($tempDir)) {
+                        mkdir($tempDir, 0755, true);
+                    }
 
-                    if (class_exists('RarArchive') && $rarArchive = \RarArchive::open($realPath)) {
+                    $unrarExec = null;
+                    if (file_exists('C:\Program Files\WinRAR\UnRAR.exe')) {
+                        $unrarExec = '"C:\Program Files\WinRAR\UnRAR.exe"';
+                    } else if (file_exists('C:\Program Files (x86)\WinRAR\UnRAR.exe')) {
+                        $unrarExec = '"C:\Program Files (x86)\WinRAR\UnRAR.exe"';
+                    } else {
+                        // Check Linux/macOS unrar
+                        exec('which unrar 2>&1', $whichOutput, $whichReturn);
+                        if ($whichReturn === 0) {
+                            $unrarExec = 'unrar';
+                        }
+                    }
+
+                    $extractedSuccess = false;
+
+                    if ($unrarExec) {
+                        // Extract RAR to temp directory using unrar x -y <archive> <output_dir>
+                        $cmd = "{$unrarExec} x -y " . escapeshellarg($realPath) . " " . escapeshellarg($tempDir . DIRECTORY_SEPARATOR);
+                        exec($cmd, $output, $returnVar);
+                        if ($returnVar === 0) {
+                            $extractedSuccess = true;
+                        }
+                    }
+
+                    if (!$extractedSuccess && class_exists('RarArchive') && $rarArchive = \RarArchive::open($realPath)) {
                         $entries = $rarArchive->getEntries();
                         if ($entries !== false) {
-                            $tempDir = storage_path('app/temp_rar_' . time() . '_' . Str::random(5));
-                            if (!file_exists($tempDir)) {
-                                mkdir($tempDir, 0755, true);
-                            }
-                            $zipFileName = time() . '_' . Str::random(10) . '.zip';
-                            $zipFullPath = storage_path('app/public/' . $folder . '/' . $zipFileName);
-                            
-                            $zip = new \ZipArchive();
-                            if ($zip->open($zipFullPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) === true) {
-                                foreach ($entries as $entry) {
-                                    if (!$entry->isDirectory()) {
-                                        $entryName = $entry->getName();
-                                        $extractedPath = $tempDir . '/' . basename($entryName);
-                                        $entry->extract(false, $extractedPath);
-                                        if (file_exists($extractedPath)) {
-                                            $zip->addFile($extractedPath, $entryName);
-                                        }
-                                    }
+                            foreach ($entries as $entry) {
+                                if (!$entry->isDirectory()) {
+                                    $extractedPath = $tempDir . '/' . basename($entry->getName());
+                                    $entry->extract(false, $extractedPath);
                                 }
-                                $zip->close();
-                                $zipFilePath = $folder . '/' . $zipFileName;
-                                $zipFileUrl = Storage::url($zipFilePath);
                             }
-                            
-                            // Cleanup temp dir
-                            array_map('unlink', glob("$tempDir/*.*"));
-                            @rmdir($tempDir);
+                            $extractedSuccess = true;
                         }
                         $rarArchive->close();
                     }
+
+                    if ($extractedSuccess) {
+                        $zipFileName = time() . '_' . Str::random(10) . '.zip';
+                        $zipFullPath = storage_path('app/public/' . $folder . '/' . $zipFileName);
+
+                        $zip = new \ZipArchive();
+                        if ($zip->open($zipFullPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) === true) {
+                            $files = new \RecursiveIteratorIterator(
+                                new \RecursiveDirectoryIterator($tempDir, \RecursiveDirectoryIterator::SKIP_DOTS),
+                                \RecursiveIteratorIterator::LEAVES_ONLY
+                            );
+
+                            foreach ($files as $fileItem) {
+                                if (!$fileItem->isDir()) {
+                                    $filePathItem = $fileItem->getRealPath();
+                                    $relativePath = substr($filePathItem, strlen($tempDir) + 1);
+                                    $zip->addFile($filePathItem, $relativePath);
+                                }
+                            }
+                            $zip->close();
+                            $zipFilePath = $folder . '/' . $zipFileName;
+                            $zipFileUrl = Storage::url($zipFilePath);
+                        }
+                    }
+
+                    // Cleanup temp directory
+                    if (file_exists($tempDir)) {
+                        $files = new \RecursiveIteratorIterator(
+                            new \RecursiveDirectoryIterator($tempDir, \RecursiveDirectoryIterator::SKIP_DOTS),
+                            \RecursiveIteratorIterator::CHILD_FIRST
+                        );
+                        foreach ($files as $fileItem) {
+                            $fileItem->isDir() ? rmdir($fileItem->getRealPath()) : unlink($fileItem->getRealPath());
+                        }
+                        rmdir($tempDir);
+                    }
                 } catch (\Exception $ex) {
-                    // Ignore RAR conversion failure and fallback to standard upload
+                    // Log exception safely and continue standard upload
+                    logger()->error("RAR to ZIP conversion error: " . $ex->getMessage());
                 }
             }
 
