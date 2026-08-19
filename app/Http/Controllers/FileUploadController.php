@@ -37,9 +37,57 @@ class FileUploadController extends Controller
             }
 
             $file = $request->file('file');
+            $originalExtension = strtolower($file->getClientOriginalExtension());
             $originalName = $request->input('fileName', $file->getClientOriginalName());
             $folder = $request->input('folder', 'gerber-files');
             $userId = $request->input('user_id', null);
+
+            $zipFileUrl = null;
+            $zipFilePath = null;
+
+            // If RAR file, convert to ZIP or extract to ZIP format if unrar / RarArchive is available
+            if ($originalExtension === 'rar') {
+                try {
+                    $realPath = $file->getRealPath();
+                    $rarEntries = [];
+
+                    if (class_exists('RarArchive') && $rarArchive = \RarArchive::open($realPath)) {
+                        $entries = $rarArchive->getEntries();
+                        if ($entries !== false) {
+                            $tempDir = storage_path('app/temp_rar_' . time() . '_' . Str::random(5));
+                            if (!file_exists($tempDir)) {
+                                mkdir($tempDir, 0755, true);
+                            }
+                            $zipFileName = time() . '_' . Str::random(10) . '.zip';
+                            $zipFullPath = storage_path('app/public/' . $folder . '/' . $zipFileName);
+                            
+                            $zip = new \ZipArchive();
+                            if ($zip->open($zipFullPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) === true) {
+                                foreach ($entries as $entry) {
+                                    if (!$entry->isDirectory()) {
+                                        $entryName = $entry->getName();
+                                        $extractedPath = $tempDir . '/' . basename($entryName);
+                                        $entry->extract(false, $extractedPath);
+                                        if (file_exists($extractedPath)) {
+                                            $zip->addFile($extractedPath, $entryName);
+                                        }
+                                    }
+                                }
+                                $zip->close();
+                                $zipFilePath = $folder . '/' . $zipFileName;
+                                $zipFileUrl = Storage::url($zipFilePath);
+                            }
+                            
+                            // Cleanup temp dir
+                            array_map('unlink', glob("$tempDir/*.*"));
+                            @rmdir($tempDir);
+                        }
+                        $rarArchive->close();
+                    }
+                } catch (\Exception $ex) {
+                    // Ignore RAR conversion failure and fallback to standard upload
+                }
+            }
 
             // Generate unique filename
             $fileName = time() . '_' . Str::random(10) . '.' . $file->getClientOriginalExtension();
@@ -72,6 +120,7 @@ class FileUploadController extends Controller
                 'fileName' => $fileName,
                 'originalName' => $originalName,
                 'url' => $url,
+                'zip_url' => $zipFileUrl,
                 'path' => $filePath,
                 'size' => $formattedSize
             ], 200);
