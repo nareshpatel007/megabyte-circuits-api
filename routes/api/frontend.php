@@ -20,10 +20,12 @@ Route::post('upload/delete', [FileUploadController::class, 'delete']);
 
 // JLCPCB API Integration
 Route::prefix('jlcpcb')->group(function () {
+    Route::post('upload-gerber', [JlcpcbController::class, 'uploadGerber']);
     Route::post('calculate', [JlcpcbController::class, 'calculate']);
     Route::get('defaults', [JlcpcbController::class, 'defaults']);
     Route::get('countries', [JlcpcbController::class, 'countries']);
 });
+
 
 // PCB Pricing Calculations (Public)
 

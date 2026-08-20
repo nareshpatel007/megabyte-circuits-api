@@ -16,10 +16,54 @@ class JlcpcbController extends Controller
     }
 
     /**
+     * Upload Gerber ZIP/RAR file to JLCPCB Open API
+     * POST /api/jlcpcb/upload-gerber
+     */
+    public function uploadGerber(Request $request)
+    {
+        try {
+            $request->validate([
+                'file' => 'required|file|mimes:zip,rar,7z|max:20480',
+                'fileName' => 'nullable|string'
+            ]);
+
+            $file = $request->file('file');
+            $fileName = $request->input('fileName', $file->getClientOriginalName());
+
+            $result = $this->jlcpcbService->uploadGerber($file, $fileName);
+
+            if ($result['success']) {
+                return response()->json([
+                    'success' => true,
+                    'code' => 200,
+                    'message' => $result['message'],
+                    'fileKey' => $result['fileKey'],
+                    'data' => $result['data']
+                ], 200);
+            }
+
+            return response()->json([
+                'success' => false,
+                'code' => $result['code'] ?? 400,
+                'message' => $result['message'] ?? 'Failed to upload Gerber file to JLCPCB',
+                'data' => null
+            ], 400);
+
+        } catch (Throwable $th) {
+            return response()->json([
+                'success' => false,
+                'code' => 500,
+                'message' => 'Server Error: ' . $th->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Calculate PCB Online Quotation via JLCPCB Open API
      * POST /api/jlcpcb/calculate
      */
     public function calculate(Request $request)
+
     {
         try {
             $input = $request->all();

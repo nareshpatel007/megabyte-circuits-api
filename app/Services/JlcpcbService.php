@@ -20,6 +20,88 @@ class JlcpcbService
     }
 
     /**
+     * Upload PCB Gerber file (ZIP/RAR) to JLCPCB Open API
+     * Endpoint: POST /overseas/openapi/pcb/uploadGerber
+     *
+     * @param mixed $file File object or path to Gerber zip/rar file
+     * @param string|null $fileName Optional file name override
+     * @return array
+     * @throws Exception
+     */
+    public function uploadGerber($file, ?string $fileName = null): array
+    {
+        if (empty($this->accessKey)) {
+            throw new Exception("JLCPCB Access Key is not configured in environment (.env).");
+        }
+
+        $url = "{$this->baseUrl}/overseas/openapi/pcb/uploadGerber";
+
+        $authHeader = (str_starts_with(strtolower($this->accessKey), 'bearer ')) 
+            ? $this->accessKey 
+            : "Bearer {$this->accessKey}";
+
+        $headers = [
+            'Authorization' => $authHeader,
+            'Accept' => 'application/json',
+        ];
+
+        try {
+            $request = Http::withHeaders($headers)->timeout(60);
+
+            if (is_string($file) && file_exists($file)) {
+                $contents = file_get_contents($file);
+                $originalName = $fileName ?? basename($file);
+                $request = $request->attach('file', $contents, $originalName);
+            } elseif ($file instanceof \Illuminate\Http\UploadedFile) {
+                $contents = file_get_contents($file->getRealPath());
+                $originalName = $fileName ?? $file->getClientOriginalName();
+                $request = $request->attach('file', $contents, $originalName);
+            } else {
+                throw new Exception("Invalid file provided for Gerber upload.");
+            }
+
+            $response = $request->post($url, [
+                'fileName' => $originalName
+            ]);
+
+            $result = $response->json();
+            Log::info("JLCPCB Upload Gerber Response", ['status' => $response->status(), 'result' => $result]);
+
+            if (is_array($result)) {
+                $code = $result['code'] ?? null;
+                if ($code === 200) {
+                    return [
+                        'success' => true,
+                        'code' => 200,
+                        'message' => 'Gerber file uploaded successfully',
+                        'fileKey' => $result['data'] ?? '',
+                        'data' => $result['data'] ?? ''
+                    ];
+                }
+
+                $errorMessage = $result['message'] ?? $this->getErrorMessageByCode($code);
+                return [
+                    'success' => false,
+                    'code' => $code ?? $response->status(),
+                    'message' => $errorMessage,
+                    'data' => null
+                ];
+            }
+
+            return [
+                'success' => false,
+                'code' => $response->status(),
+                'message' => 'Unexpected API response format during Gerber upload.',
+                'raw_response' => $response->body()
+            ];
+
+        } catch (Exception $e) {
+            Log::error("JLCPCB Upload Gerber Exception: " . $e->getMessage());
+            throw new Exception("Error uploading Gerber file to JLCPCB: " . $e->getMessage());
+        }
+    }
+
+    /**
      * Calculate PCB quotation via JLCPCB Open API
      * Endpoint: POST /overseas/openapi/pcb/calculate
      *
@@ -28,6 +110,7 @@ class JlcpcbService
      * @throws Exception
      */
     public function calculateQuotation(array $input): array
+
     {
         if (empty($this->accessKey)) {
             throw new Exception("JLCPCB Access Key is not configured in environment (.env).");
