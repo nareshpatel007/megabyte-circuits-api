@@ -58,4 +58,10 @@ return [
     'digikey' => [
         'featured_count' => (int) env('FEATURED_PRODUCTS_COUNT', 4),
     ],
+    'jlcpcb' => [
+        'app_id' => env('JLCPCB_APP_ID'),
+        'access_key' => env('JLCPCB_ACCESS_KEY'),
+        'base_url' => env('JLCPCB_BASE_URL', 'https://open.jlcpcb.com'),
+    ],
 ];
+

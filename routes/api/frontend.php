@@ -11,13 +11,22 @@ use App\Http\Controllers\FileUploadController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\CheckoutController;
 use App\Http\Controllers\GoogleController;
+use App\Http\Controllers\JlcpcbController;
 
 // File Upload (Public for testing)
 Route::post('upload', [FileUploadController::class, 'upload']);
 Route::post('upload/preview', [FileUploadController::class, 'updatePreview']);
 Route::post('upload/delete', [FileUploadController::class, 'delete']);
 
+// JLCPCB API Integration
+Route::prefix('jlcpcb')->group(function () {
+    Route::post('calculate', [JlcpcbController::class, 'calculate']);
+    Route::get('defaults', [JlcpcbController::class, 'defaults']);
+    Route::get('countries', [JlcpcbController::class, 'countries']);
+});
+
 // PCB Pricing Calculations (Public)
+
 Route::get('pcb-pricing', [\App\Http\Controllers\PcbPricingController::class, 'getPricingConfig']);
 
 // PCB Orders
