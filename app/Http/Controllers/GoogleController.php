@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use Exception;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Laravel\Socialite\Facades\Socialite;
 use Firebase\JWT\JWT;
@@ -22,8 +21,8 @@ class GoogleController extends Controller
         try {
             return Socialite::driver('google')->stateless()->redirect();
         } catch (Exception $e) {
-            $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
-            return redirect($frontendUrl . '/login?error=' . urlencode('Failed to initialize Google login: ' . $e->getMessage()));
+            $quoteUrl = env('QUOTE_URL', 'http://localhost:3002');
+            return redirect(rtrim($quoteUrl, '/') . '/login?error=' . urlencode('Failed to initialize Google login: ' . $e->getMessage()));
         }
     }
 
@@ -35,20 +34,20 @@ class GoogleController extends Controller
      */
     public function callback(Request $request)
     {
-        $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
+        $quoteUrl = rtrim(env('QUOTE_URL', 'http://localhost:3002'), '/');
 
         try {
             // Check if user denied access or error returned
             if ($request->has('error')) {
                 $errorReason = $request->input('error_description', $request->input('error', 'Access denied'));
-                return redirect($frontendUrl . '/login?error=' . urlencode('Google login canceled: ' . $errorReason));
+                return redirect($quoteUrl . '/login?error=' . urlencode('Google login canceled: ' . $errorReason));
             }
 
             // Retrieve user details from Google Socialite (stateless)
             $googleUser = Socialite::driver('google')->stateless()->user();
 
             if (!$googleUser || empty($googleUser->getEmail())) {
-                return redirect($frontendUrl . '/login?error=' . urlencode('Unable to retrieve email from Google user account.'));
+                return redirect($quoteUrl . '/login?error=' . urlencode('Unable to retrieve email from Google user account.'));
             }
 
             $email = $googleUser->getEmail();
@@ -89,28 +88,6 @@ class GoogleController extends Controller
                     'last_login_at' => now(),
                     'last_login_ip' => $request->ip(),
                 ]);
-
-                // Create initial wallet bonus transaction
-                try {
-                    DB::table('wallet_transactions')->insert([
-                        'user_id' => $user->id,
-                        'transaction_type' => 'signup_bonus',
-                        'credit_type' => 'credit',
-                        'credits' => 50,
-                        'opening_balance' => 0,
-                        'closing_balance' => 50,
-                        'remarks' => '50 FREE Credits added on successful Google Sign-In registration.',
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ]);
-                } catch (\Throwable $e) {
-                    // Ignore non-critical wallet insertion error if table schema varies
-                }
-
-                // Log activity
-                if (class_exists('\App\CommonHelper')) {
-                    \App\CommonHelper::logActivity($user->id, 'register_google', 'User registered via Google OAuth SSO.', $request);
-                }
             } else {
                 // Update user details
                 $updateData = [
@@ -128,48 +105,30 @@ class GoogleController extends Controller
                 }
 
                 $user->update($updateData);
-
-                if (class_exists('\App\CommonHelper')) {
-                    \App\CommonHelper::logActivity($user->id, 'login_google', 'User logged in via Google OAuth SSO.', $request);
-                }
             }
 
-            // Generate Access Token
-            $accessToken = null;
+            // Generate JWT Access Token
+            $payload = [
+                'user_id' => $user->id,
+                'uuid' => $user->uuid,
+                'name' => $user->name,
+                'email' => $user->email,
+                'credits' => $user->available_credits ?? 50,
+                'avatar' => $user->avatar,
+                'iat' => time(),
+                'exp' => time() + (86400 * 30), // 30 days
+            ];
 
-            // 1. Try Laravel Passport if configured on model
-            if (method_exists($user, 'createToken')) {
-                try {
-                    $tokenResult = $user->createToken('GoogleOAuthToken');
-                    $accessToken = $tokenResult->accessToken ?? $tokenResult->plainTextToken ?? null;
-                } catch (\Throwable $e) {
-                    $accessToken = null;
-                }
-            }
-
-            // 2. Generate JWT Token (Matching application's JWT standard)
-            if (!$accessToken) {
-                $payload = [
-                    'user_id' => $user->id,
-                    'uuid' => $user->uuid,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'credits' => $user->available_credits ?? 50,
-                    'avatar' => $user->avatar,
-                    'iat' => time(),
-                    'exp' => time() + (86400 * 30), // 30 days
-                ];
-
-                $secret = env('JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
-                $accessToken = JWT::encode($payload, $secret, 'HS256');
-            }
+            $secret = env('JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
+            $accessToken = JWT::encode($payload, $secret, 'HS256');
 
             // Redirect to frontend success page with token
-            $redirectUrl = $frontendUrl . '/login-success?token=' . urlencode($accessToken);
+            $redirectUrl = $quoteUrl . '/login-success?token=' . urlencode($accessToken);
             return redirect($redirectUrl);
 
         } catch (Exception $e) {
-            return redirect($frontendUrl . '/login?error=' . urlencode('Google authentication failed: ' . $e->getMessage()));
+            return redirect($quoteUrl . '/login?error=' . urlencode('Google authentication failed: ' . $e->getMessage()));
         }
     }
 }
+
