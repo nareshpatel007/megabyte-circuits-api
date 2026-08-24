@@ -60,7 +60,7 @@ class AuthController extends Controller
             ]);
         }
     }
-    
+
     // Register
     public function register(Request $request, \App\Services\RegisterService $registerService)
     {
@@ -119,7 +119,7 @@ class AuthController extends Controller
             $token = $request->input('token');
 
             // If token is empty
-            if(empty($token)) {
+            if (empty($token)) {
                 return response()->json([
                     'status' => false,
                     'message' => 'Token is required.'
@@ -130,17 +130,17 @@ class AuthController extends Controller
             $user = DB::table('users')->where('token', $token)->first();
 
             // If user not found
-            if(!$user) {
+            if (!$user) {
                 return response()->json([
                     'status' => false,
                     'message' => 'Token is invalid or expired. Please try again.'
                 ]);
-            } else if(isset($user->status) && $user->status !== 'active') {
+            } else if (isset($user->status) && $user->status !== 'active' && $user->status !== 'Active') {
                 return response()->json([
                     'status' => false,
                     'message' => 'Your account is inactive. Please contact admin.'
                 ]);
-            } else if($user->email_verify == 1) {
+            } else if ($user->email_verify == 1) {
                 return response()->json([
                     'status' => false,
                     'message' => 'Account already verified. Please login.'
@@ -191,7 +191,7 @@ class AuthController extends Controller
             $email = $request->input('email');
 
             // If email is empty
-            if(empty($email)) {
+            if (empty($email)) {
                 return response()->json([
                     'status' => false,
                     'message' => 'Email address is required.'
@@ -202,7 +202,7 @@ class AuthController extends Controller
             $user = DB::table('users')->where('email', $email)->first();
 
             // If user not found
-            if(empty($user)) {
+            if (empty($user)) {
                 return response()->json([
                     'status' => false,
                     'message' => 'User not found. Please register first.'
@@ -252,12 +252,12 @@ class AuthController extends Controller
             $password = $request->input('password');
 
             // If token is empty
-            if(empty($token)) {
+            if (empty($token)) {
                 return response()->json([
                     'status' => false,
                     'message' => 'Token is required.'
                 ], 200);
-            } else if(empty($password)) {
+            } else if (empty($password)) {
                 return response()->json([
                     'status' => false,
                     'message' => 'Password is required.'
@@ -268,7 +268,7 @@ class AuthController extends Controller
             $user = DB::table('users')->where('token', $token)->first();
 
             // If user not found
-            if(empty($user)) {
+            if (empty($user)) {
                 return response()->json([
                     'status' => false,
                     'message' => 'User not found. Please register first.'
@@ -286,7 +286,7 @@ class AuthController extends Controller
                 'token' => $new_token,
                 'updated_at' => date('Y-m-d H:i:s')
             ];
-            
+
             // Check if schema has password_hash or password
             $updateData['password_hash'] = password_hash($password, PASSWORD_BCRYPT);
             $updateData['password'] = md5($password);
@@ -336,7 +336,7 @@ class AuthController extends Controller
             }
 
             // If user id is still empty
-            if(empty($user_id)) {
+            if (empty($user_id)) {
                 return response()->json([
                     'status' => false,
                     'message' => 'User id is required.'
@@ -347,7 +347,7 @@ class AuthController extends Controller
             $user = DB::table('users')->where('id', $user_id)->first();
 
             // If user not found
-            if(empty($user)) {
+            if (empty($user)) {
                 return response()->json([
                     'status' => false,
                     'message' => 'User not found.'
@@ -412,7 +412,7 @@ class AuthController extends Controller
             $avatar = $request->input('avatar');
 
             // If user id is empty
-            if(empty($user_id)) {
+            if (empty($user_id)) {
                 return response()->json([
                     'status' => false,
                     'message' => 'User id is required.'
@@ -423,7 +423,7 @@ class AuthController extends Controller
             $user = DB::table('users')->where('id', $user_id)->first();
 
             // If user not found
-            if(empty($user)) {
+            if (empty($user)) {
                 return response()->json([
                     'status' => false,
                     'message' => 'User not found.'
@@ -439,7 +439,7 @@ class AuthController extends Controller
             ];
 
             // If avatar is not empty
-            if(!empty($avatar)) {
+            if (!empty($avatar)) {
                 $data['avatar'] = $avatar;
             }
 
@@ -458,7 +458,7 @@ class AuthController extends Controller
             ]);
         }
     }
-    
+
     // Change password
     public function change_password(Request $request)
     {
@@ -469,7 +469,7 @@ class AuthController extends Controller
             $new_password = $request->input('new_password');
 
             // If user id is empty
-            if(empty($user_id) || empty($current_password) || empty($new_password)) {
+            if (empty($user_id) || empty($current_password) || empty($new_password)) {
                 return response()->json([
                     'status' => false,
                     'message' => 'Required fields are missing.'
@@ -480,7 +480,7 @@ class AuthController extends Controller
             $user = DB::table('users')->where('id', $user_id)->first();
 
             // If user not found
-            if(empty($user)) {
+            if (empty($user)) {
                 return response()->json([
                     'status' => false,
                     'message' => 'User not found.'
@@ -488,7 +488,7 @@ class AuthController extends Controller
             }
 
             // Check if password is correct
-            if(md5($current_password) !== $user->password) {
+            if (md5($current_password) !== $user->password) {
                 return response()->json([
                     'status' => false,
                     'message' => 'Current password is incorrect.'
@@ -542,7 +542,7 @@ class AuthController extends Controller
             if (empty($user)) {
                 // Register a new user
                 $uuid = (string) \Illuminate\Support\Str::uuid();
-                
+
                 do {
                     $referralCode = strtoupper(\Illuminate\Support\Str::random(8));
                 } while (DB::table('users')->where('referral_code', $referralCode)->exists());
@@ -632,7 +632,6 @@ class AuthController extends Controller
                     'avatar' => $user->avatar
                 ]
             ]);
-
         } catch (\Throwable $th) {
             return response()->json([
                 'status' => false,
@@ -674,7 +673,7 @@ class AuthController extends Controller
             if (empty($user)) {
                 // Register a new user
                 $uuid = (string) \Illuminate\Support\Str::uuid();
-                
+
                 do {
                     $referralCode = strtoupper(\Illuminate\Support\Str::random(8));
                 } while (DB::table('users')->where('referral_code', $referralCode)->exists());
@@ -746,7 +745,6 @@ class AuthController extends Controller
 
             $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
             return redirect($frontendUrl . '/login?token=' . urlencode($jwt_token) . '&name=' . urlencode($payload_data['name']) . '&email=' . urlencode($email) . '&avatar=' . urlencode($avatar));
-
         } catch (\Throwable $th) {
             $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
             return redirect($frontendUrl . '/login?error=' . urlencode($th->getMessage()));
