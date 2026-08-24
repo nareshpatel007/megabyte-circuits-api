@@ -775,4 +775,92 @@ class OrderController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Reorder an existing PCB order.
+     * Generates order_number based on original format:
+     * e.g., M00001 -> M00001-1 -> M00001-2 ...
+     */
+    public function reorder(Request $request, $id)
+    {
+        try {
+            $originalOrder = PcbOrder::with('metas')->where('id', $id)->orWhere('order_number', $id)->first();
+
+            if (!$originalOrder) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Original order not found.'
+                ], 444);
+            }
+
+            // Determine root order number prefix
+            $origOrderNumber = $originalOrder->order_number;
+            $rootOrderNumber = explode('-', $origOrderNumber)[0];
+
+            // Find existing reorders matching the root prefix
+            $existingOrders = PcbOrder::withTrashed()
+                ->where('order_number', 'LIKE', $rootOrderNumber . '-%')
+                ->pluck('order_number')
+                ->toArray();
+
+            $maxSuffix = 0;
+            foreach ($existingOrders as $num) {
+                $parts = explode('-', $num);
+                if (count($parts) > 1 && is_numeric(end($parts))) {
+                    $val = (int)end($parts);
+                    if ($val > $maxSuffix) {
+                        $maxSuffix = $val;
+                    }
+                }
+            }
+
+            $newOrderNumber = $rootOrderNumber . '-' . ($maxSuffix + 1);
+
+            // Replicate order
+            $newOrder = $originalOrder->replicate(['created_at', 'updated_at', 'deleted_at']);
+            $newOrder->order_number = $newOrderNumber;
+            $newOrder->status = 'Pending';
+            $newOrder->completed_qty = 0;
+            $newOrder->created_at = now();
+            $newOrder->updated_at = now();
+            $newOrder->save();
+
+            // Replicate metadata
+            foreach ($originalOrder->metas as $meta) {
+                // Skip film datetime if any, or retain original specifications
+                if (in_array($meta->meta_key, ['film_datetime', 'film_date'])) {
+                    continue;
+                }
+                PcbOrderMeta::create([
+                    'pcb_order_id' => $newOrder->id,
+                    'meta_key' => $meta->meta_key,
+                    'meta_value' => $meta->meta_value,
+                ]);
+            }
+
+            // Log reorder event if log table exists
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_logs')) {
+                $adminId = $request->attributes->get('admin_id') ?: 1;
+                \Illuminate\Support\Facades\DB::table('pcb_order_logs')->insert([
+                    'pcb_order_id' => $newOrder->id,
+                    'admin_id' => $adminId,
+                    'action' => 'Reordered',
+                    'details' => "Reordered from original order #{$originalOrder->order_number}",
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
+            }
+
+            return response()->json([
+                'status' => true,
+                'message' => "Order #{$originalOrder->order_number} reordered successfully as #{$newOrderNumber}!",
+                'data' => $newOrder
+            ], 201);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to reorder: ' . $th->getMessage()
+            ], 500);
+        }
+    }
 }
