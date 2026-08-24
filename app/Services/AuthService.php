@@ -36,7 +36,7 @@ class AuthService
         }
 
         // Check status
-        if (isset($user->status) && $user->status !== 'active') {
+        if (isset($user->status) && $user->status !== 'active' && $user->status !== 'Active') {
             return [
                 'status' => false,
                 'message' => 'Your account is inactive.'
