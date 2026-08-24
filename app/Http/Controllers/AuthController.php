@@ -544,13 +544,40 @@ class AuthController extends Controller
                 // Register a new user
                 $uuid = (string) \Illuminate\Support\Str::uuid();
 
+                // Extract first and last name from Google full name or email
+                $fullName = trim((string)$name);
+                if (empty($fullName)) {
+                    $fullName = explode('@', $email)[0];
+                }
+                $nameParts = explode(' ', $fullName);
+                $firstName = $nameParts[0] ?? '';
+                $lastName = count($nameParts) > 1 ? implode(' ', array_slice($nameParts, 1)) : '';
+
+                // Generate unique username stored in name column
+                $baseUsername = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $firstName . ($lastName ? substr($lastName, 0, 1) : '')));
+                if (empty($baseUsername)) {
+                    $baseUsername = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', explode('@', $email)[0]));
+                }
+                if (empty($baseUsername)) {
+                    $baseUsername = 'user';
+                }
+
+                $generatedUsername = $baseUsername;
+                $counter = 1;
+                while (DB::table('users')->where('name', $generatedUsername)->exists()) {
+                    $generatedUsername = $baseUsername . $counter;
+                    $counter++;
+                }
+
                 do {
                     $referralCode = strtoupper(\Illuminate\Support\Str::random(8));
                 } while (DB::table('users')->where('referral_code', $referralCode)->exists());
 
                 $userId = DB::table('users')->insertGetId([
                     'uuid' => $uuid,
-                    'name' => trim($name),
+                    'name' => $generatedUsername,
+                    'first_name' => $firstName,
+                    'last_name' => $lastName,
                     'email' => $email,
                     'avatar' => $avatar,
                     'api_key' => \Illuminate\Support\Str::random(32),
@@ -579,7 +606,7 @@ class AuthController extends Controller
                     'user_id' => $userId,
                     'action' => 'register',
                     'module' => 'Authentication',
-                    'log_data' => json_encode(['description' => 'New user registered via Google SSO and received 20 FREE credits.']),
+                    'log_data' => json_encode(['description' => 'New user registered via Google SSO and received 50 FREE credits.']),
                     'ip_address' => $request->ip(),
                     'user_agent' => $request->userAgent(),
                     'created_at' => date('Y-m-d H:i:s')
@@ -587,13 +614,24 @@ class AuthController extends Controller
 
                 $user = DB::table('users')->where('id', $userId)->first();
             } else {
-                // Update user avatar and login stats
+                // Update user avatar, first/last name if empty, and login stats
+                $fullName = trim((string)$name);
+                $nameParts = explode(' ', $fullName);
+                $firstName = $nameParts[0] ?? '';
+                $lastName = count($nameParts) > 1 ? implode(' ', array_slice($nameParts, 1)) : '';
+
                 $update = [
                     'avatar' => $avatar,
                     'last_login_at' => date('Y-m-d H:i:s'),
                     'last_login_ip' => $request->ip(),
                     'updated_at' => date('Y-m-d H:i:s')
                 ];
+                if (empty($user->first_name) && !empty($firstName)) {
+                    $update['first_name'] = $firstName;
+                }
+                if (empty($user->last_name) && !empty($lastName)) {
+                    $update['last_name'] = $lastName;
+                }
                 if (empty($user->api_key)) {
                     $update['api_key'] = \Illuminate\Support\Str::random(32);
                 }
@@ -675,14 +713,41 @@ class AuthController extends Controller
                 // Register a new user
                 $uuid = (string) \Illuminate\Support\Str::uuid();
 
+                // Extract first and last name from Google full name or email
+                $fullName = trim((string)$name);
+                if (empty($fullName)) {
+                    $fullName = explode('@', $email)[0];
+                }
+                $nameParts = explode(' ', $fullName);
+                $firstName = $nameParts[0] ?? '';
+                $lastName = count($nameParts) > 1 ? implode(' ', array_slice($nameParts, 1)) : '';
+
+                // Generate unique username stored in name column
+                $baseUsername = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $firstName . ($lastName ? substr($lastName, 0, 1) : '')));
+                if (empty($baseUsername)) {
+                    $baseUsername = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', explode('@', $email)[0]));
+                }
+                if (empty($baseUsername)) {
+                    $baseUsername = 'user';
+                }
+                
+                $generatedUsername = $baseUsername;
+                $counter = 1;
+                while (DB::table('users')->where('name', $generatedUsername)->exists()) {
+                    $generatedUsername = $baseUsername . $counter;
+                    $counter++;
+                }
+
                 do {
                     $referralCode = strtoupper(\Illuminate\Support\Str::random(8));
                 } while (DB::table('users')->where('referral_code', $referralCode)->exists());
 
-                $userId = DB::table('users')->insertGetId([
+                $insertData = [
                     'uuid' => $uuid,
                     'google_id' => $payload->sub ?? null,
-                    'name' => trim($name),
+                    'name' => $generatedUsername,
+                    'first_name' => $firstName,
+                    'last_name' => $lastName,
                     'email' => $email,
                     'avatar' => $avatar,
                     'api_key' => \Illuminate\Support\Str::random(32),
@@ -692,7 +757,9 @@ class AuthController extends Controller
                     'total_bonus_credits' => 20,
                     'created_at' => date('Y-m-d H:i:s'),
                     'updated_at' => date('Y-m-d H:i:s')
-                ]);
+                ];
+
+                $userId = DB::table('users')->insertGetId($insertData);
 
                 // Create wallet transaction entry
                 DB::table('wallet_transactions')->insert([
@@ -709,13 +776,24 @@ class AuthController extends Controller
                 // Fetch user
                 $user = DB::table('users')->where('id', $userId)->first();
             } else {
-                // Update user avatar and login stats
+                // Update user avatar, first/last name if empty, and login stats
+                $fullName = trim((string)$name);
+                $nameParts = explode(' ', $fullName);
+                $firstName = $nameParts[0] ?? '';
+                $lastName = count($nameParts) > 1 ? implode(' ', array_slice($nameParts, 1)) : '';
+
                 $update = [
                     'avatar' => $avatar,
                     'last_login_at' => date('Y-m-d H:i:s'),
                     'last_login_ip' => $request->ip(),
                     'updated_at' => date('Y-m-d H:i:s')
                 ];
+                if (empty($user->first_name) && !empty($firstName)) {
+                    $update['first_name'] = $firstName;
+                }
+                if (empty($user->last_name) && !empty($lastName)) {
+                    $update['last_name'] = $lastName;
+                }
                 if (empty($user->google_id) && isset($payload->sub)) {
                     $update['google_id'] = $payload->sub;
                 }

@@ -40,10 +40,16 @@ class RegisterService
 
         // Check if user exists by email or username/name
         $username = $userdata['username'] ?? null;
+        $hasUsernameCol = Schema::hasColumn('users', 'username');
         $existingUser = DB::table('users')
             ->where('email', $email)
-            ->when($username, function ($query) use ($username) {
-                return $query->orWhere('name', $username)->orWhere('username', $username);
+            ->when($username, function ($query) use ($username, $hasUsernameCol) {
+                return $query->orWhere(function ($q) use ($username, $hasUsernameCol) {
+                    $q->where('name', $username);
+                    if ($hasUsernameCol) {
+                        $q->orWhere('username', $username);
+                    }
+                });
             })
             ->first();
 
