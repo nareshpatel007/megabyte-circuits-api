@@ -354,6 +354,15 @@ class OrderController extends Controller
             
             if ($request->has('status')) {
                 $order->status = $request->status;
+                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses')) {
+                    $st = \Illuminate\Support\Facades\DB::table('pcb_order_statuses')
+                        ->whereRaw('LOWER(name) = ?', [strtolower($request->status)])
+                        ->orWhereRaw('LOWER(label) = ?', [strtolower($request->status)])
+                        ->first();
+                    if ($st) {
+                        $order->status_id = $st->id;
+                    }
+                }
             }
 
             if ($request->has('status_id')) {

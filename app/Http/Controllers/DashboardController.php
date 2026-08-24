@@ -66,6 +66,9 @@ class DashboardController extends Controller
                 ->get();
 
             foreach ($recentOrders as $order) {
+                if (!empty($order->status)) {
+                    $order->status_name = $order->status;
+                }
                 $metas = DB::table('pcb_order_meta')
                     ->where('pcb_order_id', $order->id)
                     ->pluck('meta_value', 'meta_key');
@@ -170,6 +173,10 @@ class DashboardController extends Controller
             // Format gerber_url cleanly
             if ($order->gerber_url && !str_starts_with($order->gerber_url, 'http')) {
                 $order->gerber_url = '/' . ltrim($order->gerber_url, '/');
+            }
+
+            if (!empty($order->status)) {
+                $order->status_name = $order->status;
             }
 
             $metas = DB::table('pcb_order_meta')
@@ -324,6 +331,9 @@ class DashboardController extends Controller
 
             // Attach meta specs for each order
             foreach ($orders as $order) {
+                if (!empty($order->status)) {
+                    $order->status_name = $order->status;
+                }
                 $metas = DB::table('pcb_order_meta')
                     ->where('pcb_order_id', $order->id)
                     ->pluck('meta_value', 'meta_key');
