@@ -28,5 +28,13 @@ class PcbPricingSeeder extends Seeder
                 'description' => 'Variable price tiers per mask, copper weight, thickness, and area'
             ]
         );
+
+        PcbPricingSetting::updateOrCreate(
+            ['key' => 'shipping_options'],
+            [
+                'value' => PcbPricingController::getDefaultShippingOptions(),
+                'description' => 'Dynamic shipping rates per delivery method'
+            ]
+        );
     }
 }

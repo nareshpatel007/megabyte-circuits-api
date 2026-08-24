@@ -545,11 +545,13 @@ class ComposerStaticInit783a2735a088098a44c0759bb6236923
         ),
         'Database\\Seeders\\' => 
         array (
-            0 => __DIR__ . '/..' . '/laravel/pint/database/seeders',
+            0 => __DIR__ . '/../..' . '/database/seeders',
+            1 => __DIR__ . '/..' . '/laravel/pint/database/seeders',
         ),
         'Database\\Factories\\' => 
         array (
-            0 => __DIR__ . '/..' . '/laravel/pint/database/factories',
+            0 => __DIR__ . '/../..' . '/database/factories',
+            1 => __DIR__ . '/..' . '/laravel/pint/database/factories',
         ),
         'Cron\\' => 
         array (
@@ -587,6 +589,7 @@ class ComposerStaticInit783a2735a088098a44c0759bb6236923
     public static $classMap = array (
         'App\\CommonHelper' => __DIR__ . '/../..' . '/app/CommonHelper.php',
         'App\\Console\\Commands\\CleanUnattachedGerberFiles' => __DIR__ . '/../..' . '/app/Console/Commands/CleanUnattachedGerberFiles.php',
+        'App\\Console\\Commands\\SyncDigiKeyProducts' => __DIR__ . '/../..' . '/app/Console/Commands/SyncDigiKeyProducts.php',
         'App\\Console\\Kernel' => __DIR__ . '/../..' . '/app/Console/Kernel.php',
         'App\\Exceptions\\Handler' => __DIR__ . '/../..' . '/app/Exceptions/Handler.php',
         'App\\GptHelper' => __DIR__ . '/../..' . '/app/GptHelper.php',
@@ -599,9 +602,11 @@ class ComposerStaticInit783a2735a088098a44c0759bb6236923
         'App\\Http\\Controllers\\Controller' => __DIR__ . '/../..' . '/app/Http/Controllers/Controller.php',
         'App\\Http\\Controllers\\CronController' => __DIR__ . '/../..' . '/app/Http/Controllers/CronController.php',
         'App\\Http\\Controllers\\DashboardController' => __DIR__ . '/../..' . '/app/Http/Controllers/DashboardController.php',
+        'App\\Http\\Controllers\\DigiKeyProductsController' => __DIR__ . '/../..' . '/app/Http/Controllers/DigiKeyProductsController.php',
         'App\\Http\\Controllers\\FileUploadController' => __DIR__ . '/../..' . '/app/Http/Controllers/FileUploadController.php',
         'App\\Http\\Controllers\\GoogleController' => __DIR__ . '/../..' . '/app/Http/Controllers/GoogleController.php',
         'App\\Http\\Controllers\\InventoryController' => __DIR__ . '/../..' . '/app/Http/Controllers/InventoryController.php',
+        'App\\Http\\Controllers\\JlcpcbController' => __DIR__ . '/../..' . '/app/Http/Controllers/JlcpcbController.php',
         'App\\Http\\Controllers\\OrderController' => __DIR__ . '/../..' . '/app/Http/Controllers/OrderController.php',
         'App\\Http\\Controllers\\PcbPricingController' => __DIR__ . '/../..' . '/app/Http/Controllers/PcbPricingController.php',
         'App\\Http\\Controllers\\StatusController' => __DIR__ . '/../..' . '/app/Http/Controllers/StatusController.php',
@@ -622,6 +627,7 @@ class ComposerStaticInit783a2735a088098a44c0759bb6236923
         'App\\Mail\\CrmEmail' => __DIR__ . '/../..' . '/app/Mail/CrmEmail.php',
         'App\\Mail\\SendMail' => __DIR__ . '/../..' . '/app/Mail/SendMail.php',
         'App\\Models\\Cart' => __DIR__ . '/../..' . '/app/Models/Cart.php',
+        'App\\Models\\DigiKeyProduct' => __DIR__ . '/../..' . '/app/Models/DigiKeyProduct.php',
         'App\\Models\\InventoryItem' => __DIR__ . '/../..' . '/app/Models/InventoryItem.php',
         'App\\Models\\InventoryLog' => __DIR__ . '/../..' . '/app/Models/InventoryLog.php',
         'App\\Models\\PcbOrder' => __DIR__ . '/../..' . '/app/Models/PcbOrder.php',
@@ -637,6 +643,7 @@ class ComposerStaticInit783a2735a088098a44c0759bb6236923
         'App\\Providers\\EventServiceProvider' => __DIR__ . '/../..' . '/app/Providers/EventServiceProvider.php',
         'App\\Providers\\RouteServiceProvider' => __DIR__ . '/../..' . '/app/Providers/RouteServiceProvider.php',
         'App\\Services\\AuthService' => __DIR__ . '/../..' . '/app/Services/AuthService.php',
+        'App\\Services\\JlcpcbService' => __DIR__ . '/../..' . '/app/Services/JlcpcbService.php',
         'App\\Services\\RegisterService' => __DIR__ . '/../..' . '/app/Services/RegisterService.php',
         'Attribute' => __DIR__ . '/..' . '/symfony/polyfill-php80/Resources/stubs/Attribute.php',
         'Brick\\Math\\BigDecimal' => __DIR__ . '/..' . '/brick/math/src/BigDecimal.php',
@@ -748,6 +755,9 @@ class ComposerStaticInit783a2735a088098a44c0759bb6236923
         'Cron\\HoursField' => __DIR__ . '/..' . '/dragonmantank/cron-expression/src/Cron/HoursField.php',
         'Cron\\MinutesField' => __DIR__ . '/..' . '/dragonmantank/cron-expression/src/Cron/MinutesField.php',
         'Cron\\MonthField' => __DIR__ . '/..' . '/dragonmantank/cron-expression/src/Cron/MonthField.php',
+        'Database\\Factories\\UserFactory' => __DIR__ . '/../..' . '/database/factories/UserFactory.php',
+        'Database\\Seeders\\DatabaseSeeder' => __DIR__ . '/../..' . '/database/seeders/DatabaseSeeder.php',
+        'Database\\Seeders\\PcbPricingSeeder' => __DIR__ . '/../..' . '/database/seeders/PcbPricingSeeder.php',
         'DateError' => __DIR__ . '/..' . '/symfony/polyfill-php83/Resources/stubs/DateError.php',
         'DateException' => __DIR__ . '/..' . '/symfony/polyfill-php83/Resources/stubs/DateException.php',
         'DateInvalidOperationException' => __DIR__ . '/..' . '/symfony/polyfill-php83/Resources/stubs/DateInvalidOperationException.php',

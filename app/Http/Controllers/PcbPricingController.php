@@ -238,11 +238,22 @@ class PcbPricingController extends Controller
         ];
     }
 
+    public static function getDefaultShippingOptions()
+    {
+        return [
+            ['key' => 'gujarat_road', 'location' => 'In Gujarat', 'method' => 'By Road', 'rate' => 40],
+            ['key' => 'out_road', 'location' => 'Out of Gujarat', 'method' => 'By Road', 'rate' => 80],
+            ['key' => 'out_air', 'location' => 'Out of Gujarat', 'method' => 'By Air', 'rate' => 150],
+            ['key' => 'out_fastrack', 'location' => 'Out of Gujarat', 'method' => 'Fastrack', 'rate' => 450],
+        ];
+    }
+
     public function getPricingConfig()
     {
         try {
             $fixedCosts = null;
             $priceTiers = null;
+            $shippingOptions = null;
 
             if (Schema::hasTable('pcb_pricing_settings')) {
                 $fixedCostsRow = PcbPricingSetting::where('key', 'fixed_costs')->first();
@@ -254,6 +265,11 @@ class PcbPricingController extends Controller
                 if ($priceTiersRow) {
                     $priceTiers = $priceTiersRow->value;
                 }
+
+                $shippingOptionsRow = PcbPricingSetting::where('key', 'shipping_options')->first();
+                if ($shippingOptionsRow) {
+                    $shippingOptions = $shippingOptionsRow->value;
+                }
             }
 
             if (!$fixedCosts) {
@@ -264,11 +280,16 @@ class PcbPricingController extends Controller
                 $priceTiers = self::getDefaultPriceTiers();
             }
 
+            if (!$shippingOptions) {
+                $shippingOptions = self::getDefaultShippingOptions();
+            }
+
             return response()->json([
                 'success' => true,
                 'data' => [
                     'fixedCosts' => $fixedCosts,
-                    'priceTiers' => $priceTiers
+                    'priceTiers' => $priceTiers,
+                    'shippingOptions' => $shippingOptions
                 ]
             ]);
         } catch (\Throwable $th) {
@@ -277,7 +298,8 @@ class PcbPricingController extends Controller
                 'message' => $th->getMessage(),
                 'data' => [
                     'fixedCosts' => self::getDefaultFixedCosts(),
-                    'priceTiers' => self::getDefaultPriceTiers()
+                    'priceTiers' => self::getDefaultPriceTiers(),
+                    'shippingOptions' => self::getDefaultShippingOptions()
                 ]
             ]);
         }
@@ -288,7 +310,8 @@ class PcbPricingController extends Controller
         try {
             $request->validate([
                 'fixedCosts' => 'nullable|array',
-                'priceTiers' => 'nullable|array'
+                'priceTiers' => 'nullable|array',
+                'shippingOptions' => 'nullable|array'
             ]);
 
             if ($request->has('fixedCosts')) {
@@ -302,6 +325,13 @@ class PcbPricingController extends Controller
                 PcbPricingSetting::updateOrCreate(
                     ['key' => 'price_tiers'],
                     ['value' => $request->input('priceTiers'), 'description' => 'Variable price tiers per mask, copper weight, thickness, and area']
+                );
+            }
+
+            if ($request->has('shippingOptions')) {
+                PcbPricingSetting::updateOrCreate(
+                    ['key' => 'shipping_options'],
+                    ['value' => $request->input('shippingOptions'), 'description' => 'Dynamic shipping rates per delivery method']
                 );
             }
 
@@ -320,7 +350,7 @@ class PcbPricingController extends Controller
     public function resetPricingConfig()
     {
         try {
-            PcbPricingSetting::whereIn('key', ['fixed_costs', 'price_tiers'])->delete();
+            PcbPricingSetting::whereIn('key', ['fixed_costs', 'price_tiers', 'shipping_options'])->delete();
             return response()->json([
                 'success' => true,
                 'message' => 'PCB Pricing reset to factory defaults'
