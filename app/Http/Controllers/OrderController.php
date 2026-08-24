@@ -840,15 +840,24 @@ class OrderController extends Controller
 
             // Log reorder event if log table exists
             if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_logs')) {
-                $adminId = $request->attributes->get('admin_id') ?: 1;
-                \Illuminate\Support\Facades\DB::table('pcb_order_logs')->insert([
+                $logData = [
                     'pcb_order_id' => $newOrder->id,
-                    'admin_id' => $adminId,
+                    'order_number' => $newOrder->order_number,
+                    'status' => 'Pending',
                     'action' => 'Reordered',
-                    'details' => "Reordered from original order #{$originalOrder->order_number}",
                     'created_at' => now(),
                     'updated_at' => now()
-                ]);
+                ];
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_logs', 'description')) {
+                    $logData['description'] = "Reordered from original order #{$originalOrder->order_number}";
+                }
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_logs', 'details')) {
+                    $logData['details'] = "Reordered from original order #{$originalOrder->order_number}";
+                }
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_logs', 'admin_id')) {
+                    $logData['admin_id'] = $request->attributes->get('admin_id') ?: 1;
+                }
+                \Illuminate\Support\Facades\DB::table('pcb_order_logs')->insert($logData);
             }
 
             return response()->json([
