@@ -88,6 +88,7 @@ class AuthController extends Controller
 
             // Call register service
             $result = $registerService->register([
+                'username' => trim((string)($input['username'] ?? $request->input('username') ?? '')),
                 'name' => trim((string)$name),
                 'first_name' => $firstName,
                 'last_name' => $lastName,

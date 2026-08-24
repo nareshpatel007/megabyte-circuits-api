@@ -38,14 +38,26 @@ class RegisterService
             ];
         }
 
-        // Check if user exists
-        $user = DB::table('users')->where('email', $email)->first();
+        // Check if user exists by email or username/name
+        $username = $userdata['username'] ?? null;
+        $existingUser = DB::table('users')
+            ->where('email', $email)
+            ->when($username, function ($query) use ($username) {
+                return $query->orWhere('name', $username)->orWhere('username', $username);
+            })
+            ->first();
 
         // If user found
-        if(!empty($user)) {
+        if (!empty($existingUser)) {
+            if (strtolower($existingUser->email ?? '') === strtolower($email)) {
+                return [
+                    'status' => false,
+                    'message' => 'An account with this email address already exists. Please try signing in or use another email.'
+                ];
+            }
             return [
                 'status' => false,
-                'message' => 'Account already exists. Please try with another email address.'
+                'message' => 'This username is already taken. Please choose a different username.'
             ];
         }
 
