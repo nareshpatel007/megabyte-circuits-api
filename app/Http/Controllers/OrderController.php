@@ -383,6 +383,13 @@ class OrderController extends Controller
                 }
             }
 
+            if ($request->has('failed_qty')) {
+                PcbOrderMeta::updateOrCreate(
+                    ['pcb_order_id' => $order->id, 'meta_key' => 'failed_qty'],
+                    ['meta_value' => (string)intval($request->failed_qty)]
+                );
+            }
+
             $order->save();
 
             // Handle updating order metas
