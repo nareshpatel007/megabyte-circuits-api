@@ -2,10 +2,6 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
-use App\Http\Controllers\WhatsAppController;
-use App\Http\Controllers\SupportController;
-use App\Http\Controllers\SubscriptionController;
-use App\Http\Controllers\ScrapingController;
 use App\Http\Controllers\OrderController;
 use App\Http\Controllers\FileUploadController;
 use App\Http\Controllers\CartController;
@@ -63,6 +59,7 @@ use App\Http\Controllers\DashboardController;
 // Checkout Routes
 Route::prefix('checkout/')->group(function () {
     Route::get('addresses', [CheckoutController::class, 'getAddresses']);
+    Route::get('states', [CheckoutController::class, 'getStates']);
     Route::post('save-address', [CheckoutController::class, 'saveAddress']);
     Route::post('delete-address', [CheckoutController::class, 'deleteAddress']);
     Route::post('create-razorpay-order', [CheckoutController::class, 'createRazorpayOrder']);
@@ -84,6 +81,4 @@ Route::prefix('dashboard/')->group(function () {
 });
 
 // Frontend API Routes (Protected by API token)
-Route::middleware('verify.api.token')->group(function () {
-    
-});
+Route::middleware('verify.api.token')->group(function () {});

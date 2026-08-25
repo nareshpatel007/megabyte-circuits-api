@@ -49,6 +49,25 @@ class CheckoutController extends Controller
         }
     }
 
+    // Get list of states
+    public function getStates()
+    {
+        try {
+            $states = DB::table('states')
+                ->select('id', 'code', 'name')
+                ->orderBy('name', 'asc')
+                ->get();
+
+            return response()->json([
+                'status' => true,
+                'data' => $states
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+
     // Save a new address or update existing via SoftDelete preservation
     public function saveAddress(Request $request)
     {
