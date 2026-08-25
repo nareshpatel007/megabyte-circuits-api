@@ -397,21 +397,34 @@ class CheckoutController extends Controller
                 ]);
 
                 // Store specifications in pcb_order_meta
-                $metaFields = [
-                    'board_name' => $boardName,
-                    'product_type' => $item['productType'] ?? 'pcb',
-                    'gerber_file_name' => $item['gerberFileName'] ?? '',
-                    'pcb_color' => $item['pcbColor'] ?? 'Green',
-                    'layers' => $item['layers'] ?? '2',
-                    'dimensions' => $item['dimensions'] ?? '',
-                    'quantity' => $itemQty,
-                    'build_time' => $item['buildTime'] ?? '3-4 days',
-                    'thickness' => $item['thickness'] ?? '1.6mm',
-                    'surface_finish' => $item['surfaceFinish'] ?? 'HASL(Leaded)',
-                    'transaction_number' => $transactionNumber,
-                    'parent_order_number' => $parentOrderNumber,
-                    'preview_data' => $previewData
-                ];
+                $productType = $item['productType'] ?? 'pcb';
+
+                if ($productType === 'part') {
+                    $metaFields = [
+                        'product_type' => 'part',
+                        'part_number' => $item['partNumber'] ?? $boardName,
+                        'description' => $item['description'] ?? '',
+                        'quantity' => $itemQty,
+                        'transaction_number' => $transactionNumber,
+                        'parent_order_number' => $parentOrderNumber,
+                    ];
+                } else {
+                    $metaFields = [
+                        'board_name' => $boardName,
+                        'product_type' => $productType,
+                        'gerber_file_name' => $item['gerberFileName'] ?? '',
+                        'pcb_color' => $item['pcbColor'] ?? 'Green',
+                        'layers' => $item['layers'] ?? '2',
+                        'dimensions' => $item['dimensions'] ?? '',
+                        'quantity' => $itemQty,
+                        'build_time' => $item['buildTime'] ?? '3-4 days',
+                        'thickness' => $item['thickness'] ?? '1.6mm',
+                        'surface_finish' => $item['surfaceFinish'] ?? 'HASL(Leaded)',
+                        'transaction_number' => $transactionNumber,
+                        'parent_order_number' => $parentOrderNumber,
+                        'preview_data' => $previewData
+                    ];
+                }
 
                 foreach ($metaFields as $k => $v) {
                     DB::table('pcb_order_meta')->insert([
