@@ -241,10 +241,9 @@ class PcbPricingController extends Controller
     public static function getDefaultShippingOptions()
     {
         return [
-            ['key' => 'gujarat_road', 'location' => 'In Gujarat', 'method' => 'By Road', 'rate' => 40],
-            ['key' => 'out_road', 'location' => 'Out of Gujarat', 'method' => 'By Road', 'rate' => 80],
-            ['key' => 'out_air', 'location' => 'Out of Gujarat', 'method' => 'By Air', 'rate' => 150],
-            ['key' => 'out_fastrack', 'location' => 'Out of Gujarat', 'method' => 'Fastrack', 'rate' => 450],
+            ['key' => 'standard', 'location' => 'Standard', 'method' => 'Standard', 'rate' => 0],
+            ['key' => 'plus', 'location' => 'Plus', 'method' => 'Plus', 'rate' => 150],
+            ['key' => 'fasttrack', 'location' => 'Fasttrack', 'method' => 'Fasttrack', 'rate' => 450],
         ];
     }
 
