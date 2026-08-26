@@ -37,8 +37,15 @@ class DigiKeyProductsController extends Controller
             });
         }
 
+        if (empty($category) && empty($keyword) && ($limit <= 4 || $request->boolean('distinct_category'))) {
+            $distinctIds = DigiKeyProduct::selectRaw('MIN(id) as min_id')
+                ->whereNotNull('search_keyword')
+                ->groupBy('search_keyword');
+            $query->whereIn('id', $distinctIds);
+        }
+
         $totalCount = $query->count();
-        $products = $query->orderBy('updated_at', 'desc')->skip($offset)->take($limit)->get();
+        $products = $query->orderBy('id', 'asc')->skip($offset)->take($limit)->get();
 
         // Get unique categories with counts
         $categories = DigiKeyProduct::selectRaw('search_keyword as name, COUNT(*) as count')

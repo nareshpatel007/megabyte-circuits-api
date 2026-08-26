@@ -12,6 +12,7 @@ class DigiKeyProduct extends Model
     protected $table = 'digikey_products';
 
     protected $fillable = [
+        'category_id',
         'digikey_product_number',
         'manufacturer_product_number',
         'manufacturer_name',
@@ -22,15 +23,44 @@ class DigiKeyProduct extends Model
         'product_url',
         'datasheet_url',
         'photo_url',
+        'product_variations',
+        'parameters',
+        'classifications',
+        'series',
+        'other_names',
+        'back_order_not_allowed',
+        'normally_stocking',
+        'discontinued',
+        'end_of_life',
+        'ncnr',
+        'primary_video_url',
+        'manufacturer_lead_weeks',
+        'manufacturer_public_quantity',
         'quantity_available',
         'product_status',
         'search_keyword',
-        'raw_response',
     ];
 
     protected $casts = [
+        'category_id' => 'integer',
+        'manufacturer_id' => 'integer',
         'unit_price' => 'float',
         'quantity_available' => 'integer',
-        'raw_response' => 'array',
+        'manufacturer_public_quantity' => 'integer',
+        'product_variations' => 'array',
+        'parameters' => 'array',
+        'classifications' => 'array',
+        'series' => 'array',
+        'other_names' => 'array',
+        'back_order_not_allowed' => 'boolean',
+        'normally_stocking' => 'boolean',
+        'discontinued' => 'boolean',
+        'end_of_life' => 'boolean',
+        'ncnr' => 'boolean',
     ];
+
+    public function category()
+    {
+        return $this->belongsTo(DigiKeyCategory::class, 'category_id', 'category_id');
+    }
 }

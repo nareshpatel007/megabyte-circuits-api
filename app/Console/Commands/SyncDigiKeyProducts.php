@@ -5,110 +5,94 @@ namespace App\Console\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use App\Models\DigiKeyCategory;
+use App\Models\DigiKeyManufacturer;
 use App\Models\DigiKeyProduct;
 
 class SyncDigiKeyProducts extends Command
 {
-    /**
-     * The name and signature of the console command.
-     *
-     * @var string
-     */
-    protected $signature = 'digikey:sync {--keyword= : Sync a specific keyword only} {--count=20 : Number of records per keyword}';
+    protected $signature = 'digikey:sync {--limit=50 : Number of records per API call} {--category= : Sync products for a specific category ID only} {--max-offset= : Maximum offset limit per chunk}';
 
-    /**
-     * The console command description.
-     *
-     * @var string
-     */
-    protected $description = 'Sync products from DigiKey API v4 OAuth2 into database';
-
-    /**
-     * List of target search keywords requested
-     */
-    protected array $keywords = [
-        'resistor',
-        'capacitor',
-        'LED',
-        'diode',
-        'transistor',
-        'MOSFET',
-        'microcontroller',
-        'Arduino',
-        'ESP32',
-        'Raspberry Pi',
-        'connector',
-        'relay',
-        'switch',
-        'voltage regulator',
-        'op amp',
-        'IC',
-        'PCB',
-        'sensor',
-        'USB',
-        '10k resistor',
-        'LM358',
-        'NE555',
-        'STM32',
-        'ATmega328P',
-    ];
+    protected $description = 'Sync products from DigiKey API v4 by batching 5 manufacturers per category call with offset pagination';
 
     private ?string $accessToken = null;
 
-    /**
-     * Execute the console command.
-     */
     public function handle()
     {
-        $this->info('Starting DigiKey Product Synchronization...');
+        $this->info('Starting DigiKey Products Synchronization (Category + Batched Manufacturers)...');
 
         $clientId = env('DIGIKEY_CLIENT_ID', 'lT71SAGE5n7ZClfGSc4lLATmbnng8POpYfYrzBRsaeXuIevJ');
         $clientSecret = env('DIGIKEY_CLIENT_SECRET', '6jE42EjppYmtY6LJxOleJcRsnxAXDFs97yZ77vSZhDPrNf3V2xQYAMLU7MxWufbP');
         $mode = env('DIGIKEY_MODE', 'live');
-        $recordCount = (int) ($this->option('count') ?: 10000);
+        $limit = (int) ($this->option('limit') ?: 50);
+        $specificCategory = $this->option('category');
+        $maxOffsetOpt = $this->option('max-offset') !== null ? (int)$this->option('max-offset') : null;
 
         if (!$clientId || !$clientSecret) {
             $this->error('DigiKey Client ID or Secret missing in .env');
             return 1;
         }
 
-        // Generate initial token
         $this->accessToken = $this->generateAccessToken($clientId, $clientSecret, $mode);
         if (!$this->accessToken) {
             $this->error('Failed to obtain initial DigiKey OAuth access token.');
             return 1;
         }
 
-        $specificKeyword = $this->option('keyword');
-        $targetKeywords = $specificKeyword ? [$specificKeyword] : $this->keywords;
+        // Query subcategories
+        $catQuery = DigiKeyCategory::query();
+        if ($specificCategory) {
+            $catQuery->where('category_id', $specificCategory);
+        } else {
+            $catQuery->where('parent_id', '!=', 0);
+        }
+        $subcategories = $catQuery->get();
 
-        $totalSynced = 0;
-
-        foreach ($targetKeywords as $kw) {
-            $this->info("Fetching products for keyword: '{$kw}'...");
-            $syncedCount = $this->fetchAndSaveProducts($kw, $recordCount, $clientId, $clientSecret, $mode);
-            $totalSynced += $syncedCount;
-            $this->info("Successfully synced {$syncedCount} products for '{$kw}'.");
-            // Gentle sleep between calls to respect rate limits
-            usleep(300000);
+        if ($subcategories->isEmpty()) {
+            $this->warn('No subcategories found in database. Run `php artisan digikey:sync-categories` first.');
+            return 0;
         }
 
-        $this->info("DigiKey Synchronization Completed! Total products saved/updated: {$totalSynced}");
+        // Query all manufacturers
+        $manufacturers = DigiKeyManufacturer::all();
+        if ($manufacturers->isEmpty()) {
+            $this->warn('No manufacturers found in database. Run `php artisan digikey:sync-manufacturers` first.');
+            return 0;
+        }
+
+        $mfgChunks = $manufacturers->chunk(5);
+
+        $this->info("Processing products for {$subcategories->count()} subcategories...");
+
+        $totalSyncedProducts = 0;
+
+        foreach ($subcategories as $subcat) {
+            $offset = 0;
+            $catSynced = 0;
+
+            while (true) {
+                if ($maxOffsetOpt !== null && $offset >= $maxOffsetOpt) {
+                    break;
+                }
+
+                $fetchedCount = $this->fetchAndSaveProductsForBatch($subcat, [], $offset, $limit, $clientId, $clientSecret, $mode);
+                $catSynced += $fetchedCount;
+
+                if ($fetchedCount < $limit) {
+                    break;
+                }
+
+                $offset += $limit;
+            }
+
+            $totalSyncedProducts += $catSynced;
+            $this->info("Category [{$subcat->category_id}] {$subcat->name}: Synced {$catSynced} products.");
+        }
+
+        $this->info("DigiKey Products Synchronization Completed! Total products saved/updated: {$totalSyncedProducts}");
         return 0;
     }
 
-    /**
-     * Helper to parse integer option safely
-     */
-    private function RepublicOrArgument(string $name, int $default): int
-    {
-        $val = $this->option($name);
-        return $val ? (int)$val : $default;
-    }
-
-    /**
-     * Generate OAuth2 Access Token
-     */
     private function generateAccessToken(string $clientId, string $clientSecret, string $mode): ?string
     {
         $url = ($mode === 'sandbox')
@@ -135,40 +119,54 @@ class SyncDigiKeyProducts extends Command
         return null;
     }
 
-    /**
-     * Fetch products for a keyword and handle automatic token refresh on 401 / expired token
-     */
-    private function fetchAndSaveProducts(string $keyword, int $recordCount, string $clientId, string $clientSecret, string $mode, bool $isRetry = false): int
+    private function fetchAndSaveProductsForBatch(DigiKeyCategory $subcategory, array $mfgIds, int $offset, int $limit, string $clientId, string $clientSecret, string $mode, bool $isRetry = false): int
     {
         $searchUrl = ($mode === 'sandbox')
             ? 'https://sandbox-api.digikey.com/products/v4/search/keyword'
             : 'https://api.digikey.com/products/v4/search/keyword';
 
+        $filterOptions = [
+            'CategoryFilter' => [
+                [
+                    'Id' => (int) $subcategory->category_id,
+                ]
+            ]
+        ];
+
+        if (!empty($mfgIds)) {
+            $filterOptions['ManufacturerFilter'] = array_map(function ($id) {
+                return ['Id' => (int) $id];
+            }, $mfgIds);
+        }
+
+        $payload = [
+            'Keywords' => '',
+            'Limit' => $limit,
+            'Offset' => $offset,
+            'FilterOptionsRequest' => $filterOptions
+        ];
+
         $response = Http::withHeaders([
             'X-DIGIKEY-Client-Id' => $clientId,
             'Authorization' => 'Bearer ' . $this->accessToken,
+            'X-DIGIKEY-Locale-Currency' => 'INR',
             'Content-Type' => 'application/json',
-        ])->post($searchUrl, [
-            'Keywords' => $keyword,
-            'RecordCount' => $recordCount,
-            'RecordStartPosition' => 0,
-        ]);
+        ])->post($searchUrl, $payload);
 
-        // Check if token expired (401 or specific error payload)
         if ($response->status() === 401 || ($response->failed() && str_contains(strtolower($response->body()), 'token'))) {
             if (!$isRetry) {
-                $this->warn('DigiKey Access Token expired or rejected. Refreshing token and retrying...');
+                $this->warn("DigiKey Access Token expired during request. Refreshing token...");
                 $this->accessToken = $this->generateAccessToken($clientId, $clientSecret, $mode);
                 if ($this->accessToken) {
-                    return $this->fetchAndSaveProducts($keyword, $recordCount, $clientId, $clientSecret, $mode, true);
+                    return $this->fetchAndSaveProductsForBatch($subcategory, $mfgIds, $offset, $limit, $clientId, $clientSecret, $mode, true);
                 }
             }
-            $this->error("Failed fetching for keyword '{$keyword}': Token expired and refresh failed.");
+            $this->error("Failed fetching products for Cat {$subcategory->category_id} and Mfg Batch (" . implode(',', $mfgIds) . "): Token refresh failed.");
             return 0;
         }
 
         if (!$response->successful()) {
-            $this->error("Error response for keyword '{$keyword}': " . $response->body());
+            $this->error("Error fetching products for Cat {$subcategory->category_id} and Mfg Batch (" . implode(',', $mfgIds) . "): " . $response->body());
             return 0;
         }
 
@@ -183,16 +181,22 @@ class SyncDigiKeyProducts extends Command
             }
 
             $digiKeyPartNum = null;
-            if (!empty($p['ProductVariations'][0]['DigiKeyProductNumber'])) {
-                $digiKeyPartNum = $p['ProductVariations'][0]['DigiKeyProductNumber'];
+            if (!empty($p['ProductVariations']) && is_array($p['ProductVariations'])) {
+                foreach ($p['ProductVariations'] as $pv) {
+                    if (!empty($pv['DigiKeyProductNumber'])) {
+                        $digiKeyPartNum = $pv['DigiKeyProductNumber'];
+                        break;
+                    }
+                }
             }
 
             $unitPrice = $p['UnitPrice'] ?? 0;
 
             DigiKeyProduct::updateOrCreate(
-                ['manufacturer_product_number' => $mfgPartNum],
+                ['digikey_product_number' => $digiKeyPartNum],
                 [
-                    'digikey_product_number' => $digiKeyPartNum,
+                    'category_id' => $subcategory->category_id,
+                    'manufacturer_product_number' => $mfgPartNum,
                     'manufacturer_name' => $p['Manufacturer']['Name'] ?? null,
                     'manufacturer_id' => $p['Manufacturer']['Id'] ?? null,
                     'product_description' => $p['Description']['ProductDescription'] ?? null,
@@ -201,10 +205,22 @@ class SyncDigiKeyProducts extends Command
                     'product_url' => $p['ProductUrl'] ?? null,
                     'datasheet_url' => $p['DatasheetUrl'] ?? null,
                     'photo_url' => $p['PhotoUrl'] ?? null,
+                    'product_variations' => $p['ProductVariations'] ?? [],
+                    'parameters' => $p['Parameters'] ?? [],
+                    'classifications' => $p['Classifications'] ?? [],
+                    'series' => $p['Series'] ?? [],
+                    'other_names' => $p['OtherNames'] ?? [],
+                    'back_order_not_allowed' => (bool) ($p['BackOrderNotAllowed'] ?? false),
+                    'normally_stocking' => (bool) ($p['NormallyStocking'] ?? true),
+                    'discontinued' => (bool) ($p['Discontinued'] ?? false),
+                    'end_of_life' => (bool) ($p['EndOfLife'] ?? false),
+                    'ncnr' => (bool) ($p['Ncnr'] ?? false),
+                    'primary_video_url' => $p['PrimaryVideoUrl'] ?? null,
+                    'manufacturer_lead_weeks' => $p['ManufacturerLeadWeeks'] ?? null,
+                    'manufacturer_public_quantity' => $p['ManufacturerPublicQuantity'] ?? 0,
                     'quantity_available' => $p['QuantityAvailable'] ?? 0,
                     'product_status' => $p['ProductStatus']['Status'] ?? 'Active',
-                    'search_keyword' => $keyword,
-                    'raw_response' => $p,
+                    'search_keyword' => $subcategory->name,
                 ]
             );
             $count++;
