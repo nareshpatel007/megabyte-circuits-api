@@ -8,30 +8,55 @@ use Illuminate\Support\Facades\Log;
 use App\Models\DigiKeyCategory;
 use App\Models\DigiKeyManufacturer;
 use App\Models\DigiKeyProduct;
+use App\Models\DigiKeySyncState;
 
 class SyncDigiKeyProducts extends Command
 {
-    protected $signature = 'digikey:sync {--limit=50 : Number of records per API call} {--category= : Sync products for a specific category ID only} {--max-offset= : Maximum offset limit per chunk}';
+    protected $signature = 'digikey:sync 
+                            {--limit=50 : Number of records per API call (max 50)} 
+                            {--category= : Sync products for a specific category ID only} 
+                            {--max-offset=300 : Maximum offset limit per batch slice}
+                            {--max-calls=800 : Maximum API calls before stopping for daily quota safety}
+                            {--mfg-batch-size=10 : Number of manufacturers per batch filter}
+                            {--start-cat-index= : Override subcategory index offset to resume from}
+                            {--start-mfg-index= : Override manufacturer chunk index offset to resume from}';
 
-    protected $description = 'Sync products from DigiKey API v4 by batching 5 manufacturers per category call with offset pagination';
+    protected $description = 'Sync products from DigiKey API v4 by slicing queries with Category + Manufacturer batches with automatic DB state persistence';
 
     private ?string $accessToken = null;
+    private int $apiCallsMade = 0;
 
     public function handle()
     {
-        $this->info('Starting DigiKey Products Synchronization (Category + Batched Manufacturers)...');
+        $this->info('Starting DigiKey Products Synchronization (Category + Batched Manufacturers with DB State)...');
 
         $clientId = env('DIGIKEY_CLIENT_ID', 'lT71SAGE5n7ZClfGSc4lLATmbnng8POpYfYrzBRsaeXuIevJ');
         $clientSecret = env('DIGIKEY_CLIENT_SECRET', '6jE42EjppYmtY6LJxOleJcRsnxAXDFs97yZ77vSZhDPrNf3V2xQYAMLU7MxWufbP');
         $mode = env('DIGIKEY_MODE', 'live');
-        $limit = (int) ($this->option('limit') ?: 50);
+        $limit = min((int) ($this->option('limit') ?: 50), 50);
         $specificCategory = $this->option('category');
-        $maxOffsetOpt = $this->option('max-offset') !== null ? (int)$this->option('max-offset') : null;
+        $maxOffsetOpt = (int) ($this->option('max-offset') ?: 300);
+        $maxCalls = (int) ($this->option('max-calls') ?: 800);
+        $mfgBatchSize = max((int) ($this->option('mfg-batch-size') ?: 10), 1);
 
         if (!$clientId || !$clientSecret) {
             $this->error('DigiKey Client ID or Secret missing in .env');
             return 1;
         }
+
+        // Fetch or create DB state
+        $state = DigiKeySyncState::firstOrCreate(
+            ['id' => 1],
+            ['last_cat_index' => 0, 'last_mfg_index' => 0, 'total_synced_products' => 0]
+        );
+
+        $startCatIndex = $this->option('start-cat-index') !== null 
+            ? (int) $this->option('start-cat-index') 
+            : $state->last_cat_index;
+
+        $startMfgIndex = $this->option('start-mfg-index') !== null 
+            ? (int) $this->option('start-mfg-index') 
+            : $state->last_mfg_index;
 
         $this->accessToken = $this->generateAccessToken($clientId, $clientSecret, $mode);
         if (!$this->accessToken) {
@@ -53,43 +78,80 @@ class SyncDigiKeyProducts extends Command
             return 0;
         }
 
-        // Query all manufacturers
+        // Query manufacturers
         $manufacturers = DigiKeyManufacturer::all();
         if ($manufacturers->isEmpty()) {
             $this->warn('No manufacturers found in database. Run `php artisan digikey:sync-manufacturers` first.');
             return 0;
         }
 
-        $mfgChunks = $manufacturers->chunk(5);
+        $mfgChunks = $manufacturers->chunk($mfgBatchSize);
 
-        $this->info("Processing products for {$subcategories->count()} subcategories...");
+        $this->info("Resuming from Subcategory Index [{$startCatIndex}], Manufacturer Chunk Index [{$startMfgIndex}]...");
+        $this->info("Processing {$subcategories->count()} subcategories with {$mfgChunks->count()} manufacturer chunks (Mfg Batch: {$mfgBatchSize}, Limit: {$limit}, Max Calls: {$maxCalls})...");
 
         $totalSyncedProducts = 0;
 
-        foreach ($subcategories as $subcat) {
-            $offset = 0;
+        for ($cIdx = $startCatIndex; $cIdx < $subcategories->count(); $cIdx++) {
+            $subcat = $subcategories[$cIdx];
             $catSynced = 0;
 
-            while (true) {
-                if ($maxOffsetOpt !== null && $offset >= $maxOffsetOpt) {
-                    break;
+            $initialMfgIdx = ($cIdx === $startCatIndex) ? $startMfgIndex : 0;
+
+            for ($mIdx = $initialMfgIdx; $mIdx < $mfgChunks->count(); $mIdx++) {
+                if ($this->apiCallsMade >= $maxCalls) {
+                    // Update state in DB before stopping
+                    $state->update([
+                        'last_cat_index' => $cIdx,
+                        'last_mfg_index' => $mIdx,
+                        'total_synced_products' => $state->total_synced_products + $totalSyncedProducts,
+                    ]);
+
+                    $this->warn("\nReached max API calls quota ({$maxCalls}). Stopping execution.");
+                    $this->info("Saved state to DB: Subcategory Index={$cIdx}, Manufacturer Chunk Index={$mIdx}");
+                    $this->info("Total products saved/updated in this session: {$totalSyncedProducts}");
+                    return 0;
                 }
 
-                $fetchedCount = $this->fetchAndSaveProductsForBatch($subcat, [], $offset, $limit, $clientId, $clientSecret, $mode);
-                $catSynced += $fetchedCount;
+                $mfgChunk = $mfgChunks[$mIdx];
+                $mfgIds = $mfgChunk->pluck('manufacturer_id')->toArray();
 
-                if ($fetchedCount < $limit) {
-                    break;
+                $offset = 0;
+                while ($offset < $maxOffsetOpt) {
+                    if ($this->apiCallsMade >= $maxCalls) {
+                        break;
+                    }
+
+                    $fetchedCount = $this->fetchAndSaveProductsForBatch($subcat, $mfgIds, $offset, $limit, $clientId, $clientSecret, $mode);
+                    $catSynced += $fetchedCount;
+
+                    if ($fetchedCount < $limit) {
+                        // All products for this category + manufacturer slice fetched
+                        break;
+                    }
+
+                    $offset += $limit;
                 }
 
-                $offset += $limit;
+                // Periodically update DB progress state after each mfg chunk
+                $state->update([
+                    'last_cat_index' => $cIdx,
+                    'last_mfg_index' => $mIdx + 1 < $mfgChunks->count() ? $mIdx + 1 : 0,
+                ]);
             }
 
             $totalSyncedProducts += $catSynced;
-            $this->info("Category [{$subcat->category_id}] {$subcat->name}: Synced {$catSynced} products.");
+            $this->info("Cat [{$subcat->category_id}] {$subcat->name}: Synced {$catSynced} products. (Total API calls: {$this->apiCallsMade}/{$maxCalls})");
         }
 
-        $this->info("DigiKey Products Synchronization Completed! Total products saved/updated: {$totalSyncedProducts}");
+        // Entire catalog cycle completed -> Reset state to 0, 0 for next sync cycle
+        $state->update([
+            'last_cat_index' => 0,
+            'last_mfg_index' => 0,
+            'total_synced_products' => $state->total_synced_products + $totalSyncedProducts,
+        ]);
+
+        $this->info("DigiKey Products Full Sync Cycle Completed! Resetting DB state to [0,0]. Total products saved: {$totalSyncedProducts}");
         return 0;
     }
 
@@ -145,6 +207,8 @@ class SyncDigiKeyProducts extends Command
             'Offset' => $offset,
             'FilterOptionsRequest' => $filterOptions
         ];
+
+        $this->apiCallsMade++;
 
         $response = Http::withHeaders([
             'X-DIGIKEY-Client-Id' => $clientId,

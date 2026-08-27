@@ -13,6 +13,8 @@ class Kernel extends ConsoleKernel
     protected function schedule(Schedule $schedule): void
     {
         $schedule->command('gerber:clean-unattached')->dailyAt('00:00');
+        $schedule->command('digikey:sync-manufacturers')->weekly();
+        $schedule->command('digikey:sync-categories')->weekly();
         $schedule->command('digikey:sync')->dailyAt('01:00');
     }
 
