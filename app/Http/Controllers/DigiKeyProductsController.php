@@ -97,11 +97,15 @@ class DigiKeyProductsController extends Controller
                     'Status' => $item->product_status ?? 'Active'
                 ],
                 'Category' => $item->search_keyword,
-                'ProductVariations' => [
+                'ProductVariations' => !empty($item->product_variations) ? $item->product_variations : [
                     [
-                        'DigiKeyProductNumber' => $item->digikey_product_number
+                        'DigiKeyProductNumber' => $item->digikey_product_number,
+                        'StandardPricing' => $item->product_variations[0]['StandardPricing'] ?? [],
+                        'MinimumOrderQuantity' => $item->product_variations[0]['MinimumOrderQuantity'] ?? 1,
                     ]
-                ]
+                ],
+                'StandardPricing' => $item->product_variations[0]['StandardPricing'] ?? [],
+                'MinimumOrderQuantity' => $item->product_variations[0]['MinimumOrderQuantity'] ?? 1,
             ];
         });
 
