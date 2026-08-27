@@ -15,15 +15,13 @@ class DigiKeyCategory extends Model
         'category_id',
         'parent_id',
         'name',
-        'product_count',
-        'raw_response',
+        'product_count'
     ];
 
     protected $casts = [
         'category_id' => 'integer',
         'parent_id' => 'integer',
-        'product_count' => 'integer',
-        'raw_response' => 'array',
+        'product_count' => 'integer'
     ];
 
     public function parent()

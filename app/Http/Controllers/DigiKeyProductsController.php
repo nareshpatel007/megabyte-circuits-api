@@ -132,8 +132,11 @@ class DigiKeyProductsController extends Controller
 
         $raw = is_array($item->raw_response) ? $item->raw_response : json_decode($item->raw_response ?? '{}', true);
 
-        return response()->json([
-            'id' => $item->id,
+        // Get all DB table columns as array
+        $data = $item->toArray();
+
+        // Merge DB columns with DigiKey format keys for full frontend compatibility
+        $response = array_merge($data, [
             'ManufacturerProductNumber' => $item->manufacturer_product_number,
             'Description' => [
                 'ProductDescription' => $item->product_description,
@@ -152,14 +155,23 @@ class DigiKeyProductsController extends Controller
                 'Status' => $item->product_status ?? 'Active'
             ],
             'Category' => $item->search_keyword,
-            'ProductVariations' => [
+            'ProductVariations' => !empty($item->product_variations) ? $item->product_variations : [
                 [
                     'DigiKeyProductNumber' => $item->digikey_product_number
                 ]
             ],
+            'Parameters' => !empty($item->parameters) ? $item->parameters : ($raw['Parameters'] ?? $raw['ProductAttributes'] ?? []),
+            'Classifications' => !empty($item->classifications) ? $item->classifications : ($raw['Classifications'] ?? null),
+            'Series' => !empty($item->series) ? $item->series : ($raw['Series'] ?? null),
+            'OtherNames' => !empty($item->other_names) ? $item->other_names : ($raw['OtherNames'] ?? []),
+            'BaseProductNumber' => !empty($item->base_product_number) ? $item->base_product_number : ($raw['BaseProductNumber'] ?? null),
+            'CategoryDetails' => !empty($item->category_details) ? $item->category_details : ($raw['Category'] ?? null),
+            'DateLastBuyChance' => $item->date_last_buy_chance ?? ($raw['DateLastBuyChance'] ?? null),
+            'ShippingInfo' => !empty($item->shipping_info) ? $item->shipping_info : ($raw['ShippingInfo'] ?? null),
             'RawResponse' => $raw,
-            'Parameters' => $raw['Parameters'] ?? $raw['ProductAttributes'] ?? []
         ]);
+
+        return response()->json($response);
     }
 
     /**

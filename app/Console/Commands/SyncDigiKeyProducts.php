@@ -16,7 +16,7 @@ class SyncDigiKeyProducts extends Command
                             {--limit=50 : Number of records per API call (max 50)} 
                             {--category= : Sync products for a specific category ID only} 
                             {--max-offset=300 : Maximum offset limit per batch slice}
-                            {--max-calls=800 : Maximum API calls before stopping for daily quota safety}
+                            {--max-calls=1000 : Maximum API calls before stopping for daily quota safety}
                             {--mfg-batch-size=10 : Number of manufacturers per batch filter}
                             {--start-cat-index= : Override subcategory index offset to resume from}
                             {--start-mfg-index= : Override manufacturer chunk index offset to resume from}';
@@ -36,7 +36,7 @@ class SyncDigiKeyProducts extends Command
         $limit = min((int) ($this->option('limit') ?: 50), 50);
         $specificCategory = $this->option('category');
         $maxOffsetOpt = (int) ($this->option('max-offset') ?: 300);
-        $maxCalls = (int) ($this->option('max-calls') ?: 800);
+        $maxCalls = (int) ($this->option('max-calls') ?: 1000);
         $mfgBatchSize = max((int) ($this->option('mfg-batch-size') ?: 10), 1);
 
         if (!$clientId || !$clientSecret) {
@@ -50,12 +50,12 @@ class SyncDigiKeyProducts extends Command
             ['last_cat_index' => 0, 'last_mfg_index' => 0, 'total_synced_products' => 0]
         );
 
-        $startCatIndex = $this->option('start-cat-index') !== null 
-            ? (int) $this->option('start-cat-index') 
+        $startCatIndex = $this->option('start-cat-index') !== null
+            ? (int) $this->option('start-cat-index')
             : $state->last_cat_index;
 
-        $startMfgIndex = $this->option('start-mfg-index') !== null 
-            ? (int) $this->option('start-mfg-index') 
+        $startMfgIndex = $this->option('start-mfg-index') !== null
+            ? (int) $this->option('start-mfg-index')
             : $state->last_mfg_index;
 
         $this->accessToken = $this->generateAccessToken($clientId, $clientSecret, $mode);
@@ -254,8 +254,6 @@ class SyncDigiKeyProducts extends Command
                 }
             }
 
-            $unitPrice = $p['UnitPrice'] ?? 0;
-
             DigiKeyProduct::updateOrCreate(
                 ['digikey_product_number' => $digiKeyPartNum],
                 [
@@ -265,7 +263,7 @@ class SyncDigiKeyProducts extends Command
                     'manufacturer_id' => $p['Manufacturer']['Id'] ?? null,
                     'product_description' => $p['Description']['ProductDescription'] ?? null,
                     'detailed_description' => $p['Description']['DetailedDescription'] ?? null,
-                    'unit_price' => $unitPrice,
+                    'unit_price' => $p['UnitPrice'] ?? 0,
                     'product_url' => $p['ProductUrl'] ?? null,
                     'datasheet_url' => $p['DatasheetUrl'] ?? null,
                     'photo_url' => $p['PhotoUrl'] ?? null,
@@ -274,6 +272,10 @@ class SyncDigiKeyProducts extends Command
                     'classifications' => $p['Classifications'] ?? [],
                     'series' => $p['Series'] ?? [],
                     'other_names' => $p['OtherNames'] ?? [],
+                    'base_product_number' => $p['BaseProductNumber'] ?? null,
+                    'category_details' => $p['Category'] ?? null,
+                    'date_last_buy_chance' => $p['DateLastBuyChance'] ?? null,
+                    'shipping_info' => $p['ShippingInfo'] ?? null,
                     'back_order_not_allowed' => (bool) ($p['BackOrderNotAllowed'] ?? false),
                     'normally_stocking' => (bool) ($p['NormallyStocking'] ?? true),
                     'discontinued' => (bool) ($p['Discontinued'] ?? false),
@@ -284,7 +286,7 @@ class SyncDigiKeyProducts extends Command
                     'manufacturer_public_quantity' => $p['ManufacturerPublicQuantity'] ?? 0,
                     'quantity_available' => $p['QuantityAvailable'] ?? 0,
                     'product_status' => $p['ProductStatus']['Status'] ?? 'Active',
-                    'search_keyword' => $subcategory->name,
+                    'search_keyword' => $subcategory->name
                 ]
             );
             $count++;
