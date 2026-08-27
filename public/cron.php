@@ -17,3 +17,6 @@ $status = $kernel->call('schedule:run');
 $output = $kernel->output();
 
 header('Content-Type: text/plain');
+echo "=== Laravel Cron Schedule Worker Execution ===\n";
+echo "Timestamp: " . date('Y-m-d H:i:s') . "\n\n";
+echo $output ? $output : "No scheduled commands were due at this time.\n";
