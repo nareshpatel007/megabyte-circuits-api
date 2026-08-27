@@ -10,6 +10,8 @@ use App\Models\DigiKeyManufacturer;
 use App\Models\DigiKeyProduct;
 use App\Models\DigiKeySyncState;
 
+class DigiKeyRateLimitException extends \Exception {}
+
 class SyncDigiKeyProducts extends Command
 {
     protected $signature = 'digikey:sync 
@@ -58,7 +60,14 @@ class SyncDigiKeyProducts extends Command
             ? (int) $this->option('start-mfg-index')
             : $state->last_mfg_index;
 
-        $this->accessToken = $this->generateAccessToken($clientId, $clientSecret, $mode);
+        try {
+            $this->accessToken = $this->generateAccessToken($clientId, $clientSecret, $mode);
+        } catch (DigiKeyRateLimitException $e) {
+            $this->error("\nDaily API rate limit reached during OAuth token request (429 Too Many Requests).");
+            $this->info("Daily limit reached. Stopping command execution.");
+            return 1;
+        }
+
         if (!$this->accessToken) {
             $this->error('Failed to obtain initial DigiKey OAuth access token.');
             return 1;
@@ -91,57 +100,72 @@ class SyncDigiKeyProducts extends Command
         $this->info("Processing {$subcategories->count()} subcategories with {$mfgChunks->count()} manufacturer chunks (Mfg Batch: {$mfgBatchSize}, Limit: {$limit}, Max Calls: {$maxCalls})...");
 
         $totalSyncedProducts = 0;
+        $cIdx = $startCatIndex;
+        $mIdx = $startMfgIndex;
 
-        for ($cIdx = $startCatIndex; $cIdx < $subcategories->count(); $cIdx++) {
-            $subcat = $subcategories[$cIdx];
-            $catSynced = 0;
+        try {
+            for ($cIdx = $startCatIndex; $cIdx < $subcategories->count(); $cIdx++) {
+                $subcat = $subcategories[$cIdx];
+                $catSynced = 0;
 
-            $initialMfgIdx = ($cIdx === $startCatIndex) ? $startMfgIndex : 0;
+                $initialMfgIdx = ($cIdx === $startCatIndex) ? $startMfgIndex : 0;
 
-            for ($mIdx = $initialMfgIdx; $mIdx < $mfgChunks->count(); $mIdx++) {
-                if ($this->apiCallsMade >= $maxCalls) {
-                    // Update state in DB before stopping
+                for ($mIdx = $initialMfgIdx; $mIdx < $mfgChunks->count(); $mIdx++) {
+                    if ($this->apiCallsMade >= $maxCalls) {
+                        // Update state in DB before stopping
+                        $state->update([
+                            'last_cat_index' => $cIdx,
+                            'last_mfg_index' => $mIdx,
+                            'total_synced_products' => $state->total_synced_products + $totalSyncedProducts,
+                        ]);
+
+                        $this->warn("\nReached max API calls quota ({$maxCalls}). Stopping execution.");
+                        $this->info("Saved state to DB: Subcategory Index={$cIdx}, Manufacturer Chunk Index={$mIdx}");
+                        $this->info("Total products saved/updated in this session: {$totalSyncedProducts}");
+                        return 0;
+                    }
+
+                    $mfgChunk = $mfgChunks[$mIdx];
+                    $mfgIds = $mfgChunk->pluck('manufacturer_id')->toArray();
+
+                    $offset = 0;
+                    while ($offset < $maxOffsetOpt) {
+                        if ($this->apiCallsMade >= $maxCalls) {
+                            break;
+                        }
+
+                        $fetchedCount = $this->fetchAndSaveProductsForBatch($subcat, $mfgIds, $offset, $limit, $clientId, $clientSecret, $mode);
+                        $catSynced += $fetchedCount;
+
+                        if ($fetchedCount < $limit) {
+                            // All products for this category + manufacturer slice fetched
+                            break;
+                        }
+
+                        $offset += $limit;
+                    }
+
+                    // Periodically update DB progress state after each mfg chunk
                     $state->update([
                         'last_cat_index' => $cIdx,
-                        'last_mfg_index' => $mIdx,
-                        'total_synced_products' => $state->total_synced_products + $totalSyncedProducts,
+                        'last_mfg_index' => $mIdx + 1 < $mfgChunks->count() ? $mIdx + 1 : 0,
                     ]);
-
-                    $this->warn("\nReached max API calls quota ({$maxCalls}). Stopping execution.");
-                    $this->info("Saved state to DB: Subcategory Index={$cIdx}, Manufacturer Chunk Index={$mIdx}");
-                    $this->info("Total products saved/updated in this session: {$totalSyncedProducts}");
-                    return 0;
                 }
 
-                $mfgChunk = $mfgChunks[$mIdx];
-                $mfgIds = $mfgChunk->pluck('manufacturer_id')->toArray();
-
-                $offset = 0;
-                while ($offset < $maxOffsetOpt) {
-                    if ($this->apiCallsMade >= $maxCalls) {
-                        break;
-                    }
-
-                    $fetchedCount = $this->fetchAndSaveProductsForBatch($subcat, $mfgIds, $offset, $limit, $clientId, $clientSecret, $mode);
-                    $catSynced += $fetchedCount;
-
-                    if ($fetchedCount < $limit) {
-                        // All products for this category + manufacturer slice fetched
-                        break;
-                    }
-
-                    $offset += $limit;
-                }
-
-                // Periodically update DB progress state after each mfg chunk
-                $state->update([
-                    'last_cat_index' => $cIdx,
-                    'last_mfg_index' => $mIdx + 1 < $mfgChunks->count() ? $mIdx + 1 : 0,
-                ]);
+                $totalSyncedProducts += $catSynced;
+                $this->info("Cat [{$subcat->category_id}] {$subcat->name}: Synced {$catSynced} products. (Total API calls: {$this->apiCallsMade}/{$maxCalls})");
             }
+        } catch (DigiKeyRateLimitException $e) {
+            $state->update([
+                'last_cat_index' => $cIdx,
+                'last_mfg_index' => $mIdx,
+                'total_synced_products' => $state->total_synced_products + $totalSyncedProducts,
+            ]);
 
-            $totalSyncedProducts += $catSynced;
-            $this->info("Cat [{$subcat->category_id}] {$subcat->name}: Synced {$catSynced} products. (Total API calls: {$this->apiCallsMade}/{$maxCalls})");
+            $this->error("\nDaily API rate limit reached from DigiKey (429 Too Many Requests / Daily Ratelimit exceeded).");
+            $this->info("Saved state to DB: Subcategory Index={$cIdx}, Manufacturer Chunk Index={$mIdx}");
+            $this->info("Daily limit reached. Stopping command execution.");
+            return 1;
         }
 
         // Entire catalog cycle completed -> Reset state to 0, 0 for next sync cycle
@@ -166,6 +190,10 @@ class SyncDigiKeyProducts extends Command
             'client_secret' => $clientSecret,
             'grant_type' => 'client_credentials',
         ]);
+
+        if ($response->status() === 429 || str_contains(strtolower($response->body()), 'ratelimit') || str_contains(strtolower($response->body()), 'too many requests')) {
+            throw new DigiKeyRateLimitException('Daily Ratelimit exceeded');
+        }
 
         if ($response->successful()) {
             $data = $response->json();
@@ -217,6 +245,10 @@ class SyncDigiKeyProducts extends Command
             'X-DIGIKEY-Locale-Currency' => 'INR',
             'Content-Type' => 'application/json',
         ])->post($searchUrl, $payload);
+
+        if ($response->status() === 429 || str_contains(strtolower($response->body()), 'ratelimit') || str_contains(strtolower($response->body()), 'too many requests')) {
+            throw new DigiKeyRateLimitException('Daily Ratelimit exceeded');
+        }
 
         if ($response->status() === 401 || ($response->failed() && str_contains(strtolower($response->body()), 'token'))) {
             if (!$isRetry) {
@@ -296,3 +328,4 @@ class SyncDigiKeyProducts extends Command
         return $count;
     }
 }
+
