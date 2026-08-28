@@ -283,12 +283,21 @@ class PcbPricingController extends Controller
                 $shippingOptions = self::getDefaultShippingOptions();
             }
 
+            $minPartsOrderAmount = 3000;
+            if (Schema::hasTable('pcb_pricing_settings')) {
+                $minPartsRow = PcbPricingSetting::where('key', 'min_parts_order_amount')->first();
+                if ($minPartsRow && isset($minPartsRow->value['amount'])) {
+                    $minPartsOrderAmount = (float)$minPartsRow->value['amount'];
+                }
+            }
+
             return response()->json([
                 'success' => true,
                 'data' => [
                     'fixedCosts' => $fixedCosts,
                     'priceTiers' => $priceTiers,
-                    'shippingOptions' => $shippingOptions
+                    'shippingOptions' => $shippingOptions,
+                    'minPartsOrderAmount' => $minPartsOrderAmount
                 ]
             ]);
         } catch (\Throwable $th) {
@@ -334,6 +343,13 @@ class PcbPricingController extends Controller
                 );
             }
 
+            if ($request->has('minPartsOrderAmount')) {
+                PcbPricingSetting::updateOrCreate(
+                    ['key' => 'min_parts_order_amount'],
+                    ['value' => ['amount' => (float)$request->input('minPartsOrderAmount')], 'description' => 'Minimum order amount for parts tab']
+                );
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'PCB Pricing Calculations updated successfully'
@@ -349,7 +365,7 @@ class PcbPricingController extends Controller
     public function resetPricingConfig()
     {
         try {
-            PcbPricingSetting::whereIn('key', ['fixed_costs', 'price_tiers', 'shipping_options'])->delete();
+            PcbPricingSetting::whereIn('key', ['fixed_costs', 'price_tiers', 'shipping_options', 'min_parts_order_amount'])->delete();
             return response()->json([
                 'success' => true,
                 'message' => 'PCB Pricing reset to factory defaults'

@@ -12,11 +12,22 @@ $app = require_once __DIR__ . '/../bootstrap/app.php';
 
 $kernel = $app->make(\Illuminate\Contracts\Console\Kernel::class);
 
-// Execute Laravel schedule:run command
-$status = $kernel->call('schedule:run');
+$task = $_GET['task'] ?? 'schedule';
+
+$commands = [
+    'schedule'            => 'schedule:run',
+    'gerber-clean'        => 'gerber:clean-unattached',
+    'digikey-sync'        => 'digikey:sync',
+    'digikey-manufacturers' => 'digikey:sync-manufacturers',
+    'digikey-categories'  => 'digikey:sync-categories',
+];
+
+$commandToRun = $commands[$task] ?? 'schedule:run';
+
+$status = $kernel->call($commandToRun);
 $output = $kernel->output();
 
 header('Content-Type: text/plain');
-echo "=== Laravel Cron Schedule Worker Execution ===\n";
+echo "=== Laravel Cron Execution ({$commandToRun}) ===\n";
 echo "Timestamp: " . date('Y-m-d H:i:s') . "\n\n";
-echo $output ? $output : "No scheduled commands were due at this time.\n";
+echo $output ? $output : "Command executed successfully with no additional output.\n";

@@ -20,47 +20,112 @@ class JlcpcbService
     }
 
     /**
+     * Generate JOP HMAC-SHA256 signature and Authorization header
+     */
+    public function generateJopAuthorization(
+        string $method,
+        string $urlPath,
+        string $metaJson,
+        ?string $appId = null,
+        ?string $accessKey = null,
+        ?string $secretKey = null
+    ): array {
+        $appId = $appId ?? config('services.jlcpcb.app_id');
+        $accessKey = $accessKey ?? config('services.jlcpcb.access_key');
+        $secretKey = $secretKey ?? config('services.jlcpcb.secret_key');
+
+        $timestamp = time();
+        
+        $chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        $nonce = '';
+        for ($i = 0; $i < 32; $i++) {
+            $nonce .= $chars[random_int(0, strlen($chars) - 1)];
+        }
+
+        $stringToSign = $method . "\n"
+            . $urlPath . "\n"
+            . $timestamp . "\n"
+            . $nonce . "\n"
+            . $metaJson . "\n";
+
+        $hash = hash_hmac('sha256', $stringToSign, $secretKey, true);
+        $signature = base64_encode($hash);
+
+        $authorization = 'JOP ' .
+            'appid="' . $appId . '",' .
+            'accesskey="' . $accessKey . '",' .
+            'nonce="' . $nonce . '",' .
+            'timestamp="' . $timestamp . '",' .
+            'signature="' . $signature . '"';
+
+        return [
+            'app_id' => $appId,
+            'access_key' => $accessKey,
+            'timestamp' => $timestamp,
+            'nonce' => $nonce,
+            'meta_json' => $metaJson,
+            'string_to_sign' => $stringToSign,
+            'signature' => $signature,
+            'authorization' => $authorization
+        ];
+    }
+
+    /**
      * Upload PCB Gerber file (ZIP/RAR) to JLCPCB Open API
      * Endpoint: POST /overseas/openapi/pcb/uploadGerber
      *
      * @param mixed $file File object or path to Gerber zip/rar file
      * @param string|null $fileName Optional file name override
+     * @param string|null $appId
+     * @param string|null $accessKey
+     * @param string|null $secretKey
+     * @param string|null $metaJsonOverride
      * @return array
      * @throws Exception
      */
-    public function uploadGerber($file, ?string $fileName = null): array
-    {
-        if (empty($this->accessKey)) {
-            throw new Exception("JLCPCB Access Key is not configured in environment (.env).");
+    public function uploadGerber(
+        $file,
+        ?string $fileName = null,
+        ?string $appId = null,
+        ?string $accessKey = null,
+        ?string $secretKey = null,
+        ?string $metaJsonOverride = null
+    ): array {
+        $endpoint = "{$this->baseUrl}/overseas/openapi/pcb/uploadGerber";
+        $urlPath = parse_url($endpoint, PHP_URL_PATH);
+
+        if (is_string($file) && file_exists($file)) {
+            $filePath = $file;
+            $originalName = $fileName ?? basename($file);
+        } elseif ($file instanceof \Illuminate\Http\UploadedFile) {
+            $filePath = $file->getRealPath();
+            $originalName = $fileName ?? $file->getClientOriginalName();
+        } else {
+            throw new Exception("Invalid file provided for Gerber upload.");
         }
 
-        $url = "{$this->baseUrl}/overseas/openapi/pcb/uploadGerber";
+        $metaJson = $metaJsonOverride ?: json_encode(['fileName' => $originalName], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
-        $authHeader = (str_starts_with(strtolower($this->accessKey), 'bearer ')) 
-            ? $this->accessKey 
-            : "Bearer {$this->accessKey}";
-
-        $headers = [
-            'Authorization' => $authHeader,
-            'Accept' => 'application/json',
-        ];
+        $authData = $this->generateJopAuthorization(
+            'POST',
+            $urlPath,
+            $metaJson,
+            $appId,
+            $accessKey,
+            $secretKey
+        );
 
         try {
-            $request = Http::withHeaders($headers)->timeout(60);
-
-            if (is_string($file) && file_exists($file)) {
-                $contents = file_get_contents($file);
-                $originalName = $fileName ?? basename($file);
-                $request = $request->attach('file', $contents, $originalName);
-            } elseif ($file instanceof \Illuminate\Http\UploadedFile) {
-                $contents = file_get_contents($file->getRealPath());
-                $originalName = $fileName ?? $file->getClientOriginalName();
-                $request = $request->attach('file', $contents, $originalName);
-            } else {
-                throw new Exception("Invalid file provided for Gerber upload.");
-            }
-
-            $response = $request->post($url, [
+            $response = Http::withHeaders([
+                'Authorization' => $authData['authorization'],
+                'Accept' => 'application/json',
+            ])
+            ->withOptions([
+                'ipresolve' => CURL_IPRESOLVE_V4
+            ])
+            ->timeout(180)
+            ->attach('file', fopen($filePath, 'r'), $originalName)
+            ->post($endpoint, [
                 'fileName' => $originalName
             ]);
 
@@ -75,7 +140,8 @@ class JlcpcbService
                         'code' => 200,
                         'message' => 'Gerber file uploaded successfully',
                         'fileKey' => $result['data'] ?? '',
-                        'data' => $result['data'] ?? ''
+                        'data' => $result['data'] ?? '',
+                        'auth_debug' => $authData
                     ];
                 }
 
@@ -84,7 +150,8 @@ class JlcpcbService
                     'success' => false,
                     'code' => $code ?? $response->status(),
                     'message' => $errorMessage,
-                    'data' => null
+                    'data' => null,
+                    'auth_debug' => $authData
                 ];
             }
 
@@ -92,7 +159,8 @@ class JlcpcbService
                 'success' => false,
                 'code' => $response->status(),
                 'message' => 'Unexpected API response format during Gerber upload.',
-                'raw_response' => $response->body()
+                'raw_response' => $response->body(),
+                'auth_debug' => $authData
             ];
 
         } catch (Exception $e) {
