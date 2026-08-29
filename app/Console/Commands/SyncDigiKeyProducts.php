@@ -18,7 +18,7 @@ class SyncDigiKeyProducts extends Command
                             {--limit=50 : Number of records per API call (max 50)} 
                             {--category= : Sync products for a specific category ID only} 
                             {--max-offset=300 : Maximum offset limit per batch slice}
-                            {--max-calls=10000 : Maximum API calls before stopping for daily quota safety}
+                            {--max-calls=1000 : Maximum API calls before stopping for daily quota safety}
                             {--mfg-batch-size=10 : Number of manufacturers per batch filter}
                             {--start-cat-index= : Override subcategory index offset to resume from}
                             {--start-mfg-index= : Override manufacturer chunk index offset to resume from}';
@@ -328,4 +328,3 @@ class SyncDigiKeyProducts extends Command
         return $count;
     }
 }
-
