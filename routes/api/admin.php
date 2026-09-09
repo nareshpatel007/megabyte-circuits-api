@@ -49,6 +49,7 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::get('my-permissions', [AdminController::class, 'myPermissions']);
 
         // Blog Management
+        Route::get('blogs/stats', [BlogController::class, 'adminStats']);
         Route::get('blogs', [BlogController::class, 'index']);
         Route::get('blogs/{id}', [BlogController::class, 'show']);
         Route::post('blogs', [BlogController::class, 'store']);
@@ -56,6 +57,22 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::delete('blogs/{id}', [BlogController::class, 'destroy']);
         Route::post('blogs/upload-image',[BlogController::class, 'uploadImage']);
         Route::post('blogs/generate-ai', [BlogController::class, 'generateAI']);
+
+        // Blog Categories
+        Route::get('blog-categories', [BlogController::class, 'listCategories']);
+        Route::post('blog-categories', [BlogController::class, 'storeCategory']);
+        Route::put('blog-categories/{id}', [BlogController::class, 'updateCategory']);
+        Route::delete('blog-categories/{id}', [BlogController::class, 'destroyCategory']);
+
+        // Blog Tags
+        Route::get('blog-tags', [BlogController::class, 'listTags']);
+        Route::post('blog-tags', [BlogController::class, 'storeTag']);
+        Route::delete('blog-tags/{id}', [BlogController::class, 'destroyTag']);
+
+        // Blog Comments Moderation
+        Route::get('blog-comments', [BlogController::class, 'adminComments']);
+        Route::put('blog-comments/{id}/status', [BlogController::class, 'updateCommentStatus']);
+        Route::delete('blog-comments/{id}', [BlogController::class, 'destroyComment']);
 
         // Payment Management
         Route::get('payments', [AdminController::class, 'payments']);
