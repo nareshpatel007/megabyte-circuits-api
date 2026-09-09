@@ -88,8 +88,10 @@ Route::get('blogs', [BlogController::class, 'publicIndex']);
 Route::get('blogs/categories', [BlogController::class, 'listCategories']);
 Route::get('blogs/tags', [BlogController::class, 'listTags']);
 Route::get('blogs/{slug}', [BlogController::class, 'publicShow']);
+Route::post('blogs/{id}/view', [BlogController::class, 'incrementView']);
 Route::post('blogs/{id}/like', [BlogController::class, 'toggleLike']);
 Route::post('blogs/{id}/comments', [BlogController::class, 'submitComment']);
+
 
 // Frontend API Routes (Protected by API token)
 Route::middleware('verify.api.token')->group(function () {});

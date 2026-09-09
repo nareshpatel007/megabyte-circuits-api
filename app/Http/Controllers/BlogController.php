@@ -508,9 +508,6 @@ class BlogController extends Controller
             return response()->json(['status' => false, 'message' => 'Blog post not found.'], 404);
         }
 
-        // Increment views safely
-        $blog->increment('views');
-
         // Fetch author
         $adminAuthor = DB::table('admins')->where('id', $blog->author_id)->first();
         $authorName = $blog->author_name ?: ($adminAuthor ? $adminAuthor->name : 'MegaByte Circuits');
@@ -568,6 +565,26 @@ class BlogController extends Controller
             'related'     => $related,
         ]);
     }
+
+    // ─── PUBLIC: Increment View Count ────────────────────────────────────────
+    public function incrementView(Request $request, $id)
+    {
+        $blog = Blog::find($id);
+        if (!$blog && !is_numeric($id)) {
+            $blog = Blog::where('slug', $id)->first();
+        }
+
+        if ($blog) {
+            $blog->increment('views');
+            return response()->json([
+                'status' => true,
+                'views'  => (int) $blog->views,
+            ]);
+        }
+
+        return response()->json(['status' => false, 'message' => 'Blog post not found.'], 404);
+    }
+
 
     // ─── PUBLIC: Like / Unlike Blog ──────────────────────────────────────────
     public function toggleLike(Request $request, $id)
