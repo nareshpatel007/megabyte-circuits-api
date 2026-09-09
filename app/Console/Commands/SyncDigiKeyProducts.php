@@ -49,7 +49,11 @@ class SyncDigiKeyProducts extends Command
         // Fetch or create DB state
         $state = DigiKeySyncState::firstOrCreate(
             ['id' => 1],
-            ['last_cat_index' => 0, 'last_mfg_index' => 0, 'total_synced_products' => 0]
+            [
+                'last_cat_index' => 0,
+                'last_mfg_index' => 0,
+                'total_synced_products' => 0
+            ]
         );
 
         $startCatIndex = $this->option('start-cat-index') !== null
