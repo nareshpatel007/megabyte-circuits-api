@@ -62,6 +62,9 @@ return new class extends Migration
                 if (!Schema::hasColumn('blogs', 'robots_follow')) {
                     $table->boolean('robots_follow')->default(true)->after('robots_index');
                 }
+                if (!Schema::hasColumn('blogs', 'author_name')) {
+                    $table->string('author_name', 150)->nullable()->after('author_id');
+                }
                 if (!Schema::hasColumn('blogs', 'deleted_at')) {
                     $table->softDeletes();
                 }

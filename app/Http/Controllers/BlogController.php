@@ -43,7 +43,7 @@ class BlogController extends Controller
     // ─── ADMIN: List blogs (paginated) ──────────────────────────────────────
     public function index(Request $request)
     {
-        $perPage  = max(1, (int) $request->input('per_page', 15));
+        $perPage  = max(1, (int) $request->input('per_page', 10));
         $page     = max(1, (int) $request->input('page', 1));
         $search   = $request->input('search', '');
         $status   = $request->input('status', '');
@@ -66,7 +66,7 @@ class BlogController extends Controller
                 'blogs.published_at',
                 'blogs.created_at',
                 'blogs.featured_image',
-                'admins.name as author_name',
+                DB::raw('COALESCE(blogs.author_name, admins.name) as author_name'),
                 DB::raw('(SELECT COUNT(*) FROM blog_comments WHERE blog_comments.blog_id = blogs.id) as comments_count'),
                 DB::raw('(SELECT COUNT(*) FROM blog_likes WHERE blog_likes.blog_id = blogs.id) as likes_count')
             );
@@ -129,7 +129,7 @@ class BlogController extends Controller
         $slug    = $this->uniqueSlug($rawSlug);
 
         $status      = $request->input('status', 'draft');
-        $publishedAt = $status === 'published' ? now() : ($request->input('published_at') ?: null);
+        $publishedAt = $request->input('published_at') ? $request->input('published_at') : ($status === 'published' ? now() : null);
 
         $blog = Blog::create([
             'title'               => $title,
@@ -142,6 +142,7 @@ class BlogController extends Controller
             'category_id'         => $request->input('category_id'),
             'tags'                => is_array($request->input('tags')) ? implode(',', $request->input('tags')) : $request->input('tags'),
             'author_id'           => $request->input('author_id'),
+            'author_name'         => $request->input('author_name'),
             'reading_time'        => $request->input('reading_time', '5 min read'),
             'is_featured'         => (bool) $request->input('is_featured', false),
             'allow_comments'      => (bool) $request->input('allow_comments', true),
@@ -194,10 +195,10 @@ class BlogController extends Controller
 
         $status       = $request->input('status', $blog->status);
         $publishedAt  = $blog->published_at;
-        if ($status === 'published' && $blog->status !== 'published') {
-            $publishedAt = now();
-        } elseif ($request->has('published_at')) {
+        if ($request->has('published_at') && $request->input('published_at')) {
             $publishedAt = $request->input('published_at');
+        } elseif ($status === 'published' && !$blog->published_at) {
+            $publishedAt = now();
         }
 
         $blog->update([
@@ -210,6 +211,7 @@ class BlogController extends Controller
             'category'            => $request->input('category', $blog->category),
             'category_id'         => $request->input('category_id', $blog->category_id),
             'tags'                => is_array($request->input('tags')) ? implode(',', $request->input('tags')) : $request->input('tags', $blog->tags),
+            'author_name'         => $request->input('author_name', $blog->author_name),
             'reading_time'        => $request->input('reading_time', $blog->reading_time),
             'is_featured'         => $request->has('is_featured') ? (bool) $request->input('is_featured') : $blog->is_featured,
             'allow_comments'      => $request->has('allow_comments') ? (bool) $request->input('allow_comments') : $blog->allow_comments,
@@ -446,7 +448,7 @@ class BlogController extends Controller
                 'blogs.published_at',
                 'blogs.created_at',
                 'blogs.featured_image',
-                'admins.name as author_name',
+                DB::raw('COALESCE(blogs.author_name, admins.name) as author_name'),
                 DB::raw('(SELECT COUNT(*) FROM blog_comments WHERE blog_comments.blog_id = blogs.id AND blog_comments.status = "approved") as comments_count'),
                 DB::raw('(SELECT COUNT(*) FROM blog_likes WHERE blog_likes.blog_id = blogs.id) as likes_count')
             );
@@ -510,7 +512,8 @@ class BlogController extends Controller
         $blog->increment('views');
 
         // Fetch author
-        $author = DB::table('admins')->where('id', $blog->author_id)->first();
+        $adminAuthor = DB::table('admins')->where('id', $blog->author_id)->first();
+        $authorName = $blog->author_name ?: ($adminAuthor ? $adminAuthor->name : 'MegaByte Circuits');
 
         // Fetch approved comments
         $comments = BlogComment::where('blog_id', $blog->id)
@@ -556,9 +559,8 @@ class BlogController extends Controller
             'status'      => true,
             'blog'        => $blog,
             'author'      => [
-                'name'   => $author->name ?? 'MegaByte Circuits Team',
-                'role'   => $author->role ?? 'Engineering Team',
-                'avatar' => $author->avatar ?? 'MC',
+                'name'   => $authorName,
+                'avatar' => strtoupper(substr($authorName, 0, 2)),
             ],
             'comments'    => $comments,
             'likes_count' => $likesCount,

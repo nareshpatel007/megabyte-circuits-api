@@ -23,6 +23,7 @@ class Blog extends Model
         'category_id',
         'tags',
         'author_id',
+        'author_name',
         'views',
         'reading_time',
         'is_featured',
