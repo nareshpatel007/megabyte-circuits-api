@@ -12,28 +12,7 @@ class InventoryController extends Controller
     private function seedDefaultsIfNeeded()
     {
         if (InventoryItem::count() === 0) {
-            $defaults = [
-                ['sku' => 'RES-10K-0603', 'name' => '10kΩ 0603 Resistor', 'unit_price' => 0.15, 'available_quantity' => 50000, 'low_stock_threshold' => 10000, 'status' => 'In Stock'],
-                ['sku' => 'CAP-100N-0402', 'name' => '100nF 0402 Capacitor', 'unit_price' => 0.20, 'available_quantity' => 8500, 'low_stock_threshold' => 10000, 'status' => 'Low Stock'],
-                ['sku' => 'IC-ESP32-WR', 'name' => 'ESP32-WROOM-32D', 'unit_price' => 285.00, 'available_quantity' => 450, 'low_stock_threshold' => 500, 'status' => 'Low Stock'],
-                ['sku' => 'IC-STM32-F1', 'name' => 'STM32F103C8T6', 'unit_price' => 145.50, 'available_quantity' => 1200, 'low_stock_threshold' => 300, 'status' => 'In Stock'],
-                ['sku' => 'IC-LM317-SOT', 'name' => 'LM317 Voltage Regulator', 'unit_price' => 12.00, 'available_quantity' => 8500, 'low_stock_threshold' => 2000, 'status' => 'In Stock'],
-                ['sku' => 'CON-2X20-F', 'name' => '2x20 Pin Header Female', 'unit_price' => 18.50, 'available_quantity' => 120, 'low_stock_threshold' => 500, 'status' => 'Low Stock'],
-                ['sku' => 'CON-USBC-SMD', 'name' => 'USB Type-C Connector', 'unit_price' => 22.00, 'available_quantity' => 3400, 'low_stock_threshold' => 1000, 'status' => 'In Stock'],
-                ['sku' => 'CON-MUSB-SMD', 'name' => 'Micro USB Connector', 'unit_price' => 15.00, 'available_quantity' => 0, 'low_stock_threshold' => 500, 'status' => 'Out of Stock'],
-                ['sku' => 'IC-ATM328P', 'name' => 'ATmega328P-AU', 'unit_price' => 185.00, 'available_quantity' => 800, 'low_stock_threshold' => 200, 'status' => 'In Stock'],
-                ['sku' => 'IC-NE555-DIP', 'name' => 'NE555 Linear Regulator', 'unit_price' => 8.50, 'available_quantity' => 15000, 'low_stock_threshold' => 5000, 'status' => 'In Stock'],
-                ['sku' => 'CAP-1U-0805', 'name' => '1uF 0805 Capacitor', 'unit_price' => 0.25, 'available_quantity' => 22000, 'low_stock_threshold' => 5000, 'status' => 'In Stock'],
-                ['sku' => 'RES-4K7-0805', 'name' => '4.7kΩ 0805 Resistor', 'unit_price' => 0.18, 'available_quantity' => 18000, 'low_stock_threshold' => 5000, 'status' => 'In Stock'],
-                ['sku' => 'IC-BSS138-SOT', 'name' => 'BSS138 Timer IC', 'unit_price' => 5.00, 'available_quantity' => 4200, 'low_stock_threshold' => 1000, 'status' => 'In Stock'],
-                ['sku' => 'LED-WS2812B', 'name' => 'WS2812B RGB LED', 'unit_price' => 8.00, 'available_quantity' => 6500, 'low_stock_threshold' => 2000, 'status' => 'In Stock'],
-                ['sku' => 'IC-CH340G', 'name' => 'CH340G USB to Serial', 'unit_price' => 45.00, 'available_quantity' => 150, 'low_stock_threshold' => 500, 'status' => 'Low Stock'],
-                ['sku' => 'SW-TACT-6X6', 'name' => 'Tactile Push Button 6x6', 'unit_price' => 2.50, 'available_quantity' => 12000, 'low_stock_threshold' => 3000, 'status' => 'In Stock'],
-                ['sku' => 'SW-SLIDE-SPDT', 'name' => 'Slide Switch SPDT', 'unit_price' => 4.00, 'available_quantity' => 4500, 'low_stock_threshold' => 1000, 'status' => 'In Stock'],
-                ['sku' => 'DIO-1N4148-SMD', 'name' => '1N4148 Diode', 'unit_price' => 0.80, 'available_quantity' => 28000, 'low_stock_threshold' => 8000, 'status' => 'In Stock'],
-                ['sku' => 'FET-SS34-SMA', 'name' => 'SS34 MOSFET', 'unit_price' => 3.50, 'available_quantity' => 9000, 'low_stock_threshold' => 2000, 'status' => 'In Stock'],
-                ['sku' => 'HLD-CR2032-SMD', 'name' => 'CR2032 Battery Holder', 'unit_price' => 14.00, 'available_quantity' => 80, 'low_stock_threshold' => 300, 'status' => 'Low Stock'],
-            ];
+            $defaults = [];
 
             foreach ($defaults as $item) {
                 InventoryItem::create($item);
@@ -56,7 +35,7 @@ class InventoryController extends Controller
             $s = strtolower($request->search);
             $query->where(function ($q) use ($s) {
                 $q->whereRaw('LOWER(name) LIKE ?', ["%{$s}%"])
-                  ->orWhereRaw('LOWER(sku) LIKE ?', ["%{$s}%"]);
+                    ->orWhereRaw('LOWER(sku) LIKE ?', ["%{$s}%"]);
             });
         }
 
