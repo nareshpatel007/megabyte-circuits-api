@@ -67,6 +67,7 @@ Route::middleware('verify.admin.token')->group(function () {
         // Blog Tags
         Route::get('blog-tags', [BlogController::class, 'listTags']);
         Route::post('blog-tags', [BlogController::class, 'storeTag']);
+        Route::put('blog-tags/{id}', [BlogController::class, 'updateTag']);
         Route::delete('blog-tags/{id}', [BlogController::class, 'destroyTag']);
 
         // Blog Comments Moderation

@@ -359,6 +359,23 @@ class BlogController extends Controller
         return response()->json(['status' => true, 'message' => 'Tag created.', 'tag' => $tag]);
     }
 
+    public function updateTag(Request $request, $id)
+    {
+        $tag = BlogTag::find($id);
+        if (!$tag) {
+            return response()->json(['status' => false, 'message' => 'Tag not found.'], 44);
+        }
+        $name = $request->input('name');
+        if (!$name) {
+            return response()->json(['status' => false, 'message' => 'Tag name is required.'], 422);
+        }
+        $tag->name = $name;
+        $tag->slug = Str::slug($request->input('slug') ?: $name);
+        $tag->save();
+
+        return response()->json(['status' => true, 'message' => 'Tag updated.', 'tag' => $tag]);
+    }
+
     public function destroyTag($id)
     {
         $tag = BlogTag::find($id);
