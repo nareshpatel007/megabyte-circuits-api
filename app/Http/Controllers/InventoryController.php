@@ -50,8 +50,6 @@ class InventoryController extends Controller
 
     public function index(Request $request)
     {
-        $this->seedDefaultsIfNeeded();
-
         $query = InventoryItem::query();
 
         if ($request->has('search') && !empty($request->search)) {
