@@ -41,8 +41,12 @@ class VerifyAdminToken
             $secret = env('JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
             $decoded = \Firebase\JWT\JWT::decode($token, new \Firebase\JWT\Key($secret, 'HS256'));
             if ($decoded) {
-                if (isset($decoded->sub)) {
-                    $request->attributes->set('admin_id', $decoded->sub);
+                $adminId = $decoded->sub ?? ($decoded->admin_id ?? null);
+                if ($adminId) {
+                    $request->attributes->set('admin_id', $adminId);
+                }
+                if (isset($decoded->name)) {
+                    $request->attributes->set('admin_name', $decoded->name);
                 }
                 return $next($request);
             }

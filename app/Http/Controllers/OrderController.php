@@ -423,12 +423,13 @@ class OrderController extends Controller
                 $statusName = $order->status ?? 'Pending';
                 
                 // Fetch admin user details for description and log record
+                $effectiveAdminId = $request->input('admin_id') ?: ($request->attributes->get('admin_id') ?: null);
                 $adminUser = null;
-                $effectiveAdminId = $adminId ?: 1;
-                if (\Illuminate\Support\Facades\Schema::hasTable('admins')) {
+                if ($effectiveAdminId && \Illuminate\Support\Facades\Schema::hasTable('admins')) {
                     $adminUser = \Illuminate\Support\Facades\DB::table('admins')->where('id', $effectiveAdminId)->first();
                 }
-                $adminName = $adminUser ? $adminUser->name : "Admin #{$effectiveAdminId}";
+                
+                $adminName = $adminUser ? $adminUser->name : ($request->attributes->get('admin_name') ?: ($request->input('admin_name') ?: ($effectiveAdminId ? "Admin #{$effectiveAdminId}" : "Admin")));
 
                 if ($qtyUpdated && $request->has('status')) {
                     $actionName = "Partial Delivery / Status Updated";
