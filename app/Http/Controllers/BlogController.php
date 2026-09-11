@@ -294,26 +294,67 @@ class BlogController extends Controller
     // ─── ADMIN: Upload Image ─────────────────────────────────────────────────
     public function uploadImage(Request $request)
     {
-        if (!$request->hasFile('image')) {
+        $file = $request->file('image') ?? $request->file('file');
+        if (!$file) {
             return response()->json(['status' => false, 'message' => 'No image file provided.'], 422);
         }
 
-        $file    = $request->file('image');
+        if ($file->getSize() > 5 * 1024 * 1024) {
+            return response()->json(['status' => false, 'message' => 'Image size is too large. Maximum allowed size is 5MB.'], 422);
+        }
+
         $allowed = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg'];
         $ext     = strtolower($file->getClientOriginalExtension());
 
         if (!in_array($ext, $allowed)) {
-            return response()->json(['status' => false, 'message' => 'Invalid image format.'], 422);
+            return response()->json(['status' => false, 'message' => 'Unsupported image format. Allowed formats: JPG, PNG, WEBP, GIF, SVG.'], 422);
         }
 
-        $filename = time() . '_' . Str::random(8) . '.' . $ext;
-        $path     = $file->storeAs('blogs', $filename, 'public');
+        $privateKey  = config('services.imagekit.private_key') ?: env('IMAGEKIT_PRIVATE_KEY', '');
+        $storagePath = env('IMAGEKIT_STORAGE_PATH', '/Megabyte');
 
-        return response()->json([
-            'status' => true,
-            'url'    => '/storage/' . $path,
-            'path'   => '/storage/' . $path,
-        ]);
+        if (!$privateKey) {
+            $filename = time() . '_' . Str::random(8) . '.' . $ext;
+            $path     = $file->storeAs('blogs', $filename, 'public');
+            $fullUrl  = asset('storage/' . $path);
+            return response()->json([
+                'status'   => true,
+                'url'      => $fullUrl,
+                'location' => $fullUrl,
+                'path'     => '/storage/' . $path,
+                'type'     => 'local',
+            ]);
+        }
+
+        try {
+            $cleanName = time() . '_' . Str::slug(pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME)) . '.' . $ext;
+            $targetFolder = rtrim($storagePath, '/') . '/blogs';
+
+            $response = \Illuminate\Support\Facades\Http::withBasicAuth($privateKey, '')
+                ->attach('file', file_get_contents($file->getRealPath()), $file->getClientOriginalName())
+                ->post('https://upload.imagekit.io/api/v1/files/upload', [
+                    'fileName'          => $cleanName,
+                    'folder'            => $targetFolder,
+                    'useUniqueFileName' => 'true',
+                ]);
+
+            if ($response->successful()) {
+                $data = $response->json();
+                return response()->json([
+                    'status'   => true,
+                    'url'      => $data['url'],
+                    'fileId'   => $data['fileId'] ?? null,
+                    'name'     => $data['name'] ?? null,
+                    'type'     => 'imagekit',
+                    'location' => $data['url'],
+                ]);
+            }
+
+            $errMsg = $response->json()['message'] ?? 'ImageKit upload failed.';
+            return response()->json(['status' => false, 'message' => $errMsg], 500);
+        } catch (\Exception $e) {
+            return response()->json(['status' => false, 'message' => 'Server error uploading image: ' . $e->getMessage()], 500);
+        }
     }
 
     // ─── CATEGORY MANAGEMENT ─────────────────────────────────────────────────
