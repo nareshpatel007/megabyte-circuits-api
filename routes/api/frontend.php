@@ -84,6 +84,8 @@ Route::prefix('dashboard/')->group(function () {
 // Public Blog Routes
 use App\Http\Controllers\BlogController;
 
+Route::get('blogs/first-10', [BlogController::class, 'firstTenBlogs']);
+Route::get('open-blogs', [BlogController::class, 'firstTenBlogs']);
 Route::get('blogs', [BlogController::class, 'publicIndex']);
 Route::get('blogs/categories', [BlogController::class, 'listCategories']);
 Route::get('blogs/tags', [BlogController::class, 'listTags']);

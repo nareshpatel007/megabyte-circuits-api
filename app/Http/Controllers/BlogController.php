@@ -512,6 +512,40 @@ class BlogController extends Controller
         return response()->json(['status' => true, 'message' => 'Comment deleted.']);
     }
 
+    // ─── PUBLIC: First 10 Blogs (Open Endpoint) ─────────────────────────────
+    public function firstTenBlogs()
+    {
+        $blogs = DB::table('blogs')
+            ->leftJoin('admins', 'blogs.author_id', '=', 'admins.id')
+            ->leftJoin('blog_categories', 'blogs.category_id', '=', 'blog_categories.id')
+            ->whereNull('blogs.deleted_at')
+            ->select(
+                'blogs.id',
+                'blogs.title',
+                'blogs.slug',
+                'blogs.excerpt',
+                'blogs.status',
+                'blogs.category',
+                'blogs.category_id',
+                'blog_categories.name as category_name',
+                'blogs.featured_image',
+                'blogs.views',
+                'blogs.reading_time',
+                'blogs.published_at',
+                'blogs.created_at',
+                DB::raw('COALESCE(blogs.author_name, admins.name) as author_name')
+            )
+            ->orderBy('blogs.id', 'asc')
+            ->take(10)
+            ->get();
+
+        return response()->json([
+            'status' => true,
+            'total'  => $blogs->count(),
+            'blogs'  => $blogs,
+        ]);
+    }
+
     // ─── PUBLIC: List Published Blogs ────────────────────────────────────────
     public function publicIndex(Request $request)
     {
