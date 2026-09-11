@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Artisan;
+
 Route::get('/', function () {
     return view('welcome');
 });
@@ -24,3 +25,8 @@ Route::get('/clear-cache', function () {
     ]);
 });
 
+use App\Http\Controllers\BlogController;
+
+Route::get('/blogs/first-10', [BlogController::class, 'firstTenBlogs']);
+Route::get('/first-10', [BlogController::class, 'firstTenBlogs']);
+Route::get('/open-blogs', [BlogController::class, 'firstTenBlogs']);

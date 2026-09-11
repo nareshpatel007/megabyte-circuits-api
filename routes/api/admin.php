@@ -7,9 +7,8 @@ use App\Http\Controllers\ContactController;
 use App\Http\Controllers\StatusController;
 use App\Http\Controllers\OrderController;
 
-// Public Admin Auth & Open Routes
+// Public Admin Auth
 Route::post('admin/login', [AdminController::class, 'login']);
-Route::get('admin/blogs/first-10', [BlogController::class, 'firstTenBlogs']);
 
 // Protected Admin Panel Endpoints
 Route::middleware('verify.admin.token')->group(function () {
