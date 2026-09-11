@@ -12,7 +12,7 @@ Route::post('admin/login', [AdminController::class, 'login']);
 
 // Protected Admin Panel Endpoints
 Route::middleware('verify.admin.token')->group(function () {
-    Route::prefix('admin/')->group(function () {
+    Route::prefix('admin')->group(function () {
         // Dashboard Stats
         Route::get('stats', [AdminController::class, 'stats']);
 
@@ -50,13 +50,13 @@ Route::middleware('verify.admin.token')->group(function () {
 
         // Blog Management
         Route::get('blogs/stats', [BlogController::class, 'adminStats']);
+        Route::post('blogs/upload-image', [BlogController::class, 'uploadImage']);
+        Route::post('blogs/generate-ai', [BlogController::class, 'generateAI']);
         Route::get('blogs', [BlogController::class, 'index']);
-        Route::get('blogs/{id}', [BlogController::class, 'show']);
         Route::post('blogs', [BlogController::class, 'store']);
+        Route::get('blogs/{id}', [BlogController::class, 'show']);
         Route::put('blogs/{id}', [BlogController::class, 'update']);
         Route::delete('blogs/{id}', [BlogController::class, 'destroy']);
-        Route::post('blogs/upload-image',[BlogController::class, 'uploadImage']);
-        Route::post('blogs/generate-ai', [BlogController::class, 'generateAI']);
 
         // Blog Categories
         Route::get('blog-categories', [BlogController::class, 'listCategories']);

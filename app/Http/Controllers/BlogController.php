@@ -16,14 +16,14 @@ class BlogController extends Controller
     // ─── ADMIN: Dashboard Stats ──────────────────────────────────────────────
     public function adminStats()
     {
-        $total     = Blog::count();
-        $published = Blog::where('status', 'published')->count();
-        $draft     = Blog::where('status', 'draft')->count();
-        $scheduled = Blog::where('status', 'scheduled')->count();
-        $comments  = BlogComment::count();
-        $pending   = BlogComment::where('status', 'pending')->count();
-        $likes     = BlogLike::count();
-        $views     = Blog::sum('views');
+        $total     = DB::table('blogs')->whereNull('deleted_at')->count();
+        $published = DB::table('blogs')->whereNull('deleted_at')->where('status', 'published')->count();
+        $draft     = DB::table('blogs')->whereNull('deleted_at')->where('status', 'draft')->count();
+        $scheduled = DB::table('blogs')->whereNull('deleted_at')->where('status', 'scheduled')->count();
+        $comments  = DB::table('blog_comments')->count();
+        $pending   = DB::table('blog_comments')->where('status', 'pending')->count();
+        $likes     = DB::table('blog_likes')->count();
+        $views     = DB::table('blogs')->whereNull('deleted_at')->sum('views');
 
         return response()->json([
             'status' => true,
@@ -108,11 +108,26 @@ class BlogController extends Controller
     // ─── ADMIN: Single Blog ──────────────────────────────────────────────────
     public function show($id)
     {
-        $blog = Blog::with(['categoryRef', 'tagsRef'])->find($id);
+        $blog = DB::table('blogs')
+            ->leftJoin('blog_categories', 'blogs.category_id', '=', 'blog_categories.id')
+            ->where('blogs.id', $id)
+            ->whereNull('blogs.deleted_at')
+            ->select('blogs.*', 'blog_categories.name as category_name')
+            ->first();
 
         if (!$blog) {
             return response()->json(['status' => false, 'message' => 'Blog not found.'], 404);
         }
+
+        // Attach tags using subquery/join
+        $tags = DB::table('blog_post_tag')
+            ->join('blog_tags', 'blog_post_tag.tag_id', '=', 'blog_tags.id')
+            ->where('blog_post_tag.blog_id', $id)
+            ->select('blog_tags.id', 'blog_tags.name', 'blog_tags.slug')
+            ->get();
+
+        $blog->tags_list = $tags;
+        $blog->tag_ids = $tags->pluck('id')->toArray();
 
         return response()->json(['status' => true, 'blog' => $blog]);
     }
@@ -131,7 +146,7 @@ class BlogController extends Controller
         $status      = $request->input('status', 'draft');
         $publishedAt = $request->input('published_at') ? $request->input('published_at') : ($status === 'published' ? now() : null);
 
-        $blog = Blog::create([
+        $blogId = DB::table('blogs')->insertGetId([
             'title'               => $title,
             'slug'                => $slug,
             'excerpt'             => $request->input('excerpt'),
@@ -147,7 +162,6 @@ class BlogController extends Controller
             'is_featured'         => (bool) $request->input('is_featured', false),
             'allow_comments'      => (bool) $request->input('allow_comments', true),
             'published_at'        => $publishedAt,
-            // SEO
             'meta_title'          => $request->input('meta_title'),
             'meta_description'    => $request->input('meta_description'),
             'meta_keywords'       => $request->input('meta_keywords'),
@@ -161,31 +175,39 @@ class BlogController extends Controller
             'robots_index'        => (bool) $request->input('robots_index', true),
             'robots_follow'       => (bool) $request->input('robots_follow', true),
             'schema_markup'       => $request->input('schema_markup'),
+            'created_at'          => now(),
+            'updated_at'          => now(),
         ]);
 
         if ($request->has('tag_ids') && is_array($request->input('tag_ids'))) {
-            $blog->tagsRef()->sync($request->input('tag_ids'));
+            $tagInserts = [];
+            foreach ($request->input('tag_ids') as $tId) {
+                $tagInserts[] = ['blog_id' => $blogId, 'tag_id' => $tId];
+            }
+            if (!empty($tagInserts)) {
+                DB::table('blog_post_tag')->insert($tagInserts);
+            }
         }
 
         return response()->json([
             'status'  => true,
             'message' => 'Blog created successfully.',
-            'blog_id' => $blog->id,
-            'slug'    => $blog->slug,
+            'blog_id' => $blogId,
+            'slug'    => $slug,
         ]);
     }
 
     // ─── ADMIN: Update Blog ──────────────────────────────────────────────────
     public function update(Request $request, $id)
     {
-        $blog = Blog::find($id);
+        $blog = DB::table('blogs')->where('id', $id)->whereNull('deleted_at')->first();
         if (!$blog) {
             return response()->json(['status' => false, 'message' => 'Blog not found.'], 404);
         }
 
-        $newTitle    = $request->input('title', $blog->title);
-        $customSlug  = $request->input('slug');
-        $slug        = $blog->slug;
+        $newTitle   = $request->input('title', $blog->title);
+        $customSlug = $request->input('slug');
+        $slug       = $blog->slug;
 
         if ($customSlug && $customSlug !== $blog->slug) {
             $slug = $this->uniqueSlug(Str::slug($customSlug), $id);
@@ -193,15 +215,15 @@ class BlogController extends Controller
             $slug = $this->uniqueSlug(Str::slug($newTitle), $id);
         }
 
-        $status       = $request->input('status', $blog->status);
-        $publishedAt  = $blog->published_at;
+        $status      = $request->input('status', $blog->status);
+        $publishedAt = $blog->published_at;
         if ($request->has('published_at') && $request->input('published_at')) {
             $publishedAt = $request->input('published_at');
         } elseif ($status === 'published' && !$blog->published_at) {
             $publishedAt = now();
         }
 
-        $blog->update([
+        DB::table('blogs')->where('id', $id)->update([
             'title'               => $newTitle,
             'slug'                => $slug,
             'excerpt'             => $request->input('excerpt', $blog->excerpt),
@@ -216,7 +238,6 @@ class BlogController extends Controller
             'is_featured'         => $request->has('is_featured') ? (bool) $request->input('is_featured') : $blog->is_featured,
             'allow_comments'      => $request->has('allow_comments') ? (bool) $request->input('allow_comments') : $blog->allow_comments,
             'published_at'        => $publishedAt,
-            // SEO
             'meta_title'          => $request->has('meta_title') ? $request->input('meta_title') : $blog->meta_title,
             'meta_description'    => $request->has('meta_description') ? $request->input('meta_description') : $blog->meta_description,
             'meta_keywords'       => $request->has('meta_keywords') ? $request->input('meta_keywords') : $blog->meta_keywords,
@@ -230,28 +251,42 @@ class BlogController extends Controller
             'robots_index'        => $request->has('robots_index') ? (bool) $request->input('robots_index') : $blog->robots_index,
             'robots_follow'       => $request->has('robots_follow') ? (bool) $request->input('robots_follow') : $blog->robots_follow,
             'schema_markup'       => $request->has('schema_markup') ? $request->input('schema_markup') : $blog->schema_markup,
+            'updated_at'          => now(),
         ]);
 
         if ($request->has('tag_ids') && is_array($request->input('tag_ids'))) {
-            $blog->tagsRef()->sync($request->input('tag_ids'));
+            DB::table('blog_post_tag')->where('blog_id', $id)->delete();
+            $tagInserts = [];
+            foreach ($request->input('tag_ids') as $tId) {
+                $tagInserts[] = ['blog_id' => $id, 'tag_id' => $tId];
+            }
+            if (!empty($tagInserts)) {
+                DB::table('blog_post_tag')->insert($tagInserts);
+            }
         }
 
         return response()->json([
             'status'  => true,
             'message' => 'Blog updated successfully.',
-            'slug'    => $blog->slug,
+            'slug'    => $slug,
         ]);
     }
 
     // ─── ADMIN: Delete Blog ──────────────────────────────────────────────────
     public function destroy($id)
     {
-        $blog = Blog::find($id);
+        $blog = DB::table('blogs')->where('id', $id)->first();
         if (!$blog) {
             return response()->json(['status' => false, 'message' => 'Blog not found.'], 404);
         }
 
-        $blog->delete();
+        // Clean up linked data since DB foreign keys were removed
+        DB::table('blog_post_tag')->where('blog_id', $id)->delete();
+        DB::table('blog_comments')->where('blog_id', $id)->delete();
+        DB::table('blog_likes')->where('blog_id', $id)->delete();
+
+        // Soft delete blog post
+        DB::table('blogs')->where('id', $id)->update(['deleted_at' => now()]);
 
         return response()->json(['status' => true, 'message' => 'Blog post deleted successfully.']);
     }
@@ -284,7 +319,14 @@ class BlogController extends Controller
     // ─── CATEGORY MANAGEMENT ─────────────────────────────────────────────────
     public function listCategories()
     {
-        $categories = BlogCategory::withCount('blogs')->orderBy('name', 'asc')->get();
+        $categories = DB::table('blog_categories')
+            ->select(
+                'blog_categories.*',
+                DB::raw('(SELECT COUNT(*) FROM blogs WHERE (blogs.category_id = blog_categories.id OR blogs.category = blog_categories.name) AND blogs.deleted_at IS NULL AND blogs.status = "published") as blogs_count')
+            )
+            ->orderBy('blog_categories.name', 'asc')
+            ->get();
+
         return response()->json(['status' => true, 'categories' => $categories]);
     }
 
@@ -297,50 +339,63 @@ class BlogController extends Controller
 
         $slug = Str::slug($request->input('slug') ?: $name);
 
-        $category = BlogCategory::create([
+        $id = DB::table('blog_categories')->insertGetId([
             'name'            => $name,
             'slug'            => $slug,
             'description'     => $request->input('description'),
             'image'           => $request->input('image'),
             'seo_title'       => $request->input('seo_title'),
             'seo_description' => $request->input('seo_description'),
+            'created_at'      => now(),
+            'updated_at'      => now(),
         ]);
+
+        $category = DB::table('blog_categories')->where('id', $id)->first();
 
         return response()->json(['status' => true, 'message' => 'Category created.', 'category' => $category]);
     }
 
     public function updateCategory(Request $request, $id)
     {
-        $category = BlogCategory::find($id);
+        $category = DB::table('blog_categories')->where('id', $id)->first();
         if (!$category) {
             return response()->json(['status' => false, 'message' => 'Category not found.'], 404);
         }
 
-        $category->update([
+        DB::table('blog_categories')->where('id', $id)->update([
             'name'            => $request->input('name', $category->name),
             'slug'            => Str::slug($request->input('slug', $category->slug)),
             'description'     => $request->input('description', $category->description),
             'image'           => $request->input('image', $category->image),
             'seo_title'       => $request->input('seo_title', $category->seo_title),
             'seo_description' => $request->input('seo_description', $category->seo_description),
+            'updated_at'      => now(),
         ]);
 
-        return response()->json(['status' => true, 'message' => 'Category updated.', 'category' => $category]);
+        $updatedCategory = DB::table('blog_categories')->where('id', $id)->first();
+
+        return response()->json(['status' => true, 'message' => 'Category updated.', 'category' => $updatedCategory]);
     }
 
     public function destroyCategory($id)
     {
-        $category = BlogCategory::find($id);
-        if ($category) {
-            $category->delete();
-        }
+        DB::table('blogs')->where('category_id', $id)->update(['category_id' => null]);
+        DB::table('blog_categories')->where('id', $id)->delete();
+
         return response()->json(['status' => true, 'message' => 'Category deleted.']);
     }
 
     // ─── TAG MANAGEMENT ──────────────────────────────────────────────────────
     public function listTags()
     {
-        $tags = BlogTag::withCount('blogs')->orderBy('name', 'asc')->get();
+        $tags = DB::table('blog_tags')
+            ->select(
+                'blog_tags.*',
+                DB::raw('(SELECT COUNT(*) FROM blog_post_tag JOIN blogs ON blog_post_tag.blog_id = blogs.id WHERE blog_post_tag.tag_id = blog_tags.id AND blogs.deleted_at IS NULL AND blogs.status = "published") as blogs_count')
+            )
+            ->orderBy('blog_tags.name', 'asc')
+            ->get();
+
         return response()->json(['status' => true, 'tags' => $tags]);
     }
 
@@ -351,37 +406,45 @@ class BlogController extends Controller
             return response()->json(['status' => false, 'message' => 'Tag name is required.'], 422);
         }
 
-        $tag = BlogTag::create([
-            'name' => $name,
-            'slug' => Str::slug($request->input('slug') ?: $name),
+        $id = DB::table('blog_tags')->insertGetId([
+            'name'       => $name,
+            'slug'       => Str::slug($request->input('slug') ?: $name),
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
+
+        $tag = DB::table('blog_tags')->where('id', $id)->first();
 
         return response()->json(['status' => true, 'message' => 'Tag created.', 'tag' => $tag]);
     }
 
     public function updateTag(Request $request, $id)
     {
-        $tag = BlogTag::find($id);
+        $tag = DB::table('blog_tags')->where('id', $id)->first();
         if (!$tag) {
-            return response()->json(['status' => false, 'message' => 'Tag not found.'], 44);
+            return response()->json(['status' => false, 'message' => 'Tag not found.'], 404);
         }
         $name = $request->input('name');
         if (!$name) {
             return response()->json(['status' => false, 'message' => 'Tag name is required.'], 422);
         }
-        $tag->name = $name;
-        $tag->slug = Str::slug($request->input('slug') ?: $name);
-        $tag->save();
 
-        return response()->json(['status' => true, 'message' => 'Tag updated.', 'tag' => $tag]);
+        DB::table('blog_tags')->where('id', $id)->update([
+            'name'       => $name,
+            'slug'       => Str::slug($request->input('slug') ?: $name),
+            'updated_at' => now(),
+        ]);
+
+        $updatedTag = DB::table('blog_tags')->where('id', $id)->first();
+
+        return response()->json(['status' => true, 'message' => 'Tag updated.', 'tag' => $updatedTag]);
     }
 
     public function destroyTag($id)
     {
-        $tag = BlogTag::find($id);
-        if ($tag) {
-            $tag->delete();
-        }
+        DB::table('blog_post_tag')->where('tag_id', $id)->delete();
+        DB::table('blog_tags')->where('id', $id)->delete();
+
         return response()->json(['status' => true, 'message' => 'Tag deleted.']);
     }
 
@@ -391,24 +454,41 @@ class BlogController extends Controller
         $status  = $request->input('status');
         $blogId  = $request->input('blog_id');
         $perPage = max(1, (int) $request->input('per_page', 20));
+        $page    = max(1, (int) $request->input('page', 1));
 
-        $query = BlogComment::with('blog:id,title,slug');
+        $query = DB::table('blog_comments')
+            ->leftJoin('blogs', 'blog_comments.blog_id', '=', 'blogs.id')
+            ->select(
+                'blog_comments.*',
+                'blogs.title as blog_title',
+                'blogs.slug as blog_slug'
+            );
 
         if ($status) {
-            $query->where('status', $status);
+            $query->where('blog_comments.status', $status);
         }
         if ($blogId) {
-            $query->where('blog_id', $blogId);
+            $query->where('blog_comments.blog_id', $blogId);
         }
 
-        $comments = $query->orderBy('created_at', 'desc')->paginate($perPage);
+        $total    = $query->count();
+        $offset   = ($page - 1) * $perPage;
+        $comments = $query->orderBy('blog_comments.created_at', 'desc')->skip($offset)->take($perPage)->get();
 
-        return response()->json(['status' => true, 'comments' => $comments]);
+        return response()->json([
+            'status'   => true,
+            'comments' => [
+                'data'         => $comments,
+                'current_page' => $page,
+                'last_page'    => (int) ceil($total / $perPage),
+                'total'        => $total,
+            ],
+        ]);
     }
 
     public function updateCommentStatus(Request $request, $id)
     {
-        $comment = BlogComment::find($id);
+        $comment = DB::table('blog_comments')->where('id', $id)->first();
         if (!$comment) {
             return response()->json(['status' => false, 'message' => 'Comment not found.'], 404);
         }
@@ -418,18 +498,17 @@ class BlogController extends Controller
             return response()->json(['status' => false, 'message' => 'Invalid status.'], 422);
         }
 
-        $comment->status = $status;
-        $comment->save();
+        DB::table('blog_comments')->where('id', $id)->update([
+            'status'     => $status,
+            'updated_at' => now(),
+        ]);
 
         return response()->json(['status' => true, 'message' => "Comment marked as {$status}."]);
     }
 
     public function destroyComment($id)
     {
-        $comment = BlogComment::find($id);
-        if ($comment) {
-            $comment->delete();
-        }
+        DB::table('blog_comments')->where('id', $id)->delete();
         return response()->json(['status' => true, 'message' => 'Comment deleted.']);
     }
 
@@ -509,15 +588,21 @@ class BlogController extends Controller
     // ─── PUBLIC: Show Single Blog ────────────────────────────────────────────
     public function publicShow(Request $request, $slug)
     {
-        $blog = Blog::with(['categoryRef', 'tagsRef'])
-            ->where('slug', $slug)
-            ->where('status', 'published')
+        $blog = DB::table('blogs')
+            ->leftJoin('blog_categories', 'blogs.category_id', '=', 'blog_categories.id')
+            ->where('blogs.slug', $slug)
+            ->where('blogs.status', 'published')
+            ->whereNull('blogs.deleted_at')
+            ->select('blogs.*', 'blog_categories.name as category_name', 'blog_categories.slug as category_slug')
             ->first();
 
         if (!$blog && is_numeric($slug)) {
-            $blog = Blog::with(['categoryRef', 'tagsRef'])
-                ->where('id', $slug)
-                ->where('status', 'published')
+            $blog = DB::table('blogs')
+                ->leftJoin('blog_categories', 'blogs.category_id', '=', 'blog_categories.id')
+                ->where('blogs.id', $slug)
+                ->where('blogs.status', 'published')
+                ->whereNull('blogs.deleted_at')
+                ->select('blogs.*', 'blog_categories.name as category_name', 'blog_categories.slug as category_slug')
                 ->first();
         }
 
@@ -527,27 +612,38 @@ class BlogController extends Controller
 
         // Fetch author
         $adminAuthor = DB::table('admins')->where('id', $blog->author_id)->first();
-        $authorName = $blog->author_name ?: ($adminAuthor ? $adminAuthor->name : 'MegaByte Circuits');
+        $authorName  = $blog->author_name ?: ($adminAuthor ? $adminAuthor->name : 'MegaByte Circuits');
 
         // Fetch approved comments
-        $comments = BlogComment::where('blog_id', $blog->id)
+        $comments = DB::table('blog_comments')
+            ->where('blog_id', $blog->id)
             ->where('status', 'approved')
             ->whereNull('parent_id')
-            ->with(['replies'])
             ->orderBy('created_at', 'desc')
             ->get();
 
+        foreach ($comments as $comment) {
+            $comment->replies = DB::table('blog_comments')
+                ->where('parent_id', $comment->id)
+                ->where('status', 'approved')
+                ->orderBy('created_at', 'asc')
+                ->get();
+        }
+
         // Count likes
-        $likesCount = BlogLike::where('blog_id', $blog->id)->count();
+        $likesCount = DB::table('blog_likes')->where('blog_id', $blog->id)->count();
 
         // User liked status check
         $userIp   = $request->ip();
-        $hasLiked = BlogLike::where('blog_id', $blog->id)
+        $hasLiked = DB::table('blog_likes')
+            ->where('blog_id', $blog->id)
             ->where('ip_address', $userIp)
             ->exists();
 
         // Fetch related blogs
-        $related = Blog::where('status', 'published')
+        $related = DB::table('blogs')
+            ->where('status', 'published')
+            ->whereNull('deleted_at')
             ->where('id', '!=', $blog->id)
             ->where(function($q) use ($blog) {
                 if ($blog->category_id) {
@@ -561,9 +657,11 @@ class BlogController extends Controller
             ->get(['id', 'title', 'slug', 'excerpt', 'featured_image', 'published_at', 'category', 'reading_time']);
 
         if ($related->count() < 3) {
-            $extra = Blog::where('status', 'published')
+            $extra = DB::table('blogs')
+                ->where('status', 'published')
+                ->whereNull('deleted_at')
                 ->where('id', '!=', $blog->id)
-                ->whereNotIn('id', $related->pluck('id'))
+                ->whereNotIn('id', $related->pluck('id')->toArray())
                 ->take(3 - $related->count())
                 ->get(['id', 'title', 'slug', 'excerpt', 'featured_image', 'published_at', 'category', 'reading_time']);
             $related = $related->merge($extra);
@@ -586,48 +684,50 @@ class BlogController extends Controller
     // ─── PUBLIC: Increment View Count ────────────────────────────────────────
     public function incrementView(Request $request, $id)
     {
-        $blog = Blog::find($id);
+        $blog = DB::table('blogs')->where('id', $id)->first();
         if (!$blog && !is_numeric($id)) {
-            $blog = Blog::where('slug', $id)->first();
+            $blog = DB::table('blogs')->where('slug', $id)->first();
         }
 
         if ($blog) {
-            $blog->increment('views');
+            DB::table('blogs')->where('id', $blog->id)->increment('views');
             return response()->json([
                 'status' => true,
-                'views'  => (int) $blog->views,
+                'views'  => (int) $blog->views + 1,
             ]);
         }
 
         return response()->json(['status' => false, 'message' => 'Blog post not found.'], 404);
     }
 
-
     // ─── PUBLIC: Like / Unlike Blog ──────────────────────────────────────────
     public function toggleLike(Request $request, $id)
     {
-        $blog = Blog::find($id);
+        $blog = DB::table('blogs')->where('id', $id)->first();
         if (!$blog) {
             return response()->json(['status' => false, 'message' => 'Blog not found.'], 404);
         }
 
-        $userIp = $request->ip();
-        $existing = BlogLike::where('blog_id', $id)
+        $userIp   = $request->ip();
+        $existing = DB::table('blog_likes')
+            ->where('blog_id', $id)
             ->where('ip_address', $userIp)
             ->first();
 
         if ($existing) {
-            $existing->delete();
+            DB::table('blog_likes')->where('id', $existing->id)->delete();
             $liked = false;
         } else {
-            BlogLike::create([
+            DB::table('blog_likes')->insert([
                 'blog_id'    => $id,
                 'ip_address' => $userIp,
+                'created_at' => now(),
+                'updated_at' => now(),
             ]);
             $liked = true;
         }
 
-        $totalLikes = BlogLike::where('blog_id', $id)->count();
+        $totalLikes = DB::table('blog_likes')->where('blog_id', $id)->count();
 
         return response()->json([
             'status'      => true,
@@ -639,7 +739,7 @@ class BlogController extends Controller
     // ─── PUBLIC: Submit Comment ──────────────────────────────────────────────
     public function submitComment(Request $request, $id)
     {
-        $blog = Blog::find($id);
+        $blog = DB::table('blogs')->where('id', $id)->first();
         if (!$blog || !$blog->allow_comments) {
             return response()->json(['status' => false, 'message' => 'Comments are closed for this post.'], 403);
         }
@@ -652,14 +752,18 @@ class BlogController extends Controller
             return response()->json(['status' => false, 'message' => 'Name, email, and comment content are required.'], 422);
         }
 
-        $comment = BlogComment::create([
-            'blog_id'   => $id,
-            'name'      => $name,
-            'email'     => $email,
-            'content'   => $content,
-            'status'    => 'pending',
-            'parent_id' => $request->input('parent_id'),
+        $commentId = DB::table('blog_comments')->insertGetId([
+            'blog_id'    => $id,
+            'name'       => $name,
+            'email'      => $email,
+            'content'    => $content,
+            'status'     => 'pending',
+            'parent_id'  => $request->input('parent_id'),
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
+
+        $comment = DB::table('blog_comments')->where('id', $commentId)->first();
 
         return response()->json([
             'status'  => true,
