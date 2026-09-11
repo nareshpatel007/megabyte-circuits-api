@@ -428,6 +428,7 @@ class CheckoutController extends Controller
                         'silkscreen' => $item['silkscreen'] ?? 'White',
                         'different_design' => $item['differentDesign'] ?? '1',
                         'delivery_format' => $item['deliveryFormat'] ?? 'Single PCB',
+                        'panel_format' => (!empty($item['panelColumn']) || !empty($item['panelRow'])) ? "Column: " . ($item['panelColumn'] ?? '') . ", Row: " . ($item['panelRow'] ?? '') : '',
                         'transaction_number' => $transactionNumber,
                         'parent_order_number' => $parentOrderNumber,
                         'preview_data' => $previewData
