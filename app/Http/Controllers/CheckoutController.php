@@ -412,6 +412,11 @@ class CheckoutController extends Controller
                     $metaFields = [
                         'board_name' => $boardName,
                         'product_type' => $productType,
+                        'base_material' => $item['baseMaterial'] ?? ($item['material'] ?? 'FR-4'),
+                        'substrate_type' => $item['substrateType'] ?? '',
+                        'copper_type' => $item['copperType'] ?? '',
+                        'coverlay_color' => $item['coverlayColor'] ?? '',
+                        'gold_thickness' => $item['goldThickness'] ?? '',
                         'gerber_file_name' => $item['gerberFileName'] ?? '',
                         'pcb_color' => $item['pcbColor'] ?? 'Green',
                         'layers' => $item['layers'] ?? '2',
@@ -420,6 +425,9 @@ class CheckoutController extends Controller
                         'build_time' => $item['buildTime'] ?? '3-4 days',
                         'thickness' => $item['thickness'] ?? '1.6mm',
                         'surface_finish' => $item['surfaceFinish'] ?? 'HASL(Leaded)',
+                        'silkscreen' => $item['silkscreen'] ?? 'White',
+                        'different_design' => $item['differentDesign'] ?? '1',
+                        'delivery_format' => $item['deliveryFormat'] ?? 'Single PCB',
                         'transaction_number' => $transactionNumber,
                         'parent_order_number' => $parentOrderNumber,
                         'preview_data' => $previewData
@@ -427,13 +435,15 @@ class CheckoutController extends Controller
                 }
 
                 foreach ($metaFields as $k => $v) {
-                    DB::table('pcb_order_meta')->insert([
-                        'pcb_order_id' => $orderId,
-                        'meta_key' => $k,
-                        'meta_value' => is_array($v) ? json_encode($v) : (string)$v,
-                        'created_at' => date('Y-m-d H:i:s'),
-                        'updated_at' => date('Y-m-d H:i:s')
-                    ]);
+                    if ($v !== null && $v !== '') {
+                        DB::table('pcb_order_meta')->insert([
+                            'pcb_order_id' => $orderId,
+                            'meta_key' => $k,
+                            'meta_value' => is_array($v) ? json_encode($v) : (string)$v,
+                            'created_at' => date('Y-m-d H:i:s'),
+                            'updated_at' => date('Y-m-d H:i:s')
+                        ]);
+                    }
                 }
 
                 // Maintain Order Activity Audit Logs in pcb_order_logs
