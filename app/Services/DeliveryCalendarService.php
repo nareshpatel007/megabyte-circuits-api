@@ -18,10 +18,25 @@ class DeliveryCalendarService
     }
 
     /**
+     * Automatically delete/soft-delete past holidays whose date is before today.
+     */
+    public static function cleanupPastHolidays(): void
+    {
+        try {
+            $today = Carbon::today()->format('Y-m-d');
+            Holiday::where('date', '<', $today)->delete();
+        } catch (\Throwable $e) {
+            // Ignore failure if table not migrated yet
+        }
+    }
+
+    /**
      * Fetch active holidays within date range.
      */
     public static function getHolidaysInRange($startDate, $endDate): Collection
     {
+        self::cleanupPastHolidays();
+
         $start = $startDate instanceof Carbon ? $startDate->format('Y-m-d') : Carbon::parse($startDate)->format('Y-m-d');
         $end = $endDate instanceof Carbon ? $endDate->format('Y-m-d') : Carbon::parse($endDate)->format('Y-m-d');
 

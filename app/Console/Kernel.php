@@ -16,6 +16,9 @@ class Kernel extends ConsoleKernel
         $schedule->command('digikey:sync-manufacturers')->weekly();
         $schedule->command('digikey:sync-categories')->weekly();
         $schedule->command('digikey:sync')->dailyAt('01:00');
+        $schedule->call(function () {
+            \App\Services\DeliveryCalendarService::cleanupPastHolidays();
+        })->dailyAt('00:05');
     }
 
 

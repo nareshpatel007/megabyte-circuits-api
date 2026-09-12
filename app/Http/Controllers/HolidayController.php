@@ -16,6 +16,8 @@ class HolidayController extends Controller
     public function index(Request $request)
     {
         try {
+            DeliveryCalendarService::cleanupPastHolidays();
+
             $query = Holiday::query();
 
             // Search by name

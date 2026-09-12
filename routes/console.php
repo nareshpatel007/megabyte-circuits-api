@@ -1,14 +1,9 @@
 <?php
 
 use Illuminate\Support\Facades\Artisan;
+use App\Services\DeliveryCalendarService;
 
-/*
-|--------------------------------------------------------------------------
-| Console Routes
-|--------------------------------------------------------------------------
-|
-| This file is where you may define all of your Closure based console
-| commands. Each Closure is bound to a command instance allowing a
-| simple approach to interacting with each command's IO methods.
-|
-*/
+Artisan::command('holidays:cleanup', function () {
+    DeliveryCalendarService::cleanupPastHolidays();
+    $this->info('Past holidays cleaned up successfully.');
+})->purpose('Auto-delete past holidays from database');
