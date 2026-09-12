@@ -75,7 +75,8 @@ class AuthService
             ];
 
             // Generate JWT Token
-            $jwt_token = JWT::encode($payload, env('JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA='), 'HS256');
+            $jwtSecret = \App\Services\CredentialService::get('auth', 'JWT_SECRET', 'JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
+            $jwt_token = JWT::encode($payload, $jwtSecret, 'HS256');
 
             return [
                 'status' => true,

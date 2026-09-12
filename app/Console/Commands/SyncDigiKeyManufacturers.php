@@ -19,12 +19,12 @@ class SyncDigiKeyManufacturers extends Command
     {
         $this->info('Starting DigiKey Manufacturers Synchronization...');
 
-        $clientId = env('DIGIKEY_CLIENT_ID', 'lT71SAGE5n7ZClfGSc4lLATmbnng8POpYfYrzBRsaeXuIevJ');
-        $clientSecret = env('DIGIKEY_CLIENT_SECRET', '6jE42EjppYmtY6LJxOleJcRsnxAXDFs97yZ77vSZhDPrNf3V2xQYAMLU7MxWufbP');
-        $mode = env('DIGIKEY_MODE', 'live');
+        $clientId = \App\Services\CredentialService::get('digikey', 'DIGIKEY_CLIENT_ID', 'DIGIKEY_CLIENT_ID', 'lT71SAGE5n7ZClfGSc4lLATmbnng8POpYfYrzBRsaeXuIevJ');
+        $clientSecret = \App\Services\CredentialService::get('digikey', 'DIGIKEY_CLIENT_SECRET', 'DIGIKEY_CLIENT_SECRET', '6jE42EjppYmtY6LJxOleJcRsnxAXDFs97yZ77vSZhDPrNf3V2xQYAMLU7MxWufbP');
+        $mode = \App\Services\CredentialService::get('digikey', 'DIGIKEY_MODE', 'DIGIKEY_MODE', 'live');
 
         if (!$clientId || !$clientSecret) {
-            $this->error('DigiKey Client ID or Secret missing in .env');
+            $this->error('DigiKey Client ID or Secret missing in database and .env');
             return 1;
         }
 

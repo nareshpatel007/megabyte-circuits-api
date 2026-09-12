@@ -119,6 +119,14 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::put('settings/holidays/{id}', [\App\Http\Controllers\HolidayController::class, 'update']);
         Route::delete('settings/holidays/{id}', [\App\Http\Controllers\HolidayController::class, 'destroy']);
         Route::put('settings/holidays/{id}/status', [\App\Http\Controllers\HolidayController::class, 'toggleStatus']);
+
+        // Credentials Management
+        Route::get('credentials', [\App\Http\Controllers\CredentialController::class, 'index']);
+        Route::post('credentials', [\App\Http\Controllers\CredentialController::class, 'update']);
+        Route::put('credentials', [\App\Http\Controllers\CredentialController::class, 'update']);
+        Route::get('settings/credentials', [\App\Http\Controllers\CredentialController::class, 'index']);
+        Route::post('settings/credentials', [\App\Http\Controllers\CredentialController::class, 'update']);
+        Route::put('settings/credentials', [\App\Http\Controllers\CredentialController::class, 'update']);
     });
 });
 

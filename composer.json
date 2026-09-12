@@ -15,6 +15,7 @@
         "laravel/sanctum": "^3.2",
         "laravel/socialite": "^5.29",
         "laravel/tinker": "^2.8",
+        "phpoffice/phpspreadsheet": "^5.9",
         "smalot/pdfparser": "^2.12",
         "twilio/sdk": "^8.8",
         "webklex/laravel-imap": "^6.2"

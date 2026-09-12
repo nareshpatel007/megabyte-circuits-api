@@ -8,8 +8,8 @@ class GptHelper
     public static function chatgptModelCall($system_prompt, $user_prompt, $max_tokens = 1500, $model = 'gpt-4.1')
     {
         try {
-            // Get use from env
-            $api_key = env('OPENAI_API_KEY');
+            // Get secret using CredentialService (database first with .env fallback)
+            $api_key = \App\Services\CredentialService::get('openai', 'OPENAI_API_KEY', 'OPENAI_API_KEY', config('services.openai.key'));
 
             // Check if API key is empty
             if (empty($api_key)) {

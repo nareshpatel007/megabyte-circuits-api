@@ -25,8 +25,29 @@ Route::get('/clear-cache', function () {
     ]);
 });
 
-use App\Http\Controllers\BlogController;
+Route::get('/read-jobs', function () {
+    $filePath = public_path('jobs.xlsx');
 
-Route::get('/blogs/first-10', [BlogController::class, 'firstTenBlogs']);
-Route::get('/first-10', [BlogController::class, 'firstTenBlogs']);
-Route::get('/open-blogs', [BlogController::class, 'firstTenBlogs']);
+    if (!file_exists($filePath)) {
+        return response()->json([
+            'status' => false,
+            'message' => 'jobs.xlsx file not found in public directory.'
+        ], 404);
+    }
+
+    try {
+        $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($filePath);
+        $sheet = $spreadsheet->getActiveSheet();
+        $data = $sheet->toArray(null, true, true, true);
+
+        return response()->json([
+            'status' => true,
+            'data' => $data
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'status' => false,
+            'message' => 'Error reading Excel file: ' . $e->getMessage()
+        ], 500);
+    }
+});

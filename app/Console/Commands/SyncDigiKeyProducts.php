@@ -32,9 +32,9 @@ class SyncDigiKeyProducts extends Command
     {
         $this->info('Starting DigiKey Products Synchronization (Category + Batched Manufacturers with DB State)...');
 
-        $clientId = env('DIGIKEY_CLIENT_ID', 'lT71SAGE5n7ZClfGSc4lLATmbnng8POpYfYrzBRsaeXuIevJ');
-        $clientSecret = env('DIGIKEY_CLIENT_SECRET', '6jE42EjppYmtY6LJxOleJcRsnxAXDFs97yZ77vSZhDPrNf3V2xQYAMLU7MxWufbP');
-        $mode = env('DIGIKEY_MODE', 'live');
+        $clientId = \App\Services\CredentialService::get('digikey', 'DIGIKEY_CLIENT_ID', 'DIGIKEY_CLIENT_ID', 'lT71SAGE5n7ZClfGSc4lLATmbnng8POpYfYrzBRsaeXuIevJ');
+        $clientSecret = \App\Services\CredentialService::get('digikey', 'DIGIKEY_CLIENT_SECRET', 'DIGIKEY_CLIENT_SECRET', '6jE42EjppYmtY6LJxOleJcRsnxAXDFs97yZ77vSZhDPrNf3V2xQYAMLU7MxWufbP');
+        $mode = \App\Services\CredentialService::get('digikey', 'DIGIKEY_MODE', 'DIGIKEY_MODE', 'live');
         $limit = min((int) ($this->option('limit') ?: 50), 50);
         $specificCategory = $this->option('category');
         $maxOffsetOpt = (int) ($this->option('max-offset') ?: 300);
@@ -42,7 +42,7 @@ class SyncDigiKeyProducts extends Command
         $mfgBatchSize = max((int) ($this->option('mfg-batch-size') ?: 10), 1);
 
         if (!$clientId || !$clientSecret) {
-            $this->error('DigiKey Client ID or Secret missing in .env');
+            $this->error('DigiKey Client ID or Secret missing in database and .env');
             return 1;
         }
 

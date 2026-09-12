@@ -29,13 +29,14 @@ class VerifyApiToken
         }
 
         // Check if token matches expected static API_TOKEN
-        if ($token === env('API_TOKEN')) {
+        $apiToken = \App\Services\CredentialService::get('auth', 'API_TOKEN', 'API_TOKEN');
+        if ($apiToken && $token === $apiToken) {
             return $next($request);
         }
 
         // Otherwise, check if it is a valid user JWT token
         try {
-            $secret = env('JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
+            $secret = \App\Services\CredentialService::get('auth', 'JWT_SECRET', 'JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
             $decoded = \Firebase\JWT\JWT::decode($token, new \Firebase\JWT\Key($secret, 'HS256'));
             if ($decoded) {
                 return $next($request);

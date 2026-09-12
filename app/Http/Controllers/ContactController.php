@@ -29,8 +29,8 @@ class ContactController extends Controller
 
         $validated = $validator->validated();
 
-        // Destination admin email address
-        $adminEmail = env('MAIL_BCC_ADDRESS', env('MAIL_GLOBAL_FROM_ADDRESS', 'quote@megabytecircuit.com'));
+        // Destination admin email address resolved via CredentialService
+        $adminEmail = \App\Services\CredentialService::get('mail', 'MAIL_BCC_ADDRESS', 'MAIL_BCC_ADDRESS', \App\Services\CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', 'quote@megabytecircuit.com'));
 
         $mailData = [
             'subject' => 'Website Inquiry: ' . ucfirst(str_replace('_', ' ', $validated['serviceType'])) . ' - ' . $validated['name'],
