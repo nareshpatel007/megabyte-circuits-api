@@ -105,13 +105,9 @@ class HolidayController extends Controller
             $formattedDate = Carbon::parse($request->input('date'))->format('Y-m-d');
             $isActive = $request->has('is_active') ? filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN) : true;
 
-            // Prevent duplicate holiday entries for the same date if active
-            $existing = Holiday::where('date', $formattedDate)->where('is_active', true)->first();
-            if ($existing && $isActive) {
-                return response()->json([
-                    'success' => false,
-                    'message' => "An active holiday ('{$existing->name}') is already configured for date {$formattedDate}."
-                ], 422);
+            // If activating, deactivate any existing active holiday for this date
+            if ($isActive) {
+                Holiday::where('date', $formattedDate)->update(['is_active' => false]);
             }
 
             $adminUser = $request->attributes->get('admin');
@@ -183,17 +179,9 @@ class HolidayController extends Controller
             $formattedDate = Carbon::parse($request->input('date'))->format('Y-m-d');
             $isActive = $request->has('is_active') ? filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN) : (bool)$holiday->is_active;
 
-            // Check if updating to a date that conflicts with another active holiday
-            $existing = Holiday::where('date', $formattedDate)
-                ->where('id', '!=', $holiday->id)
-                ->where('is_active', true)
-                ->first();
-
-            if ($existing && $isActive) {
-                return response()->json([
-                    'success' => false,
-                    'message' => "Another active holiday ('{$existing->name}') is already configured for date {$formattedDate}."
-                ], 422);
+            // If activating, deactivate any other active holiday for this date
+            if ($isActive) {
+                Holiday::where('date', $formattedDate)->where('id', '!=', $holiday->id)->update(['is_active' => false]);
             }
 
             $holiday->update([
@@ -247,17 +235,8 @@ class HolidayController extends Controller
             $newStatus = !$holiday->is_active;
 
             if ($newStatus) {
-                // Verify no other active holiday exists on the date
-                $existing = Holiday::where('date', $holiday->date)
-                    ->where('id', '!=', $holiday->id)
-                    ->where('is_active', true)
-                    ->first();
-                if ($existing) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => "Cannot activate holiday. Another active holiday ('{$existing->name}') already exists for date {$holiday->date}."
-                    ], 422);
-                }
+                // Deactivate any other active holiday for this date
+                Holiday::where('date', $holiday->date)->where('id', '!=', $holiday->id)->update(['is_active' => false]);
             }
 
             $holiday->update(['is_active' => $newStatus]);
