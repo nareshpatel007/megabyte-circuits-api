@@ -9,6 +9,8 @@ use App\Http\Controllers\CheckoutController;
 use App\Http\Controllers\GoogleController;
 use App\Http\Controllers\JlcpcbController;
 
+use App\Http\Controllers\ContactController;
+
 // File Upload (Public for testing)
 Route::post('upload', [FileUploadController::class, 'upload']);
 Route::post('upload/preview', [FileUploadController::class, 'updatePreview']);
@@ -31,6 +33,9 @@ Route::get('pcb-pricing', [\App\Http\Controllers\PcbPricingController::class, 'g
 Route::prefix('orders/')->group(function () {
     Route::post('submit', [OrderController::class, 'store']);
 });
+
+// Contact Form Submission
+Route::post('contact', [ContactController::class, 'submitContact']);
 
 // DigiKey Products & Categories API (DB stored)
 Route::get('digikey/categories', [\App\Http\Controllers\DigiKeyProductsController::class, 'categories']);

@@ -3,140 +3,59 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+use App\MailHelper;
 
 class ContactController extends Controller
 {
     public function submitContact(Request $request)
     {
-        try {
-            $validated = $request->validate([
-                'name' => 'required|string|max:255',
-                'email' => 'required|email|max:255',
-                'phone' => 'nullable|string|max:45',
-                'category' => 'required|string|max:100',
-                'message' => 'required|string'
-            ]);
+        $validator = Validator::make($request->all(), [
+            'name' => 'required|string|min:2|max:200',
+            'email' => 'required|email|max:200',
+            'phone' => 'nullable|string|max:50',
+            'company' => 'nullable|string|max:200',
+            'serviceType' => 'required|string|max:100',
+            'message' => 'required|string|min:10',
+        ]);
 
-            DB::table('contact_messages')->insert([
-                'name' => $validated['name'],
-                'email' => $validated['email'],
-                'phone' => $validated['phone'] ?? null,
-                'category' => $validated['category'],
-                'message' => $validated['message'],
-                'ip_address' => $request->ip(),
-                'user_agent' => $request->userAgent(),
-                'created_at' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s')
-            ]);
-
+        if ($validator->fails()) {
             return response()->json([
-                'status' => true,
-                'message' => 'Contact message submitted successfully.'
-            ]);
-        } catch (\Throwable $th) {
-            return response()->json([
-                'status' => false,
-                'message' => 'Failed to submit message: ' . $th->getMessage()
-            ], 500);
+                'success' => false,
+                'message' => 'Validation error',
+                'errors' => $validator->errors()
+            ], 422);
         }
-    }
 
-    public function index(Request $request)
-    {
-        try {
-            $contacts = DB::table('contact_messages')
-                ->orderBy('created_at', 'desc')
-                ->get();
+        $validated = $validator->validated();
 
+        // Destination admin email address
+        $adminEmail = env('MAIL_BCC_ADDRESS', env('MAIL_GLOBAL_FROM_ADDRESS', 'quote@megabytecircuit.com'));
+
+        $mailData = [
+            'subject' => 'Website Inquiry: ' . ucfirst(str_replace('_', ' ', $validated['serviceType'])) . ' - ' . $validated['name'],
+            'template' => 'emails.contact_inquiry',
+            'name' => $validated['name'],
+            'email' => $validated['email'],
+            'phone' => $validated['phone'] ?? 'N/A',
+            'company' => $validated['company'] ?? 'N/A',
+            'serviceType' => $validated['serviceType'],
+            'message' => $validated['message'],
+        ];
+
+        // Send email via MailHelper
+        $result = MailHelper::send_email($adminEmail, $mailData);
+
+        if ($result['success']) {
             return response()->json([
-                'status' => true,
-                'data' => $contacts
+                'success' => true,
+                'message' => 'Thank you for reaching out! Our team will contact you within 24 hours.',
+                'id' => 'CNT-' . time()
             ]);
-        } catch (\Throwable $th) {
+        } else {
             return response()->json([
-                'status' => false,
-                'message' => 'Failed to fetch contacts: ' . $th->getMessage()
-            ], 500);
-        }
-    }
-
-    public function store(Request $request)
-    {
-        try {
-            $validated = $request->validate([
-                'name' => 'required|string|max:255',
-                'email' => 'required|email|max:255',
-                'phone' => 'nullable|string|max:45',
-                'category' => 'nullable|string|max:100',
-                'message' => 'required|string'
-            ]);
-
-            $id = DB::table('contact_messages')->insertGetId([
-                'name' => $validated['name'],
-                'email' => $validated['email'],
-                'phone' => $validated['phone'] ?? null,
-                'category' => $validated['category'] ?? null,
-                'message' => $validated['message'],
-                'status' => 'pending',
-                'ip_address' => $request->ip() ?? '127.0.0.1',
-                'user_agent' => $request->userAgent() ?? 'Admin',
-                'created_at' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s')
-            ]);
-
-            return response()->json([
-                'status' => true,
-                'message' => 'Contact created successfully.',
-                'data' => DB::table('contact_messages')->where('id', $id)->first()
-            ]);
-        } catch (\Throwable $th) {
-            return response()->json([
-                'status' => false,
-                'message' => 'Failed to create contact: ' . $th->getMessage()
-            ], 500);
-        }
-    }
-
-    public function update(Request $request, $id)
-    {
-        try {
-            $validated = $request->validate([
-                'status' => 'required|in:pending,resolved,closed'
-            ]);
-
-            DB::table('contact_messages')
-                ->where('id', $id)
-                ->update([
-                    'status' => $validated['status'],
-                    'updated_at' => date('Y-m-d H:i:s')
-                ]);
-
-            return response()->json([
-                'status' => true,
-                'message' => 'Contact status updated successfully.'
-            ]);
-        } catch (\Throwable $th) {
-            return response()->json([
-                'status' => false,
-                'message' => 'Failed to update contact: ' . $th->getMessage()
-            ], 500);
-        }
-    }
-
-    public function destroy($id)
-    {
-        try {
-            DB::table('contact_messages')->where('id', $id)->delete();
-
-            return response()->json([
-                'status' => true,
-                'message' => 'Contact deleted successfully.'
-            ]);
-        } catch (\Throwable $th) {
-            return response()->json([
-                'status' => false,
-                'message' => 'Failed to delete contact: ' . $th->getMessage()
+                'success' => false,
+                'message' => 'Failed to send message: ' . ($result['message'] ?? 'SMTP Error'),
             ], 500);
         }
     }
