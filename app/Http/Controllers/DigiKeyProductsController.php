@@ -75,38 +75,9 @@ class DigiKeyProductsController extends Controller
             ];
         })->unique('name')->values();
 
-        // Map format for frontend standard
+        // Map format for frontend standard with dynamic customer pricing
         $formatted = $products->map(function ($item) {
-            return [
-                'id' => $item->id,
-                'ManufacturerProductNumber' => $item->manufacturer_product_number,
-                'Description' => [
-                    'ProductDescription' => $item->product_description,
-                    'DetailedDescription' => $item->detailed_description,
-                ],
-                'Manufacturer' => [
-                    'Id' => $item->manufacturer_id,
-                    'Name' => $item->manufacturer_name,
-                ],
-                'UnitPrice' => (float) $item->unit_price,
-                'ProductUrl' => $item->product_url,
-                'DatasheetUrl' => $item->datasheet_url,
-                'PhotoUrl' => $item->photo_url,
-                'QuantityAvailable' => (int) $item->quantity_available,
-                'ProductStatus' => [
-                    'Status' => $item->product_status ?? 'Active'
-                ],
-                'Category' => $item->search_keyword,
-                'ProductVariations' => !empty($item->product_variations) ? $item->product_variations : [
-                    [
-                        'DigiKeyProductNumber' => $item->digikey_product_number,
-                        'StandardPricing' => $item->product_variations[0]['StandardPricing'] ?? [],
-                        'MinimumOrderQuantity' => $item->product_variations[0]['MinimumOrderQuantity'] ?? 1,
-                    ]
-                ],
-                'StandardPricing' => $item->product_variations[0]['StandardPricing'] ?? [],
-                'MinimumOrderQuantity' => $item->product_variations[0]['MinimumOrderQuantity'] ?? 1,
-            ];
+            return \App\Services\DigiKeyPricingService::formatProductResponse($item);
         });
 
         $totalPages = ceil($totalCount / ($limit > 0 ? $limit : 1));
@@ -134,44 +105,11 @@ class DigiKeyProductsController extends Controller
             return response()->json(['error' => 'Product not found'], 404);
         }
 
+        $formatted = \App\Services\DigiKeyPricingService::formatProductResponse($item);
         $raw = is_array($item->raw_response) ? $item->raw_response : json_decode($item->raw_response ?? '{}', true);
 
-        // Get all DB table columns as array
-        $data = $item->toArray();
-
         // Merge DB columns with DigiKey format keys for full frontend compatibility
-        $response = array_merge($data, [
-            'ManufacturerProductNumber' => $item->manufacturer_product_number,
-            'Description' => [
-                'ProductDescription' => $item->product_description,
-                'DetailedDescription' => $item->detailed_description,
-            ],
-            'Manufacturer' => [
-                'Id' => $item->manufacturer_id,
-                'Name' => $item->manufacturer_name,
-            ],
-            'UnitPrice' => (float) $item->unit_price,
-            'ProductUrl' => $item->product_url,
-            'DatasheetUrl' => $item->datasheet_url,
-            'PhotoUrl' => $item->photo_url,
-            'QuantityAvailable' => (int) $item->quantity_available,
-            'ProductStatus' => [
-                'Status' => $item->product_status ?? 'Active'
-            ],
-            'Category' => $item->search_keyword,
-            'ProductVariations' => !empty($item->product_variations) ? $item->product_variations : [
-                [
-                    'DigiKeyProductNumber' => $item->digikey_product_number
-                ]
-            ],
-            'Parameters' => !empty($item->parameters) ? $item->parameters : ($raw['Parameters'] ?? $raw['ProductAttributes'] ?? []),
-            'Classifications' => !empty($item->classifications) ? $item->classifications : ($raw['Classifications'] ?? null),
-            'Series' => !empty($item->series) ? $item->series : ($raw['Series'] ?? null),
-            'OtherNames' => !empty($item->other_names) ? $item->other_names : ($raw['OtherNames'] ?? []),
-            'BaseProductNumber' => !empty($item->base_product_number) ? $item->base_product_number : ($raw['BaseProductNumber'] ?? null),
-            'CategoryDetails' => !empty($item->category_details) ? $item->category_details : ($raw['Category'] ?? null),
-            'DateLastBuyChance' => $item->date_last_buy_chance ?? ($raw['DateLastBuyChance'] ?? null),
-            'ShippingInfo' => !empty($item->shipping_info) ? $item->shipping_info : ($raw['ShippingInfo'] ?? null),
+        $response = array_merge($item->toArray(), $formatted, [
             'RawResponse' => $raw,
         ]);
 

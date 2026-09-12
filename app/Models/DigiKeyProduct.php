@@ -70,4 +70,10 @@ class DigiKeyProduct extends Model
     {
         return $this->belongsTo(DigiKeyCategory::class, 'category_id', 'category_id');
     }
+
+    public function margin()
+    {
+        return $this->hasOne(DigiKeyProductMargin::class, 'digikey_product_id', 'id');
+    }
 }
+

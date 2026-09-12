@@ -436,11 +436,41 @@ class CheckoutController extends Controller
                 $productType = $item['productType'] ?? 'pcb';
 
                 if ($productType === 'part') {
+                    // Server-side dynamic pricing calculation & validation
+                    $partNumber = $item['partNumber'] ?? ($item['boardName'] ?? null);
+                    $dbProduct = null;
+
+                    if ($partNumber) {
+                        $dbProduct = \App\Models\DigiKeyProduct::where('manufacturer_product_number', $partNumber)
+                            ->orWhere('digikey_product_number', $partNumber)
+                            ->first();
+                    }
+
+                    $calculatedBaseUnitPrice = $item['baseUnitPrice'] ?? 0;
+                    $calculatedMarginType = 'percentage';
+                    $calculatedMarginValue = 0;
+                    $serverUnitPrice = $unitPrice;
+
+                    if ($dbProduct) {
+                        $pricingResult = \App\Services\DigiKeyPricingService::calculateCustomerPricing($dbProduct, $itemQty);
+                        $serverUnitPrice = $pricingResult['unit_price'];
+                        $calculatedBaseUnitPrice = $pricingResult['base_unit_price'];
+                        $calculatedMarginType = $pricingResult['margin']['type'];
+                        $calculatedMarginValue = $pricingResult['margin']['value'];
+                        // Override item price with server calculated amount
+                        $itemPrice = $pricingResult['total_price'];
+                    }
+
                     $metaFields = [
                         'product_type' => 'part',
-                        'part_number' => $item['partNumber'] ?? $boardName,
+                        'part_number' => $partNumber ?? $boardName,
                         'description' => $item['description'] ?? '',
                         'quantity' => $itemQty,
+                        'digikey_base_unit_price' => $calculatedBaseUnitPrice,
+                        'margin_type' => $calculatedMarginType,
+                        'margin_value' => $calculatedMarginValue,
+                        'final_customer_unit_price' => $serverUnitPrice,
+                        'final_line_total' => $itemPrice,
                         'transaction_number' => $transactionNumber,
                         'parent_order_number' => $parentOrderNumber,
                     ];

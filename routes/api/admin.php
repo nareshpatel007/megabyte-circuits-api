@@ -120,6 +120,14 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::delete('settings/holidays/{id}', [\App\Http\Controllers\HolidayController::class, 'destroy']);
         Route::put('settings/holidays/{id}/status', [\App\Http\Controllers\HolidayController::class, 'toggleStatus']);
 
+        // DigiKey Products & Margin Management
+        Route::get('digikey-products', [\App\Http\Controllers\AdminDigiKeyProductsController::class, 'index']);
+        Route::put('digikey-products/{id}/margin', [\App\Http\Controllers\AdminDigiKeyProductsController::class, 'updateMargin']);
+        Route::delete('digikey-products/{id}/margin', [\App\Http\Controllers\AdminDigiKeyProductsController::class, 'resetMargin']);
+        Route::post('digikey-products/bulk-margin', [\App\Http\Controllers\AdminDigiKeyProductsController::class, 'bulkUpdateMargins']);
+        Route::get('digikey-products/default-margin', [\App\Http\Controllers\AdminDigiKeyProductsController::class, 'getDefaultMargin']);
+        Route::post('digikey-products/default-margin', [\App\Http\Controllers\AdminDigiKeyProductsController::class, 'updateDefaultMargin']);
+
         // Credentials Management
         Route::get('credentials', [\App\Http\Controllers\CredentialController::class, 'index']);
         Route::post('credentials', [\App\Http\Controllers\CredentialController::class, 'update']);
@@ -129,4 +137,5 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::put('settings/credentials', [\App\Http\Controllers\CredentialController::class, 'update']);
     });
 });
+
 
