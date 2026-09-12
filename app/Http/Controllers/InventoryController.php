@@ -9,17 +9,6 @@ use Illuminate\Support\Facades\Validator;
 
 class InventoryController extends Controller
 {
-    private function seedDefaultsIfNeeded()
-    {
-        if (InventoryItem::count() === 0) {
-            $defaults = [];
-
-            foreach ($defaults as $item) {
-                InventoryItem::create($item);
-            }
-        }
-    }
-
     private function calculateStatus($qty, $threshold)
     {
         if ($qty == 0) return 'Out of Stock';
