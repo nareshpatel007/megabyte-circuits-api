@@ -14,9 +14,9 @@ class JlcpcbService
 
     public function __construct()
     {
-        $this->baseUrl = rtrim(config('services.jlcpcb.base_url', 'https://open.jlcpcb.com'), '/');
-        $this->appId = config('services.jlcpcb.app_id');
-        $this->accessKey = config('services.jlcpcb.access_key');
+        $this->baseUrl = rtrim(CredentialService::get('jlcpcb', 'JLCPCB_BASE_URL', 'JLCPCB_BASE_URL', config('services.jlcpcb.base_url', 'https://open.jlcpcb.com')), '/');
+        $this->appId = CredentialService::get('jlcpcb', 'JLCPCB_APP_ID', 'JLCPCB_APP_ID', config('services.jlcpcb.app_id'));
+        $this->accessKey = CredentialService::get('jlcpcb', 'JLCPCB_ACCESS_KEY', 'JLCPCB_ACCESS_KEY', config('services.jlcpcb.access_key'));
     }
 
     /**

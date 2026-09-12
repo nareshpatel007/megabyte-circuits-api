@@ -25,9 +25,7 @@ class MigrateCredentialsSeeder extends Seeder
             'jlcpcb' => [
                 'JLCPCB_APP_ID' => env('JLCPCB_APP_ID', ''),
                 'JLCPCB_ACCESS_KEY' => env('JLCPCB_ACCESS_KEY', ''),
-                'JLCPCB_SECRET_KEY' => env('JLCPCB_SECRET_KEY', ''),
                 'JLCPCB_BASE_URL' => env('JLCPCB_BASE_URL', 'https://open.jlcpcb.com'),
-                'JLCPCB_ACCOUNT_EMAIL' => env('JLCPCB_ACCOUNT_EMAIL', ''),
             ],
             'smtp' => [
                 'MAIL_HOST' => env('MAIL_HOST', 'smtp.gmail.com'),
