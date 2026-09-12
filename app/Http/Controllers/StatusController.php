@@ -66,7 +66,7 @@ class StatusController extends Controller
         ];
         if ($hasSlug) $insertData['slug'] = $slug;
         if ($hasSort) $insertData['sort_order'] = $request->sort_order ?? ($maxSort + 1);
-        if ($hasColor) $insertData['color'] = $request->color ?? '#10b981';
+        if ($hasColor) $insertData['color'] = $request->color ?? '#ffffff';
 
         $id = \Illuminate\Support\Facades\DB::table('pcb_order_statuses')->insertGetId($insertData);
         $status = \Illuminate\Support\Facades\DB::table('pcb_order_statuses')->where('id', $id)->first();
