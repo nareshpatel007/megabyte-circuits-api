@@ -22,6 +22,22 @@ class CartController extends Controller
             ], 400);
         }
 
+        // Validate delivery date for each item in cart
+        if (is_array($items)) {
+            foreach ($items as $item) {
+                $deliveryDate = $item['delivery_date'] ?? $item['deliveryDate'] ?? null;
+                if ($deliveryDate) {
+                    $validation = \App\Services\DeliveryCalendarService::validateDeliveryDate($deliveryDate);
+                    if (!$validation['valid']) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => $validation['reason']
+                        ], 400);
+                    }
+                }
+            }
+        }
+
         $cartDataString = is_array($items) || is_object($items) ? json_encode($items) : $items;
 
         $cart = Cart::updateOrCreate(

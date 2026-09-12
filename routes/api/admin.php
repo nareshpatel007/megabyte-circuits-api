@@ -104,5 +104,14 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::get('pcb-pricing', [\App\Http\Controllers\PcbPricingController::class, 'getPricingConfig']);
         Route::post('pcb-pricing', [\App\Http\Controllers\PcbPricingController::class, 'updatePricingConfig']);
         Route::post('pcb-pricing/reset', [\App\Http\Controllers\PcbPricingController::class, 'resetPricingConfig']);
+
+        // Holiday Management
+        Route::get('settings/holidays', [\App\Http\Controllers\HolidayController::class, 'index']);
+        Route::post('settings/holidays', [\App\Http\Controllers\HolidayController::class, 'store']);
+        Route::get('settings/holidays/{id}', [\App\Http\Controllers\HolidayController::class, 'show']);
+        Route::put('settings/holidays/{id}', [\App\Http\Controllers\HolidayController::class, 'update']);
+        Route::delete('settings/holidays/{id}', [\App\Http\Controllers\HolidayController::class, 'destroy']);
+        Route::put('settings/holidays/{id}/status', [\App\Http\Controllers\HolidayController::class, 'toggleStatus']);
     });
 });
+

@@ -35,6 +35,16 @@ class OrderController extends Controller
             ], 422);
         }
 
+        if ($request->filled('delivery_date')) {
+            $validation = \App\Services\DeliveryCalendarService::validateDeliveryDate($request->delivery_date);
+            if (!$validation['valid']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $validation['reason']
+                ], 400);
+            }
+        }
+
         try {
             // Find or create PcbUser by email
             $userId = $request->user_id;

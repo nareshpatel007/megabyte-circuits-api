@@ -28,6 +28,7 @@ Route::prefix('jlcpcb')->group(function () {
 // PCB Pricing Calculations (Public)
 
 Route::get('pcb-pricing', [\App\Http\Controllers\PcbPricingController::class, 'getPricingConfig']);
+Route::get('delivery/holidays', [\App\Http\Controllers\HolidayController::class, 'getPublicHolidays']);
 
 // PCB Orders
 Route::prefix('orders/')->group(function () {

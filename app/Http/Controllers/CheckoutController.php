@@ -170,6 +170,23 @@ class CheckoutController extends Controller
 
             $amountInPaise = (int) round($amount * 100);
 
+            // Validate delivery date for items if provided
+            $items = $input['items'] ?? [];
+            if (is_array($items)) {
+                foreach ($items as $item) {
+                    $deliveryDate = $item['delivery_date'] ?? $item['deliveryDate'] ?? null;
+                    if ($deliveryDate) {
+                        $validation = \App\Services\DeliveryCalendarService::validateDeliveryDate($deliveryDate);
+                        if (!$validation['valid']) {
+                            return response()->json([
+                                'status' => false,
+                                'message' => $validation['reason']
+                            ], 400);
+                        }
+                    }
+                }
+            }
+
             // Call Razorpay API to create order
             $response = Http::withBasicAuth($this->razorpayKey, $this->razorpaySecret)
                 ->post('https://api.razorpay.com/v1/orders', [
@@ -250,6 +267,20 @@ class CheckoutController extends Controller
                     'status' => false,
                     'message' => 'No items found in order payload'
                 ], 400);
+            }
+
+            // Re-validate delivery dates for all items
+            foreach ($items as $item) {
+                $deliveryDate = $item['delivery_date'] ?? $item['deliveryDate'] ?? null;
+                if ($deliveryDate) {
+                    $validation = \App\Services\DeliveryCalendarService::validateDeliveryDate($deliveryDate);
+                    if (!$validation['valid']) {
+                        return response()->json([
+                            'status' => false,
+                            'message' => $validation['reason']
+                        ], 400);
+                    }
+                }
             }
 
             // Verify signature if provided
@@ -381,6 +412,11 @@ class CheckoutController extends Controller
                 }
 
                 // Insert into pcb_orders storing ONLY foreign ID references (No board_name, status_id = Pending)
+                $itemDeliveryDate = $item['delivery_date'] ?? $item['deliveryDate'] ?? null;
+                $resolvedDeliveryDate = $itemDeliveryDate
+                    ? \Carbon\Carbon::parse($itemDeliveryDate)->format('Y-m-d')
+                    : \App\Services\DeliveryCalendarService::addDeliveryDays(now(), 5)->format('Y-m-d');
+
                 $orderId = DB::table('pcb_orders')->insertGetId([
                     'order_number' => $orderNumber,
                     'user_id' => $userId,
@@ -391,7 +427,7 @@ class CheckoutController extends Controller
                     'gerber_file_id' => $gerberFileId, // Links to gerber_files record
                     'unit_price' => $unitPrice,
                     'order_value' => $itemPrice,
-                    'delivery_date' => date('Y-m-d', strtotime('+5 days')),
+                    'delivery_date' => $resolvedDeliveryDate,
                     'created_at' => date('Y-m-d H:i:s'),
                     'updated_at' => date('Y-m-d H:i:s')
                 ]);
