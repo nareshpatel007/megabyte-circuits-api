@@ -106,6 +106,13 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::post('pcb-pricing/reset', [\App\Http\Controllers\PcbPricingController::class, 'resetPricingConfig']);
 
         // Holiday Management
+        Route::get('holidays', [\App\Http\Controllers\HolidayController::class, 'index']);
+        Route::post('holidays', [\App\Http\Controllers\HolidayController::class, 'store']);
+        Route::get('holidays/{id}', [\App\Http\Controllers\HolidayController::class, 'show']);
+        Route::put('holidays/{id}', [\App\Http\Controllers\HolidayController::class, 'update']);
+        Route::delete('holidays/{id}', [\App\Http\Controllers\HolidayController::class, 'destroy']);
+        Route::put('holidays/{id}/status', [\App\Http\Controllers\HolidayController::class, 'toggleStatus']);
+
         Route::get('settings/holidays', [\App\Http\Controllers\HolidayController::class, 'index']);
         Route::post('settings/holidays', [\App\Http\Controllers\HolidayController::class, 'store']);
         Route::get('settings/holidays/{id}', [\App\Http\Controllers\HolidayController::class, 'show']);
