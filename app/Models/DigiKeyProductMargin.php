@@ -13,6 +13,7 @@ class DigiKeyProductMargin extends Model
 
     protected $fillable = [
         'digikey_product_id',
+        'tier_quantity',
         'margin_type',
         'margin_value',
         'is_active',
@@ -20,6 +21,7 @@ class DigiKeyProductMargin extends Model
 
     protected $casts = [
         'digikey_product_id' => 'integer',
+        'tier_quantity' => 'integer',
         'margin_value' => 'float',
         'is_active' => 'boolean',
     ];

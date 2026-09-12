@@ -33,27 +33,67 @@ class DigiKeyPricingService
     }
 
     /**
-     * Resolve effective margin configuration for a specific product
+     * Resolve effective margin configuration for a product and optionally a specific tier quantity
      */
-    public static function getMarginForProduct(?int $productId): array
+    public static function getProductMargins(?int $productId): array
     {
-        if ($productId) {
-            $productMargin = DigiKeyProductMargin::where('digikey_product_id', $productId)->first();
-            if ($productMargin && $productMargin->is_active) {
-                return [
-                    'margin_type' => $productMargin->margin_type,
-                    'margin_value' => (float) $productMargin->margin_value,
+        $defaultMargin = self::getDefaultMargin();
+        if (!$productId) {
+            return [
+                'default' => $defaultMargin,
+                'tiers' => [],
+                'has_custom' => false,
+            ];
+        }
+
+        $margins = DigiKeyProductMargin::where('digikey_product_id', $productId)
+            ->where('is_active', true)
+            ->get();
+
+        if ($margins->isEmpty()) {
+            return [
+                'default' => $defaultMargin,
+                'tiers' => [],
+                'has_custom' => false,
+            ];
+        }
+
+        $productDefault = $margins->firstWhere('tier_quantity', null);
+        $effectiveDefault = $productDefault ? [
+            'margin_type' => $productDefault->margin_type,
+            'margin_value' => (float) $productDefault->margin_value,
+            'is_custom' => true,
+        ] : $defaultMargin;
+
+        $tierMap = [];
+        foreach ($margins as $m) {
+            if ($m->tier_quantity !== null && $m->tier_quantity > 0) {
+                $tierMap[$m->tier_quantity] = [
+                    'margin_type' => $m->margin_type,
+                    'margin_value' => (float) $m->margin_value,
                     'is_custom' => true,
                 ];
             }
         }
 
-        $defaultMargin = self::getDefaultMargin();
         return [
-            'margin_type' => $defaultMargin['margin_type'],
-            'margin_value' => (float) $defaultMargin['margin_value'],
-            'is_custom' => false,
+            'default' => $effectiveDefault,
+            'tiers' => $tierMap,
+            'has_custom' => true,
         ];
+    }
+
+    /**
+     * Resolve margin for product at a specific tier break quantity
+     */
+    public static function getMarginForProduct(?int $productId, ?int $tierQty = null): array
+    {
+        $allMargins = self::getProductMargins($productId);
+        if ($tierQty !== null && isset($allMargins['tiers'][$tierQty])) {
+            return $allMargins['tiers'][$tierQty];
+        }
+
+        return $allMargins['default'];
     }
 
     /**
@@ -99,75 +139,102 @@ class DigiKeyPricingService
     }
 
     /**
-     * Calculate tiered customer pricing structure for a product
+     * Calculate tiered customer pricing structure for a product with tier-specific margins
      */
     public static function calculateCustomerPricing(DigiKeyProduct $product, int $quantity = 1, ?array $marginOverride = null): array
     {
-        $marginConfig = $marginOverride ?? self::getMarginForProduct($product->id);
-        $marginType = $marginConfig['margin_type'];
-        $marginValue = (float) $marginConfig['margin_value'];
-
-        $baseUnitPrice = (float) $product->unit_price;
-        $customerBaseUnitPrice = self::applyMarginToUnitPrice($baseUnitPrice, $marginType, $marginValue);
-
+        $allMargins = self::getProductMargins($product->id);
         $rawPricingTiers = self::extractRawStandardPricing($product);
+        $baseUnitPrice = (float) $product->unit_price;
+
         $customerTiers = [];
 
         if (!empty($rawPricingTiers)) {
             foreach ($rawPricingTiers as $tier) {
                 $breakQty = (int) ($tier['BreakQuantity'] ?? 1);
                 $digiKeyTierUnitPrice = (float) ($tier['UnitPrice'] ?? $baseUnitPrice);
-                $customerTierUnitPrice = self::applyMarginToUnitPrice($digiKeyTierUnitPrice, $marginType, $marginValue);
+
+                // Determine tier margin (override > tier-specific margin > product default margin > global default margin)
+                if ($marginOverride && isset($marginOverride['tiers'][$breakQty])) {
+                    $tierMargin = $marginOverride['tiers'][$breakQty];
+                } elseif ($marginOverride && isset($marginOverride['margin_type']) && !isset($marginOverride['tiers'])) {
+                    $tierMargin = $marginOverride;
+                } elseif (isset($allMargins['tiers'][$breakQty])) {
+                    $tierMargin = $allMargins['tiers'][$breakQty];
+                } else {
+                    $tierMargin = $allMargins['default'];
+                }
+
+                $mType = $tierMargin['margin_type'];
+                $mVal = (float) $tierMargin['margin_value'];
+                $customerTierUnitPrice = self::applyMarginToUnitPrice($digiKeyTierUnitPrice, $mType, $mVal);
 
                 $customerTiers[] = [
                     'BreakQuantity' => $breakQty,
                     'DigiKeyUnitPrice' => $digiKeyTierUnitPrice,
+                    'MarginType' => $mType,
+                    'MarginValue' => $mVal,
                     'UnitPrice' => $customerTierUnitPrice,
                     'TotalPrice' => round($customerTierUnitPrice * $breakQty, 2),
+                    'IsCustomMargin' => $tierMargin['is_custom'] ?? false,
                 ];
             }
         } else {
             // Default 1+ break tier if no quantity breaks exist
+            $tierMargin = $allMargins['default'];
+            $mType = $tierMargin['margin_type'];
+            $mVal = (float) $tierMargin['margin_value'];
+            $customerBaseUnitPrice = self::applyMarginToUnitPrice($baseUnitPrice, $mType, $mVal);
+
             $customerTiers[] = [
                 'BreakQuantity' => 1,
                 'DigiKeyUnitPrice' => $baseUnitPrice,
+                'MarginType' => $mType,
+                'MarginValue' => $mVal,
                 'UnitPrice' => $customerBaseUnitPrice,
                 'TotalPrice' => round($customerBaseUnitPrice * 1, 2),
+                'IsCustomMargin' => $tierMargin['is_custom'] ?? false,
             ];
         }
 
-        // Determine applicable tier unit price for target quantity
-        $effectiveUnitPrice = $customerBaseUnitPrice;
-        $effectiveBaseUnitPrice = $baseUnitPrice;
-
+        // Determine applicable tier unit price & margin for target quantity
+        $applicableTier = null;
         if (!empty($customerTiers)) {
-            // Sort by BreakQuantity descending to find highest applicable tier
+            // Sort descending by BreakQuantity to match target quantity
             usort($customerTiers, function ($a, $b) {
                 return $b['BreakQuantity'] <=> $a['BreakQuantity'];
             });
 
             foreach ($customerTiers as $tier) {
                 if ($quantity >= $tier['BreakQuantity']) {
-                    $effectiveUnitPrice = $tier['UnitPrice'];
-                    $effectiveBaseUnitPrice = $tier['DigiKeyUnitPrice'];
+                    $applicableTier = $tier;
                     break;
                 }
             }
 
-            // Re-sort ascending for tier display presentation
+            // Re-sort ascending for display presentation
             usort($customerTiers, function ($a, $b) {
                 return $a['BreakQuantity'] <=> $b['BreakQuantity'];
             });
         }
+
+        if (!$applicableTier && !empty($customerTiers)) {
+            $applicableTier = $customerTiers[0];
+        }
+
+        $effectiveUnitPrice = $applicableTier ? $applicableTier['UnitPrice'] : $baseUnitPrice;
+        $effectiveBaseUnitPrice = $applicableTier ? $applicableTier['DigiKeyUnitPrice'] : $baseUnitPrice;
+        $effectiveMarginType = $applicableTier ? $applicableTier['MarginType'] : $allMargins['default']['margin_type'];
+        $effectiveMarginValue = $applicableTier ? $applicableTier['MarginValue'] : $allMargins['default']['margin_value'];
 
         $totalLinePrice = round($effectiveUnitPrice * $quantity, 2);
 
         return [
             'quantity' => $quantity,
             'margin' => [
-                'type' => $marginType,
-                'value' => $marginValue,
-                'is_custom' => $marginConfig['is_custom'] ?? false,
+                'type' => $effectiveMarginType,
+                'value' => $effectiveMarginValue,
+                'is_custom' => $applicableTier['IsCustomMargin'] ?? false,
             ],
             'base_unit_price' => $effectiveBaseUnitPrice,
             'unit_price' => $effectiveUnitPrice,
@@ -190,7 +257,10 @@ class DigiKeyPricingService
                 'BreakQuantity' => $t['BreakQuantity'],
                 'UnitPrice' => $t['UnitPrice'],
                 'DigiKeyUnitPrice' => $t['DigiKeyUnitPrice'],
+                'MarginType' => $t['MarginType'] ?? 'percentage',
+                'MarginValue' => $t['MarginValue'] ?? 0,
                 'TotalPrice' => $t['TotalPrice'],
+                'IsCustomMargin' => $t['IsCustomMargin'] ?? false,
             ];
         }, $pricing['tiers']);
 

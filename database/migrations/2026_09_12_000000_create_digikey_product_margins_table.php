@@ -13,11 +13,14 @@ return new class extends Migration
     {
         Schema::create('digikey_product_margins', function (Blueprint $table) {
             $table->id();
-            $table->unsignedBigInteger('digikey_product_id')->nullable()->unique()->index();
+            $table->unsignedBigInteger('digikey_product_id')->nullable()->index();
+            $table->unsignedInteger('tier_quantity')->nullable()->index();
             $table->enum('margin_type', ['percentage', 'fixed'])->default('percentage');
             $table->decimal('margin_value', 12, 4)->default(0.0000);
             $table->boolean('is_active')->default(true);
             $table->timestamps();
+
+            $table->unique(['digikey_product_id', 'tier_quantity'], 'product_tier_margin_unique');
         });
     }
 

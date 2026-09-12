@@ -42,19 +42,8 @@ class AdminDigiKeyProductsController extends Controller
         $defaultMargin = DigiKeyPricingService::getDefaultMargin();
 
         $formatted = $products->map(function ($item) use ($defaultMargin) {
-            $productMargin = $item->margin;
-            $hasCustom = $productMargin && $productMargin->is_active;
-
-            $marginType = $hasCustom ? $productMargin->margin_type : $defaultMargin['margin_type'];
-            $marginValue = $hasCustom ? (float) $productMargin->margin_value : (float) $defaultMargin['margin_value'];
-
-            $marginConfig = [
-                'margin_type' => $marginType,
-                'margin_value' => $marginValue,
-                'is_custom' => $hasCustom,
-            ];
-
-            $pricing = DigiKeyPricingService::calculateCustomerPricing($item, 1, $marginConfig);
+            $allMargins = DigiKeyPricingService::getProductMargins($item->id);
+            $pricing = DigiKeyPricingService::calculateCustomerPricing($item, 1);
 
             return [
                 'id' => $item->id,
@@ -64,9 +53,9 @@ class AdminDigiKeyProductsController extends Controller
                 'product_description' => $item->product_description,
                 'category' => $item->search_keyword,
                 'base_unit_price' => (float) $item->unit_price,
-                'margin_type' => $marginType,
-                'margin_value' => $marginValue,
-                'is_custom_margin' => $hasCustom,
+                'margin_type' => $pricing['margin']['type'],
+                'margin_value' => $pricing['margin']['value'],
+                'is_custom_margin' => $allMargins['has_custom'],
                 'final_customer_price' => $pricing['unit_price'],
                 'quantity_available' => (int) $item->quantity_available,
                 'product_status' => $item->product_status ?? 'Active',
@@ -91,7 +80,7 @@ class AdminDigiKeyProductsController extends Controller
     }
 
     /**
-     * Update product margin settings for a single product
+     * Update product margin settings (supports applying to all tiers, single tier, or full tiers list)
      */
     public function updateMargin(Request $request, $id)
     {
@@ -100,19 +89,83 @@ class AdminDigiKeyProductsController extends Controller
             return response()->json(['success' => false, 'message' => 'Product not found'], 404);
         }
 
-        $validated = $request->validate([
-            'margin_type' => 'required|in:percentage,fixed',
-            'margin_value' => 'required|numeric|min:0',
-        ]);
+        // Case 1: Tiers list payload
+        if ($request->has('tiers') && is_array($request->input('tiers'))) {
+            $request->validate([
+                'tiers' => 'required|array',
+                'tiers.*.BreakQuantity' => 'required|integer|min:1',
+                'tiers.*.MarginType' => 'required|in:percentage,fixed',
+                'tiers.*.MarginValue' => 'required|numeric|min:0',
+            ]);
 
-        $margin = DigiKeyProductMargin::updateOrCreate(
-            ['digikey_product_id' => $product->id],
-            [
-                'margin_type' => $validated['margin_type'],
-                'margin_value' => $validated['margin_value'],
-                'is_active' => true,
-            ]
-        );
+            foreach ($request->input('tiers') as $t) {
+                DigiKeyProductMargin::updateOrCreate(
+                    [
+                        'digikey_product_id' => $product->id,
+                        'tier_quantity' => (int) $t['BreakQuantity'],
+                    ],
+                    [
+                        'margin_type' => $t['MarginType'],
+                        'margin_value' => (float) $t['MarginValue'],
+                        'is_active' => true,
+                    ]
+                );
+            }
+        } elseif ($request->boolean('apply_to_all_tiers')) {
+            // Case 2: Apply same margin to all existing tiers of the product
+            $validated = $request->validate([
+                'margin_type' => 'required|in:percentage,fixed',
+                'margin_value' => 'required|numeric|min:0',
+            ]);
+
+            $rawPricingTiers = DigiKeyPricingService::extractRawStandardPricing($product);
+            $breakQtys = array_map(function ($t) {
+                return (int) ($t['BreakQuantity'] ?? 1);
+            }, $rawPricingTiers);
+
+            if (empty($breakQtys)) {
+                $breakQtys = [1];
+            }
+
+            // Set default product margin
+            DigiKeyProductMargin::updateOrCreate(
+                ['digikey_product_id' => $product->id, 'tier_quantity' => null],
+                [
+                    'margin_type' => $validated['margin_type'],
+                    'margin_value' => $validated['margin_value'],
+                    'is_active' => true,
+                ]
+            );
+
+            foreach ($breakQtys as $qty) {
+                DigiKeyProductMargin::updateOrCreate(
+                    ['digikey_product_id' => $product->id, 'tier_quantity' => $qty],
+                    [
+                        'margin_type' => $validated['margin_type'],
+                        'margin_value' => $validated['margin_value'],
+                        'is_active' => true,
+                    ]
+                );
+            }
+        } else {
+            // Case 3: Single margin / default tier margin update
+            $validated = $request->validate([
+                'margin_type' => 'required|in:percentage,fixed',
+                'margin_value' => 'required|numeric|min:0',
+                'tier_quantity' => 'nullable|integer',
+            ]);
+
+            $tierQty = $request->input('tier_quantity');
+
+            DigiKeyProductMargin::updateOrCreate(
+                ['digikey_product_id' => $product->id, 'tier_quantity' => $tierQty],
+                [
+                    'margin_type' => $validated['margin_type'],
+                    'margin_value' => $validated['margin_value'],
+                    'is_active' => true,
+                ]
+            );
+        }
 
         $pricing = DigiKeyPricingService::calculateCustomerPricing($product);
 
@@ -121,8 +174,8 @@ class AdminDigiKeyProductsController extends Controller
             'message' => 'Product margin updated successfully',
             'data' => [
                 'id' => $product->id,
-                'margin_type' => $margin->margin_type,
-                'margin_value' => (float) $margin->margin_value,
+                'margin_type' => $pricing['margin']['type'],
+                'margin_value' => $pricing['margin']['value'],
                 'final_customer_price' => $pricing['unit_price'],
                 'pricing_tiers' => $pricing['tiers'],
             ],
@@ -158,7 +211,7 @@ class AdminDigiKeyProductsController extends Controller
     }
 
     /**
-     * Bulk update margins for multiple products
+     * Bulk update margins for multiple products (applies margin to all tiers for selected products)
      */
     public function bulkUpdateMargins(Request $request)
     {
@@ -170,14 +223,37 @@ class AdminDigiKeyProductsController extends Controller
         ]);
 
         foreach ($validated['product_ids'] as $productId) {
+            $product = DigiKeyProduct::find($productId);
+            if (!$product) continue;
+
+            $rawPricingTiers = DigiKeyPricingService::extractRawStandardPricing($product);
+            $breakQtys = array_map(function ($t) {
+                return (int) ($t['BreakQuantity'] ?? 1);
+            }, $rawPricingTiers);
+
+            if (empty($breakQtys)) {
+                $breakQtys = [1];
+            }
+
             DigiKeyProductMargin::updateOrCreate(
-                ['digikey_product_id' => $productId],
+                ['digikey_product_id' => $productId, 'tier_quantity' => null],
                 [
                     'margin_type' => $validated['margin_type'],
                     'margin_value' => $validated['margin_value'],
                     'is_active' => true,
                 ]
             );
+
+            foreach ($breakQtys as $qty) {
+                DigiKeyProductMargin::updateOrCreate(
+                    ['digikey_product_id' => $productId, 'tier_quantity' => $qty],
+                    [
+                        'margin_type' => $validated['margin_type'],
+                        'margin_value' => $validated['margin_value'],
+                        'is_active' => true,
+                    ]
+                );
+            }
         }
 
         return response()->json([
