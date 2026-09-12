@@ -142,7 +142,7 @@ class DigiKeyPricingService
 
         if (!empty($customerTiers)) {
             // Sort by BreakQuantity descending to find highest applicable tier
-            usort($customerTiers, function ($a, b) {
+            usort($customerTiers, function ($a, $b) {
                 return $b['BreakQuantity'] <=> $a['BreakQuantity'];
             });
 
@@ -155,7 +155,7 @@ class DigiKeyPricingService
             }
 
             // Re-sort ascending for tier display presentation
-            usort($customerTiers, function ($a, b) {
+            usort($customerTiers, function ($a, $b) {
                 return $a['BreakQuantity'] <=> $b['BreakQuantity'];
             });
         }
