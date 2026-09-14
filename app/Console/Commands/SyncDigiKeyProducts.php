@@ -9,8 +9,10 @@ use App\Models\DigiKeyCategory;
 use App\Models\DigiKeyManufacturer;
 use App\Models\DigiKeyProduct;
 use App\Models\DigiKeySyncState;
+use App\Models\DigiKeyAccount;
 
 class DigiKeyRateLimitException extends \Exception {}
+class DigiKeyAccountException extends \Exception {}
 
 class SyncDigiKeyProducts extends Command
 {
@@ -23,26 +25,28 @@ class SyncDigiKeyProducts extends Command
                             {--start-cat-index= : Override subcategory index offset to resume from}
                             {--start-mfg-index= : Override manufacturer chunk index offset to resume from}';
 
-    protected $description = 'Sync products from DigiKey API v4 by slicing queries with Category + Manufacturer batches with automatic DB state persistence';
+    protected $description = 'Sync products from DigiKey API v4 using multi-account rotation with Category + Manufacturer batches and automatic DB state persistence';
 
+    private ?DigiKeyAccount $currentAccount = null;
     private ?string $accessToken = null;
     private int $apiCallsMade = 0;
 
     public function handle()
     {
-        $this->info('Starting DigiKey Products Synchronization (Category + Batched Manufacturers with DB State)...');
+        $this->info('Starting DigiKey Products Synchronization (Multi-Account + Batched Manufacturers with DB State)...');
 
-        $clientId = \App\Services\CredentialService::get('digikey', 'DIGIKEY_CLIENT_ID', 'DIGIKEY_CLIENT_ID', 'lT71SAGE5n7ZClfGSc4lLATmbnng8POpYfYrzBRsaeXuIevJ');
-        $clientSecret = \App\Services\CredentialService::get('digikey', 'DIGIKEY_CLIENT_SECRET', 'DIGIKEY_CLIENT_SECRET', '6jE42EjppYmtY6LJxOleJcRsnxAXDFs97yZ77vSZhDPrNf3V2xQYAMLU7MxWufbP');
-        $mode = \App\Services\CredentialService::get('digikey', 'DIGIKEY_MODE', 'DIGIKEY_MODE', 'live');
+        // Ensure fallback initial account exists in digikey_accounts if empty
+        $this->ensureAccountExists();
+
         $limit = min((int) ($this->option('limit') ?: 50), 50);
         $specificCategory = $this->option('category');
         $maxOffsetOpt = (int) ($this->option('max-offset') ?: 300);
         $maxCalls = (int) ($this->option('max-calls') ?: 1000);
         $mfgBatchSize = max((int) ($this->option('mfg-batch-size') ?: 10), 1);
 
-        if (!$clientId || !$clientSecret) {
-            $this->error('DigiKey Client ID or Secret missing in database and .env');
+        // Fetch initial active account
+        if (!$this->switchToNextAccount()) {
+            $this->error('No active or usable DigiKey accounts found in `digikey_accounts` table or environment.');
             return 1;
         }
 
@@ -63,19 +67,6 @@ class SyncDigiKeyProducts extends Command
         $startMfgIndex = $this->option('start-mfg-index') !== null
             ? (int) $this->option('start-mfg-index')
             : $state->last_mfg_index;
-
-        try {
-            $this->accessToken = $this->generateAccessToken($clientId, $clientSecret, $mode);
-        } catch (DigiKeyRateLimitException $e) {
-            $this->error("\nDaily API rate limit reached during OAuth token request (429 Too Many Requests).");
-            $this->info("Daily limit reached. Stopping command execution.");
-            return 1;
-        }
-
-        if (!$this->accessToken) {
-            $this->error('Failed to obtain initial DigiKey OAuth access token.');
-            return 1;
-        }
 
         // Query subcategories
         $catQuery = DigiKeyCategory::query();
@@ -138,7 +129,7 @@ class SyncDigiKeyProducts extends Command
                             break;
                         }
 
-                        $fetchedCount = $this->fetchAndSaveProductsForBatch($subcat, $mfgIds, $offset, $limit, $clientId, $clientSecret, $mode);
+                        $fetchedCount = $this->fetchAndSaveProductsWithAccountFallback($subcat, $mfgIds, $offset, $limit);
                         $catSynced += $fetchedCount;
 
                         if ($fetchedCount < $limit) {
@@ -166,9 +157,9 @@ class SyncDigiKeyProducts extends Command
                 'total_synced_products' => $state->total_synced_products + $totalSyncedProducts,
             ]);
 
-            $this->error("\nDaily API rate limit reached from DigiKey (429 Too Many Requests / Daily Ratelimit exceeded).");
+            $this->error("\nAll DigiKey accounts reached daily rate limit or exhausted.");
             $this->info("Saved state to DB: Subcategory Index={$cIdx}, Manufacturer Chunk Index={$mIdx}");
-            $this->info("Daily limit reached. Stopping command execution.");
+            $this->info("Stopping command execution.");
             return 1;
         }
 
@@ -183,8 +174,75 @@ class SyncDigiKeyProducts extends Command
         return 0;
     }
 
-    private function generateAccessToken(string $clientId, string $clientSecret, string $mode): ?string
+    /**
+     * Seed initial account into digikey_accounts table if empty using CredentialService / .env values.
+     */
+    private function ensureAccountExists(): void
     {
+        if (DigiKeyAccount::count() === 0) {
+            $clientId = \App\Services\CredentialService::get('digikey', 'DIGIKEY_CLIENT_ID', 'DIGIKEY_CLIENT_ID', 'lT71SAGE5n7ZClfGSc4lLATmbnng8POpYfYrzBRsaeXuIevJ');
+            $clientSecret = \App\Services\CredentialService::get('digikey', 'DIGIKEY_CLIENT_SECRET', 'DIGIKEY_CLIENT_SECRET', '6jE42EjppYmtY6LJxOleJcRsnxAXDFs97yZ77vSZhDPrNf3V2xQYAMLU7MxWufbP');
+            $mode = \App\Services\CredentialService::get('digikey', 'DIGIKEY_MODE', 'DIGIKEY_MODE', 'live');
+
+            if (!empty($clientId) && !empty($clientSecret)) {
+                DigiKeyAccount::create([
+                    'account_name' => 'Primary DigiKey Account',
+                    'client_id' => $clientId,
+                    'client_secret' => $clientSecret,
+                    'mode' => $mode,
+                    'is_active' => true,
+                    'status' => 'active',
+                ]);
+                $this->info('Seeded primary DigiKey account into `digikey_accounts` table.');
+            }
+        }
+    }
+
+    /**
+     * Switch to the next available and usable DigiKey account.
+     */
+    private function switchToNextAccount(?int $excludeId = null): bool
+    {
+        $query = DigiKeyAccount::usable();
+        if ($excludeId !== null) {
+            $query->where('id', '!=', $excludeId);
+        }
+
+        $accounts = $query->orderBy('last_used_at', 'asc')->get();
+
+        foreach ($accounts as $account) {
+            try {
+                $token = $this->generateAccessTokenForAccount($account);
+                if ($token) {
+                    $this->currentAccount = $account;
+                    $this->accessToken = $token;
+                    $account->touchUsed();
+                    $this->info("Successfully switched to DigiKey Account: [ID: {$account->id}] {$account->account_name}");
+                    return true;
+                }
+            } catch (DigiKeyRateLimitException $e) {
+                $this->warn("Account [ID: {$account->id}] {$account->account_name} rate limit reached. Marking rate limited.");
+                $account->markRateLimited($e->getMessage());
+            } catch (\Exception $e) {
+                $this->warn("Account [ID: {$account->id}] {$account->account_name} failed: " . $e->getMessage());
+                $account->markError($e->getMessage());
+            }
+        }
+
+        $this->currentAccount = null;
+        $this->accessToken = null;
+        return false;
+    }
+
+    /**
+     * Generate OAuth access token for a specific DigiKey account record.
+     */
+    private function generateAccessTokenForAccount(DigiKeyAccount $account): ?string
+    {
+        $clientId = $account->client_id;
+        $clientSecret = $account->decrypted_client_secret;
+        $mode = $account->mode ?? 'live';
+
         $url = ($mode === 'sandbox')
             ? 'https://sandbox-api.digikey.com/v1/oauth2/token'
             : 'https://api.digikey.com/v1/oauth2/token';
@@ -203,18 +261,50 @@ class SyncDigiKeyProducts extends Command
             $data = $response->json();
             $token = $data['access_token'] ?? null;
             if ($token) {
-                $this->info('Obtained fresh DigiKey OAuth token successfully.');
                 return $token;
             }
         }
 
-        $this->error('OAuth Error: ' . $response->body());
-        Log::error('DigiKey OAuth Token Error', ['body' => $response->body()]);
-        return null;
+        $errorMsg = 'OAuth Error (' . $response->status() . '): ' . $response->body();
+        Log::error('DigiKey OAuth Token Error', ['account_id' => $account->id, 'body' => $response->body()]);
+        throw new DigiKeyAccountException($errorMsg);
     }
 
-    private function fetchAndSaveProductsForBatch(DigiKeyCategory $subcategory, array $mfgIds, int $offset, int $limit, string $clientId, string $clientSecret, string $mode, bool $isRetry = false): int
+    /**
+     * Wrapper function that handles API requests with automatic account fallback on rate limits or errors.
+     */
+    private function fetchAndSaveProductsWithAccountFallback(DigiKeyCategory $subcategory, array $mfgIds, int $offset, int $limit): int
     {
+        while ($this->currentAccount !== null) {
+            try {
+                return $this->fetchAndSaveProductsForBatch($subcategory, $mfgIds, $offset, $limit);
+            } catch (DigiKeyRateLimitException $e) {
+                $this->warn("\nRate limit (429) hit on DigiKey Account [ID: {$this->currentAccount->id}] {$this->currentAccount->account_name}. Switching account...");
+                $this->currentAccount->markRateLimited($e->getMessage());
+                if (!$this->switchToNextAccount($this->currentAccount->id)) {
+                    throw $e; // No more accounts available
+                }
+            } catch (DigiKeyAccountException $e) {
+                $this->warn("\nAPI error hit on DigiKey Account [ID: {$this->currentAccount->id}] {$this->currentAccount->account_name}: {$e->getMessage()}. Switching account...");
+                $this->currentAccount->markError($e->getMessage());
+                if (!$this->switchToNextAccount($this->currentAccount->id)) {
+                    throw new DigiKeyRateLimitException('All accounts failed or rate limited');
+                }
+            }
+        }
+
+        throw new DigiKeyRateLimitException('No active DigiKey account available');
+    }
+
+    private function fetchAndSaveProductsForBatch(DigiKeyCategory $subcategory, array $mfgIds, int $offset, int $limit, bool $isRetry = false): int
+    {
+        if (!$this->currentAccount || !$this->accessToken) {
+            throw new DigiKeyAccountException('No active DigiKey account session available');
+        }
+
+        $clientId = $this->currentAccount->client_id;
+        $mode = $this->currentAccount->mode ?? 'live';
+
         $searchUrl = ($mode === 'sandbox')
             ? 'https://sandbox-api.digikey.com/products/v4/search/keyword'
             : 'https://api.digikey.com/products/v4/search/keyword';
@@ -256,19 +346,22 @@ class SyncDigiKeyProducts extends Command
 
         if ($response->status() === 401 || ($response->failed() && str_contains(strtolower($response->body()), 'token'))) {
             if (!$isRetry) {
-                $this->warn("DigiKey Access Token expired during request. Refreshing token...");
-                $this->accessToken = $this->generateAccessToken($clientId, $clientSecret, $mode);
-                if ($this->accessToken) {
-                    return $this->fetchAndSaveProductsForBatch($subcategory, $mfgIds, $offset, $limit, $clientId, $clientSecret, $mode, true);
+                $this->warn("DigiKey Access Token expired during request. Refreshing token for current account...");
+                try {
+                    $this->accessToken = $this->generateAccessTokenForAccount($this->currentAccount);
+                    if ($this->accessToken) {
+                        return $this->fetchAndSaveProductsForBatch($subcategory, $mfgIds, $offset, $limit, true);
+                    }
+                } catch (\Exception $ex) {
+                    throw new DigiKeyAccountException('Token refresh failed: ' . $ex->getMessage());
                 }
             }
-            $this->error("Failed fetching products for Cat {$subcategory->category_id} and Mfg Batch (" . implode(',', $mfgIds) . "): Token refresh failed.");
-            return 0;
+            throw new DigiKeyAccountException('Unauthorized (401) token error');
         }
 
         if (!$response->successful()) {
             $this->error("Error fetching products for Cat {$subcategory->category_id} and Mfg Batch (" . implode(',', $mfgIds) . "): " . $response->body());
-            return 0;
+            throw new DigiKeyAccountException('HTTP Error ' . $response->status() . ': ' . $response->body());
         }
 
         $json = $response->json();
@@ -332,3 +425,4 @@ class SyncDigiKeyProducts extends Command
         return $count;
     }
 }
+
