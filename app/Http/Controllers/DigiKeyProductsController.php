@@ -29,11 +29,12 @@ class DigiKeyProductsController extends Controller
 
         if (!empty($keyword)) {
             $query->where(function ($q) use ($keyword) {
-                $q->where('search_keyword', 'like', "%{$keyword}%")
+                $q->where('digikey_product_number', 'like', "%{$keyword}%")
                   ->orWhere('manufacturer_product_number', 'like', "%{$keyword}%")
+                  ->orWhere('manufacturer_name', 'like', "%{$keyword}%")
+                  ->orWhere('search_keyword', 'like', "%{$keyword}%")
                   ->orWhere('product_description', 'like', "%{$keyword}%")
-                  ->orWhere('detailed_description', 'like', "%{$keyword}%")
-                  ->orWhere('manufacturer_name', 'like', "%{$keyword}%");
+                  ->orWhere('detailed_description', 'like', "%{$keyword}%");
             });
         }
 
