@@ -291,13 +291,28 @@ class PcbPricingController extends Controller
                 }
             }
 
+            $gstPercentage = 18;
+            if (Schema::hasTable('pcb_pricing_settings')) {
+                $gstRow = PcbPricingSetting::where('key', 'gst_percentage')->first();
+                if ($gstRow && isset($gstRow->value['percentage'])) {
+                    $gstPercentage = (float)$gstRow->value['percentage'];
+                }
+            }
+            if ($gstPercentage === (float)18 && Schema::hasTable('credentials')) {
+                $cred = \App\Models\Credential::where('key', 'GST_PERCENTAGE')->first();
+                if ($cred && !empty($cred->decrypted_value)) {
+                    $gstPercentage = (float)$cred->decrypted_value;
+                }
+            }
+
             return response()->json([
                 'success' => true,
                 'data' => [
                     'fixedCosts' => $fixedCosts,
                     'priceTiers' => $priceTiers,
                     'shippingOptions' => $shippingOptions,
-                    'minPartsOrderAmount' => $minPartsOrderAmount
+                    'minPartsOrderAmount' => $minPartsOrderAmount,
+                    'gstPercentage' => $gstPercentage
                 ]
             ]);
         } catch (\Throwable $th) {
@@ -307,7 +322,8 @@ class PcbPricingController extends Controller
                 'data' => [
                     'fixedCosts' => self::getDefaultFixedCosts(),
                     'priceTiers' => self::getDefaultPriceTiers(),
-                    'shippingOptions' => self::getDefaultShippingOptions()
+                    'shippingOptions' => self::getDefaultShippingOptions(),
+                    'gstPercentage' => 18
                 ]
             ]);
         }
@@ -347,6 +363,13 @@ class PcbPricingController extends Controller
                 PcbPricingSetting::updateOrCreate(
                     ['key' => 'min_parts_order_amount'],
                     ['value' => ['amount' => (float)$request->input('minPartsOrderAmount')], 'description' => 'Minimum order amount for parts tab']
+                );
+            }
+
+            if ($request->has('gstPercentage')) {
+                PcbPricingSetting::updateOrCreate(
+                    ['key' => 'gst_percentage'],
+                    ['value' => ['percentage' => (float)$request->input('gstPercentage')], 'description' => 'GST Percentage for PCB calculations']
                 );
             }
 

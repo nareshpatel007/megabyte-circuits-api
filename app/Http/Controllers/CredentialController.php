@@ -93,5 +93,12 @@ class CredentialController extends Controller
         }
 
         $credential->save();
+
+        if ($key === 'GST_PERCENTAGE' && \Illuminate\Support\Facades\Schema::hasTable('pcb_pricing_settings')) {
+            \App\Models\PcbPricingSetting::updateOrCreate(
+                ['key' => 'gst_percentage'],
+                ['value' => ['percentage' => (float)$value], 'description' => 'GST Percentage for PCB calculations']
+            );
+        }
     }
 }
