@@ -247,7 +247,7 @@ class SyncDigiKeyProducts extends Command
             ? 'https://sandbox-api.digikey.com/v1/oauth2/token'
             : 'https://api.digikey.com/v1/oauth2/token';
 
-        $response = Http::asForm()->post($url, [
+        $response = Http::timeout(30)->asForm()->post($url, [
             'client_id' => $clientId,
             'client_secret' => $clientSecret,
             'grant_type' => 'client_credentials',
@@ -275,6 +275,9 @@ class SyncDigiKeyProducts extends Command
      */
     private function fetchAndSaveProductsWithAccountFallback(DigiKeyCategory $subcategory, array $mfgIds, int $offset, int $limit): int
     {
+        $networkRetryCount = 0;
+        $maxNetworkRetries = 3;
+
         while ($this->currentAccount !== null) {
             try {
                 return $this->fetchAndSaveProductsForBatch($subcategory, $mfgIds, $offset, $limit);
@@ -289,6 +292,18 @@ class SyncDigiKeyProducts extends Command
                 $this->currentAccount->markError($e->getMessage());
                 if (!$this->switchToNextAccount($this->currentAccount->id)) {
                     throw new DigiKeyRateLimitException('All accounts failed or rate limited');
+                }
+            } catch (\Illuminate\Http\Client\ConnectionException $e) {
+                $networkRetryCount++;
+                if ($networkRetryCount >= $maxNetworkRetries) {
+                    $this->warn("\nNetwork connection timeout persisted after {$maxNetworkRetries} attempts on Account [ID: {$this->currentAccount->id}]. Trying next account...");
+                    if (!$this->switchToNextAccount($this->currentAccount->id)) {
+                        throw $e;
+                    }
+                    $networkRetryCount = 0;
+                } else {
+                    $this->warn("\nNetwork timeout hit on DigiKey API: {$e->getMessage()}. Retrying request ({$networkRetryCount}/{$maxNetworkRetries}) in 3 seconds...");
+                    sleep(3);
                 }
             }
         }
@@ -332,7 +347,9 @@ class SyncDigiKeyProducts extends Command
 
         $this->apiCallsMade++;
 
-        $response = Http::withHeaders([
+        $response = Http::timeout(30)->retry(3, 1000, function ($exception) {
+            return $exception instanceof \Illuminate\Http\Client\ConnectionException;
+        })->withHeaders([
             'X-DIGIKEY-Client-Id' => $clientId,
             'Authorization' => 'Bearer ' . $this->accessToken,
             'X-DIGIKEY-Locale-Site' => 'IN',
@@ -415,7 +432,7 @@ class SyncDigiKeyProducts extends Command
                     'manufacturer_lead_weeks' => $p['ManufacturerLeadWeeks'] ?? null,
                     'manufacturer_public_quantity' => $p['ManufacturerPublicQuantity'] ?? 0,
                     'quantity_available' => $p['QuantityAvailable'] ?? 0,
-                    'product_status' => $p['ProductStatus']['Status'] ?? 'Active',
+                    'product_status' => (trim($p['ProductStatus']['Status'] ?? ($p['ProductStatus'] ?? 'Active')) === 'Discontinued at DigiKey') ? 'Discontinued' : ($p['ProductStatus']['Status'] ?? ($p['ProductStatus'] ?? 'Active')),
                     'search_keyword' => $subcategory->name
                 ]
             );

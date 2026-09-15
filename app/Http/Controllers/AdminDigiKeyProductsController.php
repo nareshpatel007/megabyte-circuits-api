@@ -58,7 +58,7 @@ class AdminDigiKeyProductsController extends Controller
                 'is_custom_margin' => $allMargins['has_custom'],
                 'final_customer_price' => $pricing['unit_price'],
                 'quantity_available' => (int) $item->quantity_available,
-                'product_status' => $item->product_status ?? 'Active',
+                'product_status' => (trim($item->product_status ?? 'Active') === 'Discontinued at DigiKey') ? 'Discontinued' : ($item->product_status ?? 'Active'),
                 'pricing_tiers' => $pricing['tiers'],
                 'updated_at' => $item->updated_at ? $item->updated_at->toDateTimeString() : null,
             ];

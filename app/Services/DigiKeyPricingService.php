@@ -297,7 +297,7 @@ class DigiKeyPricingService
             'PhotoUrl' => $item->photo_url,
             'QuantityAvailable' => (int) $item->quantity_available,
             'ProductStatus' => [
-                'Status' => $item->product_status ?? 'Active'
+                'Status' => (trim($item->product_status ?? 'Active') === 'Discontinued at DigiKey') ? 'Discontinued' : ($item->product_status ?? 'Active')
             ],
             'Category' => $item->search_keyword,
             'ProductVariations' => $productVariations,

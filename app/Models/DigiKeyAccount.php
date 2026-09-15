@@ -70,7 +70,7 @@ class DigiKeyAccount extends Model
             ->where('status', '!=', 'disabled')
             ->where(function ($q) {
                 $q->whereNull('rate_limited_until')
-                  ->orWhere('rate_limited_until', '<=', now());
+                    ->orWhere('rate_limited_until', '<=', now());
             });
     }
 
@@ -79,11 +79,11 @@ class DigiKeyAccount extends Model
      */
     public function markRateLimited(string $reason = 'Daily limit reached'): void
     {
-        $this->update([
-            'status' => 'rate_limited',
-            'rate_limited_until' => now()->addDay(),
-            'error_message' => $reason,
-        ]);
+        // $this->update([
+        //     'status' => 'rate_limited',
+        //     'rate_limited_until' => now()->addDay(),
+        //     'error_message' => $reason,
+        // ]);
     }
 
     /**
