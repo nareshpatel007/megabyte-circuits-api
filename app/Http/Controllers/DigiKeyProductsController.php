@@ -48,33 +48,8 @@ class DigiKeyProductsController extends Controller
         $totalCount = $query->count();
         $products = $query->orderBy('id', 'asc')->skip($offset)->take($limit)->get();
 
-        // Get all categories & subcategories list from digikey_categories table
-        $allCategories = \App\Models\DigiKeyCategory::where('parent_id', '!=', 0)
-            ->select('name', 'product_count as count')
-            ->orderBy('name', 'asc')
-            ->get();
-
-        if ($allCategories->isEmpty()) {
-            $allCategories = DigiKeyProduct::selectRaw('search_keyword as name, COUNT(*) as count')
-                ->whereNotNull('search_keyword')
-                ->groupBy('search_keyword')
-                ->orderBy('search_keyword', 'asc')
-                ->get();
-        }
-
-        // Merge actual stored DB product counts for active categories
-        $dbCounts = DigiKeyProduct::selectRaw('search_keyword as name, COUNT(*) as count')
-            ->whereNotNull('search_keyword')
-            ->groupBy('search_keyword')
-            ->pluck('count', 'name');
-
-        $categories = $allCategories->map(function ($cat) use ($dbCounts) {
-            $dbCount = $dbCounts[$cat->name] ?? 0;
-            return [
-                'name' => $cat->name,
-                'count' => $dbCount > 0 ? (int)$dbCount : (int)$cat->count
-            ];
-        })->unique('name')->values();
+        // Get active categories list (only categories that actually have products in local DB)
+        $categories = $this->getActiveLocalCategories();
 
         // Map format for frontend standard with dynamic customer pricing
         $formatted = $products->map(function ($item) {
@@ -122,35 +97,64 @@ class DigiKeyProductsController extends Controller
      */
     public function categories()
     {
-        $allCategories = \App\Models\DigiKeyCategory::where('parent_id', '!=', 0)
-            ->select('name', 'product_count as count')
-            ->orderBy('name', 'asc')
-            ->get();
-
-        if ($allCategories->isEmpty()) {
-            $allCategories = DigiKeyProduct::selectRaw('search_keyword as name, COUNT(*) as count')
-                ->whereNotNull('search_keyword')
-                ->groupBy('search_keyword')
-                ->orderBy('search_keyword', 'asc')
-                ->get();
-        }
-
-        $dbCounts = DigiKeyProduct::selectRaw('search_keyword as name, COUNT(*) as count')
-            ->whereNotNull('search_keyword')
-            ->groupBy('search_keyword')
-            ->pluck('count', 'name');
-
-        $categories = $allCategories->map(function ($cat) use ($dbCounts) {
-            $dbCount = $dbCounts[$cat->name] ?? 0;
-            return [
-                'name' => $cat->name,
-                'count' => $dbCount > 0 ? (int)$dbCount : (int)$cat->count
-            ];
-        })->unique('name')->values();
+        $categories = $this->getActiveLocalCategories();
 
         return response()->json([
             'Categories' => $categories
         ]);
+    }
+
+    /**
+     * Helper to return only categories that actually have products in local DB
+     */
+    private function getActiveLocalCategories()
+    {
+        $dbCountsByName = DigiKeyProduct::selectRaw('search_keyword as name, COUNT(*) as count')
+            ->whereNotNull('search_keyword')
+            ->where('search_keyword', '!=', '')
+            ->groupBy('search_keyword')
+            ->pluck('count', 'name');
+
+        $dbCountsByCatId = DigiKeyProduct::selectRaw('category_id, COUNT(*) as count')
+            ->whereNotNull('category_id')
+            ->groupBy('category_id')
+            ->pluck('count', 'category_id');
+
+        $allCategories = \App\Models\DigiKeyCategory::where('parent_id', '!=', 0)
+            ->select('category_id', 'name')
+            ->orderBy('name', 'asc')
+            ->get();
+
+        $categories = $allCategories->filter(function ($cat) use ($dbCountsByName, $dbCountsByCatId) {
+            $countByName = $dbCountsByName[$cat->name] ?? 0;
+            $countById = $dbCountsByCatId[$cat->category_id] ?? 0;
+            return ($countByName > 0 || $countById > 0);
+        })->map(function ($cat) use ($dbCountsByName, $dbCountsByCatId) {
+            $countByName = $dbCountsByName[$cat->name] ?? 0;
+            $countById = $dbCountsByCatId[$cat->category_id] ?? 0;
+            $count = $countByName > 0 ? $countByName : $countById;
+            return [
+                'name' => $cat->name,
+                'count' => (int) $count
+            ];
+        })->unique('name')->values();
+
+        if ($categories->isEmpty()) {
+            $categories = DigiKeyProduct::selectRaw('search_keyword as name, COUNT(*) as count')
+                ->whereNotNull('search_keyword')
+                ->where('search_keyword', '!=', '')
+                ->groupBy('search_keyword')
+                ->orderBy('search_keyword', 'asc')
+                ->get()
+                ->map(function ($cat) {
+                    return [
+                        'name' => $cat->name,
+                        'count' => (int) $cat->count
+                    ];
+                })->values();
+        }
+
+        return $categories;
     }
 
 
