@@ -293,6 +293,13 @@ class SyncDigiKeyProducts extends Command
                 if (!$this->switchToNextAccount($this->currentAccount->id)) {
                     throw new DigiKeyRateLimitException('All accounts failed or rate limited');
                 }
+            } catch (\Illuminate\Http\Client\RequestException $e) {
+                $status = $e->response ? $e->response->status() : 'Unknown';
+                $this->warn("\nHTTP Request Exception ({$status}) on DigiKey Account [ID: {$this->currentAccount->id}]: {$e->getMessage()}. Switching account...");
+                $this->currentAccount->markError($e->getMessage());
+                if (!$this->switchToNextAccount($this->currentAccount->id)) {
+                    throw new DigiKeyRateLimitException('All accounts failed or rate limited');
+                }
             } catch (\Illuminate\Http\Client\ConnectionException $e) {
                 $networkRetryCount++;
                 if ($networkRetryCount >= $maxNetworkRetries) {
@@ -347,15 +354,19 @@ class SyncDigiKeyProducts extends Command
 
         $this->apiCallsMade++;
 
-        $response = Http::timeout(30)->retry(3, 1000, function ($exception) {
-            return $exception instanceof \Illuminate\Http\Client\ConnectionException;
-        })->withHeaders([
-            'X-DIGIKEY-Client-Id' => $clientId,
-            'Authorization' => 'Bearer ' . $this->accessToken,
-            'X-DIGIKEY-Locale-Site' => 'IN',
-            'X-DIGIKEY-Locale-Currency' => 'INR',
-            'Content-Type' => 'application/json',
-        ])->post($searchUrl, $payload);
+        try {
+            $response = Http::timeout(30)->retry(3, 1000, function ($exception) {
+                return $exception instanceof \Illuminate\Http\Client\ConnectionException;
+            })->withHeaders([
+                'X-DIGIKEY-Client-Id' => $clientId,
+                'Authorization' => 'Bearer ' . $this->accessToken,
+                'X-DIGIKEY-Locale-Site' => 'IN',
+                'X-DIGIKEY-Locale-Currency' => 'INR',
+                'Content-Type' => 'application/json',
+            ])->post($searchUrl, $payload);
+        } catch (\Illuminate\Http\Client\RequestException $e) {
+            $response = $e->response;
+        }
 
         if ($response->status() === 429 || str_contains(strtolower($response->body()), 'ratelimit') || str_contains(strtolower($response->body()), 'too many requests')) {
             throw new DigiKeyRateLimitException('Daily Ratelimit exceeded');
