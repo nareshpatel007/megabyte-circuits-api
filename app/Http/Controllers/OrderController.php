@@ -908,16 +908,21 @@ class OrderController extends Controller
     public function importSample(OrderImportService $importService)
     {
         try {
+            while (ob_get_level() > 0) {
+                @ob_end_clean();
+            }
+
             $spreadsheet = $importService->generateSampleSheet();
             $fileName = 'sample_pcb_manufacturing_orders.xlsx';
-            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+            $tempFile = tempnam(sys_get_temp_dir(), 'pcb_sample_') . '.xlsx';
 
-            return response()->streamDownload(function () use ($writer) {
-                $writer->save('php://output');
-            }, $fileName, [
-                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+            $writer->save($tempFile);
+
+            return response()->download($tempFile, $fileName, [
+                'Content-Type'  => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 'Cache-Control' => 'max-age=0, no-cache, must-revalidate',
-            ]);
+            ])->deleteFileAfterSend(true);
         } catch (\Throwable $th) {
             return response()->json([
                 'status' => false,
@@ -1038,16 +1043,21 @@ class OrderController extends Controller
                     'Cache-Control' => 'max-age=0, no-cache, must-revalidate',
                 ]);
             } else {
+                while (ob_get_level() > 0) {
+                    @ob_end_clean();
+                }
+
                 $spreadsheet = $exportService->generateExport($filters);
                 $fileName = 'pcb-manufacturing-export-' . date('Y-m-d') . '.xlsx';
-                $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+                $tempFile = tempnam(sys_get_temp_dir(), 'pcb_export_') . '.xlsx';
 
-                return response()->streamDownload(function () use ($writer) {
-                    $writer->save('php://output');
-                }, $fileName, [
-                    'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+                $writer->save($tempFile);
+
+                return response()->download($tempFile, $fileName, [
+                    'Content-Type'  => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                     'Cache-Control' => 'max-age=0, no-cache, must-revalidate',
-                ]);
+                ])->deleteFileAfterSend(true);
             }
         } catch (\Throwable $th) {
             return response()->json([
