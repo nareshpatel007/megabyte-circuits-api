@@ -9,6 +9,8 @@ use Illuminate\Support\Str;
 use App\Models\PcbOrder;
 use App\Models\PcbOrderMeta;
 use App\Models\PcbOrderStatusHistory;
+use App\Services\OrderImportService;
+use App\Services\OrderExportService;
 
 class OrderController extends Controller
 {
@@ -896,6 +898,161 @@ class OrderController extends Controller
             return response()->json([
                 'status' => false,
                 'message' => 'Failed to reorder: ' . $th->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Download sample manufacturer Excel sheet
+     */
+    public function importSample(OrderImportService $importService)
+    {
+        try {
+            $spreadsheet = $importService->generateSampleSheet();
+            $fileName = 'sample_pcb_manufacturing_orders.xlsx';
+            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+
+            return response()->streamDownload(function () use ($writer) {
+                $writer->save('php://output');
+            }, $fileName, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'Cache-Control' => 'max-age=0, no-cache, must-revalidate',
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to generate sample sheet: ' . $th->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Preview manufacturer Excel file import
+     */
+    public function importPreview(Request $request, OrderImportService $importService)
+    {
+        $validator = Validator::make($request->all(), [
+            'file' => 'required|file|mimes:xlsx,xls|max:51200',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Invalid file uploaded. Please upload a valid .xlsx or .xls file (max 50MB).',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $file = $request->file('file');
+            $filePath = $file->getRealPath();
+            $result = $importService->previewImport($filePath);
+
+            return response()->json($result, $result['success'] ? 200 : 400);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to preview import file: ' . $th->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Execute manufacturer Excel file import
+     */
+    public function importExecute(Request $request, OrderImportService $importService)
+    {
+        $validator = Validator::make($request->all(), [
+            'file' => 'required|file|mimes:xlsx,xls|max:51200',
+            'duplicate_action' => 'nullable|string|in:skip,update,create_new',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $file = $request->file('file');
+            $duplicateAction = $request->input('duplicate_action', 'skip');
+            $filePath = $file->getRealPath();
+
+            $result = $importService->executeImport($filePath, $duplicateAction);
+
+            return response()->json($result, $result['success'] ? 200 : 500);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to execute import: ' . $th->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Live preview table data for Export Modal before downloading
+     */
+    public function exportPreview(Request $request, OrderExportService $exportService)
+    {
+        try {
+            $filters = $request->only([
+                'start_date', 'end_date', 'date_field', 'status', 'customer_name',
+                'layer', 'mask', 'c_g', 'tool', 'combo', 'p_n', 'quote_number', 'bill_number',
+                'search', 'order_ids'
+            ]);
+            $page = (int)$request->input('page', 1);
+            $perPage = (int)$request->input('per_page', 10);
+
+            $result = $exportService->previewFilteredRecords($filters, $page, $perPage);
+            return response()->json($result);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to preview export query: ' . $th->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Export PCB Orders in exact manufacturer format (XLSX or CSV)
+     */
+    public function export(Request $request, OrderExportService $exportService)
+    {
+        try {
+            $filters = $request->only([
+                'start_date', 'end_date', 'date_field', 'status', 'customer_name',
+                'layer', 'mask', 'c_g', 'tool', 'combo', 'p_n', 'quote_number', 'bill_number',
+                'search', 'order_ids'
+            ]);
+            $format = strtolower($request->input('format', 'xlsx'));
+
+            if ($format === 'csv') {
+                $csvContent = $exportService->generateCsvExport($filters);
+                $fileName = 'pcb-manufacturing-export-' . date('Y-m-d') . '.csv';
+
+                return response($csvContent, 200, [
+                    'Content-Type' => 'text/csv; charset=UTF-8',
+                    'Content-Disposition' => "attachment; filename=\"{$fileName}\"",
+                    'Cache-Control' => 'max-age=0, no-cache, must-revalidate',
+                ]);
+            } else {
+                $spreadsheet = $exportService->generateExport($filters);
+                $fileName = 'pcb-manufacturing-export-' . date('Y-m-d') . '.xlsx';
+                $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+
+                return response()->streamDownload(function () use ($writer) {
+                    $writer->save('php://output');
+                }, $fileName, [
+                    'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'Cache-Control' => 'max-age=0, no-cache, must-revalidate',
+                ]);
+            }
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to export orders: ' . $th->getMessage()
             ], 500);
         }
     }

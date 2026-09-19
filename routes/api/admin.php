@@ -22,6 +22,11 @@ Route::middleware('verify.admin.token')->group(function () {
         // Order Management
         Route::get('orders', [OrderController::class, 'index']);
         Route::post('orders', [OrderController::class, 'createAdminOrder']);
+        Route::get('orders/import-sample', [OrderController::class, 'importSample']);
+        Route::post('orders/import-preview', [OrderController::class, 'importPreview']);
+        Route::post('orders/import', [OrderController::class, 'importExecute']);
+        Route::get('orders/export-preview', [OrderController::class, 'exportPreview']);
+        Route::get('orders/export', [OrderController::class, 'export']);
         Route::post('orders/{id}/reorder', [OrderController::class, 'reorder']);
         Route::get('orders/{id}', [OrderController::class, 'show']);
         Route::put('orders/{id}', [OrderController::class, 'update']);
