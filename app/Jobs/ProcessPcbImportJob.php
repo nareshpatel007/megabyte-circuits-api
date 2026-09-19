@@ -44,7 +44,7 @@ class ProcessPcbImportJob implements ShouldQueue
         }
 
         try {
-            $importService->processBackgroundImport($import);
+            $importService->processBackgroundImportFromStaging($import);
         } catch (\Throwable $th) {
             Log::error("ProcessPcbImportJob failed for import #{$this->importId}: " . $th->getMessage(), [
                 'exception' => $th

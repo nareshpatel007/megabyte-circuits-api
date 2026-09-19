@@ -19,6 +19,8 @@ class PcbImport extends Model
         'file_size',
         'status',
         'total_rows',
+        'valid_rows',
+        'invalid_rows',
         'processed_rows',
         'successful_rows',
         'failed_rows',
@@ -36,6 +38,8 @@ class PcbImport extends Model
 
     protected $casts = [
         'total_rows' => 'integer',
+        'valid_rows' => 'integer',
+        'invalid_rows' => 'integer',
         'processed_rows' => 'integer',
         'successful_rows' => 'integer',
         'failed_rows' => 'integer',

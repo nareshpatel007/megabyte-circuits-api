@@ -1031,6 +1031,114 @@ class OrderController extends Controller
     }
 
     /**
+     * Step 1: Upload & Stage Excel file without modifying production tables
+     */
+    public function uploadImportStaged(Request $request, OrderImportService $importService)
+    {
+        $validator = Validator::make($request->all(), [
+            'file' => 'required|file|mimes:xlsx,xls|max:51200',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Invalid file uploaded. Please upload a valid .xlsx or .xls file (max 50MB).',
+                'errors'  => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $file = $request->file('file');
+            $originalName = $file->getClientOriginalName();
+            $storedPath = $file->store('pcb_imports', 'local');
+            $fullPath = \Illuminate\Support\Facades\Storage::disk('local')->path($storedPath);
+            $adminId = $request->attributes->get('admin_id') ?: 1;
+
+            $import = $importService->stageImportFile($fullPath, $originalName, $adminId);
+
+            return response()->json([
+                'status'  => true,
+                'message' => 'File staged successfully for review.',
+                'data'    => $import
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Failed to stage import file: ' . $th->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Step 2: Get paginated staged rows for review page
+     */
+    public function getStagedRows(Request $request, $id, OrderImportService $importService)
+    {
+        try {
+            $filters = $request->only(['validation_status', 'search']);
+            $page = (int)$request->input('page', 1);
+            $perPage = (int)$request->input('per_page', 50);
+
+            $result = $importService->getStagedRows((int)$id, $filters, $page, $perPage);
+            return response()->json($result);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Failed to fetch staged rows: ' . $th->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Step 2: Live update single cell value in staged row
+     */
+    public function updateStagedRowCell(Request $request, $id, $rowId, OrderImportService $importService)
+    {
+        $validator = Validator::make($request->all(), [
+            'field_key' => 'required|string',
+            'value'     => 'nullable',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Invalid field_key or value.',
+                'errors'  => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $fieldKey = $request->input('field_key');
+            $value = $request->input('value');
+
+            $result = $importService->updateStagedCell((int)$id, (int)$rowId, $fieldKey, $value);
+            return response()->json($result);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Failed to update staged cell: ' . $th->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Step 2 -> Step 3: Final validation & start background import
+     */
+    public function startStagedImport(Request $request, $id, OrderImportService $importService)
+    {
+        try {
+            $duplicateAction = $request->input('duplicate_action', 'skip');
+            $result = $importService->startStagedImport((int)$id, $duplicateAction);
+            return response()->json($result, $result['success'] ? 200 : 422);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status'  => false,
+                'message' => 'Failed to start import: ' . $th->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Get list of PCB import records with pagination & filtering
      */
     public function listImports(Request $request)
