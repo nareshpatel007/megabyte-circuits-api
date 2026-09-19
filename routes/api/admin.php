@@ -25,6 +25,11 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::get('orders/import-sample', [OrderController::class, 'importSample']);
         Route::post('orders/import-preview', [OrderController::class, 'importPreview']);
         Route::post('orders/import', [OrderController::class, 'importExecute']);
+        Route::post('orders/import-upload', [OrderController::class, 'uploadImport']);
+        Route::get('orders/imports', [OrderController::class, 'listImports']);
+        Route::get('orders/imports/{id}', [OrderController::class, 'showImport']);
+        Route::post('orders/imports/{id}/retry', [OrderController::class, 'retryImport']);
+        Route::post('orders/imports/{id}/cancel', [OrderController::class, 'cancelImport']);
         Route::get('orders/export-preview', [OrderController::class, 'exportPreview']);
         Route::get('orders/export', [OrderController::class, 'export']);
         Route::post('orders/{id}/reorder', [OrderController::class, 'reorder']);

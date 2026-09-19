@@ -8,6 +8,7 @@ use App\Models\PcbOrderStatusHistory;
 use App\Models\PcbUser;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 
@@ -125,6 +126,373 @@ class OrderImportService
         }
 
         return $spreadsheet;
+    }
+
+    /**
+     * Perform lightweight header validation during upload request
+     */
+    public function validateHeaderOnly(string $filePath): array
+    {
+        if (!file_exists($filePath) || !is_readable($filePath)) {
+            return [
+                'success' => false,
+                'message' => 'Uploaded file is unreadable or missing.',
+            ];
+        }
+
+        try {
+            $spreadsheet = IOFactory::load($filePath);
+            $sheet = $spreadsheet->getActiveSheet();
+            $allRows = $sheet->toArray(null, true, true, false);
+
+            if (empty($allRows) || count($allRows) < 1) {
+                return [
+                    'success' => false,
+                    'message' => 'Spreadsheet is empty.',
+                ];
+            }
+
+            $rawHeaders = $allRows[0];
+            $headerMap = $this->mapHeaders($rawHeaders);
+
+            if (!empty($headerMap['missing_headers'])) {
+                return [
+                    'success' => false,
+                    'message' => 'Required manufacturer columns are missing: ' . implode(', ', $headerMap['missing_headers']),
+                    'missing_headers' => $headerMap['missing_headers'],
+                ];
+            }
+
+            $totalRows = 0;
+            $countRows = count($allRows);
+            for ($i = 1; $i < $countRows; $i++) {
+                if (!$this->isRowEmpty($allRows[$i])) {
+                    $totalRows++;
+                }
+            }
+
+            return [
+                'success'    => true,
+                'total_rows' => $totalRows,
+                'header_map' => $headerMap['column_index_map'],
+            ];
+        } catch (\Throwable $e) {
+            return [
+                'success' => false,
+                'message' => 'Failed to open spreadsheet: ' . $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * Queue an uploaded file for background import processing
+     */
+    public function queueImportFile($file, string $duplicateAction = 'skip', ?int $adminId = null): array
+    {
+        $originalName = $file->getClientOriginalName();
+        $ext = strtolower($file->getClientOriginalExtension());
+
+        if (!in_array($ext, ['xlsx', 'xls'], true)) {
+            return [
+                'success' => false,
+                'message' => 'Invalid file format. Please upload a .xlsx or .xls file.',
+            ];
+        }
+
+        $tempPath = $file->getRealPath();
+        $headerCheck = $this->validateHeaderOnly($tempPath);
+
+        if (!$headerCheck['success']) {
+            return $headerCheck;
+        }
+
+        // Store file temporarily in storage/app/imports/pcb/
+        $generatedName = date('Ymd_His') . '_' . \Illuminate\Support\Str::random(10) . '.' . $ext;
+        $storedRelPath = $file->storeAs('imports/pcb', $generatedName, 'local');
+
+        $import = \App\Models\PcbImport::create([
+            'original_file_name' => $originalName,
+            'file_name'          => $generatedName,
+            'file_path'          => $storedRelPath,
+            'file_type'          => $ext,
+            'file_size'          => $file->getSize(),
+            'status'             => 'queued',
+            'total_rows'         => $headerCheck['total_rows'],
+            'duplicate_action'   => $duplicateAction,
+            'created_by'         => $adminId ?: 1,
+        ]);
+
+        // Dispatch background job
+        \App\Jobs\ProcessPcbImportJob::dispatch($import->id);
+
+        return [
+            'success' => true,
+            'message' => 'Import file uploaded and queued for background processing.',
+            'import'  => $import,
+        ];
+    }
+
+    /**
+     * Process background import job execution
+     */
+    public function processBackgroundImport(\App\Models\PcbImport $import): void
+    {
+        $import->update([
+            'status'     => 'processing',
+            'started_at' => now(),
+        ]);
+
+        $fullPath = Storage::disk('local')->path($import->file_path);
+        if (!file_exists($fullPath)) {
+            $fullPath = storage_path('app/' . $import->file_path);
+        }
+
+        if (!file_exists($fullPath)) {
+            $import->update([
+                'status'        => 'failed',
+                'failed_at'     => now(),
+                'error_message' => "Import file not found at {$fullPath}",
+            ]);
+            return;
+        }
+
+        $spreadsheet = IOFactory::load($fullPath);
+        $sheet = $spreadsheet->getActiveSheet();
+        $allRows = $sheet->toArray(null, true, true, false);
+
+        if (empty($allRows) || count($allRows) < 1) {
+            $import->update([
+                'status'        => 'failed',
+                'failed_at'     => now(),
+                'error_message' => 'Spreadsheet is empty.',
+            ]);
+            return;
+        }
+
+        $rawHeaders = $allRows[0];
+        $headerMap = $this->mapHeaders($rawHeaders);
+        if (!empty($headerMap['missing_headers'])) {
+            $import->update([
+                'status'        => 'failed',
+                'failed_at'     => now(),
+                'error_message' => 'Missing required headers: ' . implode(', ', $headerMap['missing_headers']),
+            ]);
+            return;
+        }
+
+        $colIndices = $headerMap['column_index_map'];
+        $duplicateAction = $import->duplicate_action ?: 'skip';
+
+        // Memory caches for high performance & deduplication
+        $existingOrders = PcbOrder::select('id', 'order_number')->get();
+        $existingOrderMap = [];
+        foreach ($existingOrders as $eo) {
+            if (!empty($eo->order_number)) {
+                $existingOrderMap[strtolower($eo->order_number)] = $eo->id;
+            }
+        }
+
+        $customerCache = $this->buildCustomerCache();
+        $existingCustomersUsedCount = 0;
+        $newCustomersCreatedCount = 0;
+        $usedExistingCustomerIds = [];
+
+        $lastOrder = PcbOrder::withTrashed()
+            ->where('order_number', 'LIKE', 'M%')
+            ->where('order_number', 'NOT LIKE', '%-%')
+            ->orderBy('id', 'desc')
+            ->first();
+
+        $nextNumericId = 1000;
+        if ($lastOrder && !empty($lastOrder->order_number)) {
+            $num = (int) preg_replace('/[^0-9]/', '', $lastOrder->order_number);
+            if ($num > 0) {
+                $nextNumericId = $num;
+            }
+        }
+
+        $totalRowsInSheet = count($allRows);
+        $processedCount = 0;
+        $importedCount = 0;
+        $updatedCount = 0;
+        $skippedCount = 0;
+        $failedCount = 0;
+        $duplicateCount = 0;
+
+        DB::beginTransaction();
+
+        try {
+            for ($i = 1; $i < $totalRowsInSheet; $i++) {
+                $rowData = $allRows[$i];
+                $excelRowNumber = $i + 1;
+
+                if ($this->isRowEmpty($rowData)) {
+                    continue;
+                }
+
+                $processedCount++;
+
+                // Idempotency check: if row already completed, skip database work
+                $existingImportRow = \App\Models\PcbImportRow::where('import_id', $import->id)
+                    ->where('row_number', $excelRowNumber)
+                    ->first();
+
+                if ($existingImportRow && in_array($existingImportRow->status, ['completed', 'skipped'], true)) {
+                    if ($existingImportRow->status === 'completed') {
+                        $importedCount++;
+                    } else {
+                        $skippedCount++;
+                    }
+                    continue;
+                }
+
+                $extracted = $this->extractRowData($rowData, $colIndices);
+                $validation = $this->validateRow($extracted, $excelRowNumber);
+
+                if (!$validation['valid']) {
+                    $failedCount++;
+                    
+                    foreach ($validation['errors'] as $colName => $errMsg) {
+                        \App\Models\PcbImportError::create([
+                            'import_id'     => $import->id,
+                            'row_number'    => $excelRowNumber,
+                            'column_name'   => $colName,
+                            'value'         => is_scalar($extracted[strtolower($colName)] ?? null) ? (string)($extracted[strtolower($colName)] ?? '') : null,
+                            'error_message' => $errMsg,
+                        ]);
+                    }
+
+                    \App\Models\PcbImportRow::updateOrCreate([
+                        'import_id'  => $import->id,
+                        'row_number' => $excelRowNumber,
+                    ], [
+                        'status'        => 'failed',
+                        'error_message' => implode(' | ', array_values($validation['errors'])),
+                        'processed_at'  => now(),
+                    ]);
+
+                    continue;
+                }
+
+                // Customer Resolution
+                $rawCustomerName = trim((string)($extracted['customer_name'] ?? ''));
+                $normCustomer = $this->normalizeCustomerName($rawCustomerName);
+                $resolvedUserId = null;
+
+                if ($normCustomer !== '') {
+                    if (isset($customerCache[$normCustomer])) {
+                        $resolvedUserId = $customerCache[$normCustomer]['id'];
+                        if (!$customerCache[$normCustomer]['is_new']) {
+                            if (!isset($usedExistingCustomerIds[$resolvedUserId])) {
+                                $usedExistingCustomerIds[$resolvedUserId] = true;
+                                $existingCustomersUsedCount++;
+                            }
+                        }
+                    } else {
+                        $cleanCustName = preg_replace('/\s+/', ' ', $rawCustomerName);
+                        $slug = \Illuminate\Support\Str::slug($cleanCustName);
+                        $uniqueEmail = 'customer_' . ($slug ?: 'user') . '_' . substr(md5(strtolower($cleanCustName)), 0, 6) . '@import.local';
+
+                        $newCustomer = PcbUser::create([
+                            'name'         => $cleanCustName,
+                            'company_name' => $cleanCustName,
+                            'email'        => $uniqueEmail,
+                            'status'       => 'active',
+                        ]);
+
+                        $resolvedUserId = $newCustomer->id;
+                        $customerCache[$normCustomer] = [
+                            'id'     => $resolvedUserId,
+                            'name'   => $cleanCustName,
+                            'is_new' => true,
+                        ];
+                        $newCustomersCreatedCount++;
+                    }
+                }
+
+                // Duplicate Order Resolution
+                $toolVal = trim($extracted['tool'] ?? '');
+                $toolValLower = strtolower($toolVal);
+                $existingOrderId = ($toolValLower !== '' && isset($existingOrderMap[$toolValLower])) ? $existingOrderMap[$toolValLower] : null;
+
+                $finalOrderId = null;
+                $rowStatus = 'completed';
+
+                if ($existingOrderId && $duplicateAction !== 'create_new') {
+                    $duplicateCount++;
+                    if ($duplicateAction === 'skip') {
+                        $skippedCount++;
+                        $rowStatus = 'skipped';
+                        $finalOrderId = $existingOrderId;
+                    } elseif ($duplicateAction === 'update') {
+                        $existingOrder = PcbOrder::find($existingOrderId);
+                        if ($existingOrder) {
+                            $this->updatePcbOrderRecord($existingOrder, $extracted, $resolvedUserId);
+                            $updatedCount++;
+                            $finalOrderId = $existingOrder->id;
+                        }
+                    }
+                } else {
+                    $orderNumber = $toolVal;
+                    if (empty($orderNumber) || ($existingOrderId && $duplicateAction === 'create_new')) {
+                        $nextNumericId++;
+                        $orderNumber = 'M' . str_pad($nextNumericId, 4, '0', STR_PAD_LEFT);
+                    }
+
+                    $newOrder = $this->createPcbOrderRecord($orderNumber, $extracted, $resolvedUserId);
+                    $existingOrderMap[strtolower($orderNumber)] = $newOrder->id;
+                    $importedCount++;
+                    $finalOrderId = $newOrder->id;
+                }
+
+                \App\Models\PcbImportRow::updateOrCreate([
+                    'import_id'  => $import->id,
+                    'row_number' => $excelRowNumber,
+                ], [
+                    'status'       => $rowStatus,
+                    'customer_id'  => $resolvedUserId,
+                    'order_id'     => $finalOrderId,
+                    'processed_at' => now(),
+                ]);
+
+                // Update progress every 25 rows
+                if ($processedCount % 25 === 0) {
+                    $import->update([
+                        'processed_rows'     => $processedCount,
+                        'successful_rows'    => ($importedCount + $updatedCount),
+                        'failed_rows'        => $failedCount,
+                        'skipped_rows'       => $skippedCount,
+                        'duplicate_rows'     => $duplicateCount,
+                        'existing_customers' => $existingCustomersUsedCount,
+                        'new_customers'      => $newCustomersCreatedCount,
+                    ]);
+                    DB::commit();
+                    DB::beginTransaction();
+                }
+            }
+
+            DB::commit();
+
+            $import->update([
+                'status'             => 'completed',
+                'completed_at'       => now(),
+                'processed_rows'     => $processedCount,
+                'successful_rows'    => ($importedCount + $updatedCount),
+                'failed_rows'        => $failedCount,
+                'skipped_rows'       => $skippedCount,
+                'duplicate_rows'     => $duplicateCount,
+                'existing_customers' => $existingCustomersUsedCount,
+                'new_customers'      => $newCustomersCreatedCount,
+            ]);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            $import->update([
+                'status'        => 'failed',
+                'failed_at'     => now(),
+                'error_message' => 'Import processing failed: ' . $e->getMessage(),
+            ]);
+            throw $e;
+        }
     }
 
     /**

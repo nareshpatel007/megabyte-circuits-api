@@ -963,7 +963,7 @@ class OrderController extends Controller
     }
 
     /**
-     * Execute manufacturer Excel file import
+     * Execute manufacturer Excel file import (synchronous legacy fallback)
      */
     public function importExecute(Request $request, OrderImportService $importService)
     {
@@ -993,6 +993,160 @@ class OrderController extends Controller
                 'status' => false,
                 'message' => 'Failed to execute import: ' . $th->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Upload manufacturer Excel file and queue for background processing
+     */
+    public function uploadImport(Request $request, OrderImportService $importService)
+    {
+        $validator = Validator::make($request->all(), [
+            'file' => 'required|file|mimes:xlsx,xls|max:51200',
+            'duplicate_action' => 'nullable|string|in:skip,update,create_new',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Invalid file uploaded. Please upload a valid .xlsx or .xls file (max 50MB).',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $file = $request->file('file');
+            $duplicateAction = $request->input('duplicate_action', 'skip');
+            $adminId = $request->attributes->get('admin_id') ?: 1;
+
+            $result = $importService->queueImportFile($file, $duplicateAction, $adminId);
+
+            return response()->json($result, $result['success'] ? 200 : 400);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to queue import file: ' . $th->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get list of PCB import records with pagination & filtering
+     */
+    public function listImports(Request $request)
+    {
+        try {
+            $query = \App\Models\PcbImport::orderBy('id', 'desc');
+
+            if ($request->has('status') && $request->input('status') !== 'all') {
+                $query->where('status', $request->input('status'));
+            }
+
+            $perPage = (int)$request->input('per_page', 15);
+            $imports = $query->paginate($perPage);
+
+            return response()->json([
+                'status' => true,
+                'data' => $imports
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Get detailed view of single import record including error log
+     */
+    public function showImport($id)
+    {
+        try {
+            $import = \App\Models\PcbImport::with(['errors' => function ($q) {
+                $q->orderBy('row_number', 'asc')->limit(100);
+            }])->find($id);
+
+            if (!$import) {
+                return response()->json(['status' => false, 'message' => 'Import record not found.'], 404);
+            }
+
+            return response()->json([
+                'status' => true,
+                'data' => $import
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Retry a failed import
+     */
+    public function retryImport($id, OrderImportService $importService)
+    {
+        try {
+            $import = \App\Models\PcbImport::find($id);
+            if (!$import) {
+                return response()->json(['status' => false, 'message' => 'Import record not found.'], 404);
+            }
+
+            $fullPath = \Illuminate\Support\Facades\Storage::disk('local')->path($import->file_path);
+            if (!file_exists($fullPath)) {
+                $fullPath = storage_path('app/' . $import->file_path);
+            }
+
+            if (!file_exists($fullPath)) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Original import file is no longer available. Please upload the file again.'
+                ], 400);
+            }
+
+            // Reset status & progress counters
+            $import->update([
+                'status'          => 'queued',
+                'error_message'   => null,
+                'failed_at'       => null,
+                'started_at'      => null,
+                'completed_at'    => null,
+            ]);
+
+            \App\Jobs\ProcessPcbImportJob::dispatch($import->id);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Import queued for retry.',
+                'import' => $import
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Cancel a queued or processing import
+     */
+    public function cancelImport($id)
+    {
+        try {
+            $import = \App\Models\PcbImport::find($id);
+            if (!$import) {
+                return response()->json(['status' => false, 'message' => 'Import record not found.'], 404);
+            }
+
+            if (in_array($import->status, ['completed', 'cancelled'], true)) {
+                return response()->json(['status' => false, 'message' => "Import cannot be cancelled because it is already {$import->status}."], 400);
+            }
+
+            $import->update([
+                'status' => 'cancelled',
+            ]);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Import cancelled successfully.',
+                'import' => $import
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
         }
     }
 
