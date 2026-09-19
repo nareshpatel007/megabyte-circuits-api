@@ -345,6 +345,10 @@ class OrderController extends Controller
             }
         }
 
+        if (empty($order->bill_number)) {
+            $order->bill_number = $order->getMeta('bill_number');
+        }
+
         return response()->json([
             'status' => true,
             'data' => $order
@@ -383,6 +387,10 @@ class OrderController extends Controller
 
             if ($request->has('delivery_date')) {
                 $order->delivery_date = $request->delivery_date;
+            }
+
+            if ($request->has('bill_number')) {
+                $order->bill_number = $request->bill_number;
             }
 
             $oldCompletedQty = $order->completed_qty ?? 0;

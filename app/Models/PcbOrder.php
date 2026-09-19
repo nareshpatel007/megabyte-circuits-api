@@ -25,6 +25,7 @@ class PcbOrder extends Model
         'completed_qty',
         'order_value',
         'delivery_date',
+        'bill_number',
     ];
 
     // Status relationship

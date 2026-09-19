@@ -950,12 +950,27 @@ class OrderImportService
             $errors['Customer name'] = 'Customer name is required.';
         }
 
-        if (empty($data['p_n'])) {
+        if (empty($data['p_n']) || trim((string)$data['p_n']) === '') {
             $errors['P/N'] = 'P/N (Board/Part name) is required.';
         }
 
-        // Date validation
-        foreach (['order_date' => 'Order Date', 'launch_date' => 'Launch Date', 'delivery_date' => 'Delivery date'] as $k => $label) {
+        if (empty($data['order_date']) || trim((string)$data['order_date']) === '') {
+            $errors['Order Date'] = 'Order date is required.';
+        } else {
+            $parsedDate = $this->parseDate($data['order_date']);
+            if (!$parsedDate) {
+                $errors['Order Date'] = "Invalid date format for '{$data['order_date']}'. Expected YYYY-MM-DD or M/D/YYYY.";
+            }
+        }
+
+        if ($data['qty'] === null || $data['qty'] === '' || trim((string)$data['qty']) === '') {
+            $errors['Qty'] = 'Order Qty is required.';
+        } elseif (!is_numeric($data['qty']) || floatval($data['qty']) < 0) {
+            $errors['Qty'] = "'{$data['qty']}' must be a valid numeric value >= 0.";
+        }
+
+        // Other Date fields validation
+        foreach (['launch_date' => 'Launch Date', 'delivery_date' => 'Delivery date'] as $k => $label) {
             if (!empty($data[$k])) {
                 $parsedDate = $this->parseDate($data[$k]);
                 if (!$parsedDate) {
@@ -964,9 +979,9 @@ class OrderImportService
             }
         }
 
-        // Numeric fields validation
-        foreach (['qty' => 'Qty', 'launch_qty' => 'Launch', 'panel_qty' => 'Panel', 'ups' => 'ups', 'final_qty' => 'Final qty'] as $nk => $nLabel) {
-            if ($data[$nk] !== null && $data[$nk] !== '') {
+        // Other Numeric fields validation
+        foreach (['launch_qty' => 'Launch', 'panel_qty' => 'Panel', 'ups' => 'ups', 'final_qty' => 'Final qty'] as $nk => $nLabel) {
+            if (isset($data[$nk]) && $data[$nk] !== null && $data[$nk] !== '' && trim((string)$data[$nk]) !== '') {
                 if (!is_numeric($data[$nk]) || floatval($data[$nk]) < 0) {
                     $errors[$nLabel] = "'{$data[$nk]}' must be a valid numeric value >= 0.";
                 }
@@ -990,6 +1005,7 @@ class OrderImportService
         $completedQty = isset($data['final_qty']) && is_numeric($data['final_qty']) ? (int)$data['final_qty'] : 0;
         $status = !empty($data['status']) ? (string)$data['status'] : 'move';
         $customerName = !empty($data['customer_name']) ? (string)$data['customer_name'] : null;
+        $billNumber = !empty($data['bill_number']) ? (string)$data['bill_number'] : null;
 
         $order = PcbOrder::create([
             'user_id'       => $userId,
@@ -997,6 +1013,7 @@ class OrderImportService
             'status'        => $status,
             'completed_qty' => $completedQty,
             'delivery_date' => $deliveryDate,
+            'bill_number'   => $billNumber,
             'created_at'    => $orderDate ? Carbon::parse($orderDate) : now(),
             'updated_at'    => now(),
         ]);
@@ -1031,6 +1048,10 @@ class OrderImportService
 
         if (!empty($data['status'])) {
             $order->status = (string)$data['status'];
+        }
+
+        if (!empty($data['bill_number'])) {
+            $order->bill_number = (string)$data['bill_number'];
         }
 
         if ($userId) {
