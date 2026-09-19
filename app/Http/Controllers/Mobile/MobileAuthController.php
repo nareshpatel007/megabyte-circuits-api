@@ -56,12 +56,11 @@ class MobileAuthController extends Controller
                 $secret = env('JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
                 $payload = [
                     'admin_id' => $admin->id,
-                    'name' => $admin->name,
+                    'name'     => $admin->name,
                     'username' => $admin->username ?? strtok($admin->email, '@'),
-                    'email' => $admin->email,
-                    'permissions' => $permissions,
+                    'email'    => $admin->email,
                     'is_admin' => true,
-                    'exp' => time() + (30 * 24 * 60 * 60) // 30 days token
+                    'exp'      => time() + (30 * 24 * 60 * 60) // 30 days token
                 ];
 
                 $token = JWT::encode($payload, $secret, 'HS256');
@@ -108,10 +107,9 @@ class MobileAuthController extends Controller
                 $secret = env('JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
                 $payload = [
                     'admin_id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'permissions' => ['orders.view', 'inventory.view'],
-                    'exp' => time() + (30 * 24 * 60 * 60)
+                    'name'     => $user->name,
+                    'email'    => $user->email,
+                    'exp'      => time() + (30 * 24 * 60 * 60)
                 ];
 
                 $token = JWT::encode($payload, $secret, 'HS256');

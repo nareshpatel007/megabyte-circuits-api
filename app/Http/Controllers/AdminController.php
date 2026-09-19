@@ -68,6 +68,12 @@ class AdminController extends Controller
                 }
             }
 
+            if (empty($permissions) && (strtolower((string)$role) === 'super admin' || (int)$admin->role_id === 1 || (int)$admin->id === 1)) {
+                $permissions = Schema::hasTable('permissions') ? DB::table('permissions')->pluck('slug')->toArray() : [];
+            }
+
+            $permissions = array_values(array_unique(array_filter($permissions)));
+
             // Update last login timestamp
             $now = date('Y-m-d H:i:s');
             DB::table('admins')->where('id', $admin->id)->update([
@@ -75,22 +81,21 @@ class AdminController extends Controller
                 'updated_at' => $now
             ]);
 
-            // Generate JWT Token
+            // Generate JWT Token (clean, compact payload for fast HTTP headers)
             $payload = [
                 'admin_id' => $admin->id,
-                'name' => $admin->name,
+                'name'     => $admin->name,
                 'username' => $admin->username ?? strtok($admin->email, '@'),
-                'email' => $admin->email,
-                'role' => $role ?? 'Admin',
-                'permissions' => $permissions,
+                'email'    => $admin->email,
+                'role'     => $role ?? 'Admin',
                 'is_admin' => true,
-                'exp' => time() + (24 * 60 * 60) // 24 hours
+                'exp'      => time() + (24 * 60 * 60) // 24 hours
             ];
 
             $secret = env('JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
             $jwt_token = JWT::encode($payload, $secret, 'HS256');
 
-            return response()->json([
+            $responseData = [
                 'status' => true,
                 'message' => 'Logged in successfully as Admin',
                 'data' => [
@@ -104,6 +109,11 @@ class AdminController extends Controller
                     'permissions' => $permissions,
                     'is_admin' => true
                 ]
+            ];
+            $jsonEncoded = json_encode($responseData);
+            return response($jsonEncoded, 200, [
+                'Content-Type' => 'application/json',
+                'Content-Length' => (string)strlen($jsonEncoded)
             ]);
 
         } catch (\Throwable $th) {
