@@ -657,8 +657,8 @@ class OrderImportService
                 $invalidRows[] = $extracted;
             }
 
-            // Limit preview items returned to UI for fast rendering
-            if (count($previewItems) < 100) {
+            // Include all preview items (up to 1000 rows)
+            if (count($previewItems) < 1000) {
                 $previewItems[] = $extracted;
             }
         }

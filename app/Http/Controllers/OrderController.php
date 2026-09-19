@@ -1156,11 +1156,23 @@ class OrderController extends Controller
     public function exportPreview(Request $request, OrderExportService $exportService)
     {
         try {
-            $filters = $request->only([
-                'start_date', 'end_date', 'date_field', 'status', 'customer_name',
-                'layer', 'mask', 'c_g', 'tool', 'combo', 'p_n', 'quote_number', 'bill_number',
-                'search', 'order_ids'
-            ]);
+            $filters = [
+                'start_date'    => $request->input('start_date'),
+                'end_date'      => $request->input('end_date'),
+                'date_field'    => $request->input('date_field', 'order_date'),
+                'status'        => $request->input('status'),
+                'customer_name' => $request->input('customer_name') ?? $request->input('customer'),
+                'layer'         => $request->input('layer'),
+                'mask'          => $request->input('mask'),
+                'c_g'           => $request->input('c_g') ?? $request->input('cg'),
+                'tool'          => $request->input('tool'),
+                'combo'         => $request->input('combo'),
+                'p_n'           => $request->input('p_n') ?? $request->input('pn'),
+                'quote_number'  => $request->input('quote_number') ?? $request->input('quote_no'),
+                'bill_number'   => $request->input('bill_number') ?? $request->input('bill_no'),
+                'search'        => $request->input('search'),
+                'order_ids'     => $request->input('order_ids'),
+            ];
             $page = (int)$request->input('page', 1);
             $perPage = (int)$request->input('per_page', 10);
 
@@ -1180,11 +1192,23 @@ class OrderController extends Controller
     public function export(Request $request, OrderExportService $exportService)
     {
         try {
-            $filters = $request->only([
-                'start_date', 'end_date', 'date_field', 'status', 'customer_name',
-                'layer', 'mask', 'c_g', 'tool', 'combo', 'p_n', 'quote_number', 'bill_number',
-                'search', 'order_ids'
-            ]);
+            $filters = [
+                'start_date'    => $request->input('start_date'),
+                'end_date'      => $request->input('end_date'),
+                'date_field'    => $request->input('date_field', 'order_date'),
+                'status'        => $request->input('status'),
+                'customer_name' => $request->input('customer_name') ?? $request->input('customer'),
+                'layer'         => $request->input('layer'),
+                'mask'          => $request->input('mask'),
+                'c_g'           => $request->input('c_g') ?? $request->input('cg'),
+                'tool'          => $request->input('tool'),
+                'combo'         => $request->input('combo'),
+                'p_n'           => $request->input('p_n') ?? $request->input('pn'),
+                'quote_number'  => $request->input('quote_number') ?? $request->input('quote_no'),
+                'bill_number'   => $request->input('bill_number') ?? $request->input('bill_no'),
+                'search'        => $request->input('search'),
+                'order_ids'     => $request->input('order_ids'),
+            ];
             $format = strtolower($request->input('format', 'xlsx'));
 
             if ($format === 'csv') {

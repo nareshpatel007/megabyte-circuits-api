@@ -21,30 +21,61 @@ class OrderExportService
 
         $dateField = $filters['date_field'] ?? 'order_date'; // order_date, launch_date, delivery_date, created_at
 
+        // Helper to parse input date safely into YYYY-MM-DD format
+        $parseFilterDate = function ($dateStr) {
+            if (empty($dateStr)) return null;
+            try {
+                return Carbon::parse($dateStr)->format('Y-m-d');
+            } catch (\Throwable $e) {
+                return $dateStr;
+            }
+        };
+
+        $startDate = $parseFilterDate($filters['start_date'] ?? null);
+        $endDate = $parseFilterDate($filters['end_date'] ?? null);
+
         // Date range filters
-        if (!empty($filters['start_date'])) {
+        if (!empty($startDate)) {
             if ($dateField === 'created_at') {
-                $query->whereDate('created_at', '>=', $filters['start_date']);
+                $query->whereDate('created_at', '>=', $startDate);
             } elseif ($dateField === 'delivery_date') {
-                $query->whereDate('delivery_date', '>=', $filters['start_date']);
+                $query->where(function ($q) use ($startDate) {
+                    $q->whereDate('delivery_date', '>=', $startDate)
+                      ->orWhereHas('metas', function ($mq) use ($startDate) {
+                          $mq->where('meta_key', 'delivery_date')
+                             ->whereDate('meta_value', '>=', $startDate);
+                      });
+                });
             } else {
-                // Filter by order_date or launch_date meta
-                $query->whereHas('metas', function ($mq) use ($filters, $dateField) {
-                    $mq->where('meta_key', $dateField)
-                       ->whereDate('meta_value', '>=', $filters['start_date']);
+                // Filter by order_date, launch_date, or created_at
+                $query->where(function ($q) use ($startDate, $dateField) {
+                    $q->whereDate('created_at', '>=', $startDate)
+                      ->orWhereHas('metas', function ($mq) use ($startDate, $dateField) {
+                          $mq->whereIn('meta_key', [$dateField, 'order_date', 'launch_date'])
+                             ->whereDate('meta_value', '>=', $startDate);
+                      });
                 });
             }
         }
 
-        if (!empty($filters['end_date'])) {
+        if (!empty($endDate)) {
             if ($dateField === 'created_at') {
-                $query->whereDate('created_at', '<=', $filters['end_date']);
+                $query->whereDate('created_at', '<=', $endDate);
             } elseif ($dateField === 'delivery_date') {
-                $query->whereDate('delivery_date', '<=', $filters['end_date']);
+                $query->where(function ($q) use ($endDate) {
+                    $q->whereDate('delivery_date', '<=', $endDate)
+                      ->orWhereHas('metas', function ($mq) use ($endDate) {
+                          $mq->where('meta_key', 'delivery_date')
+                             ->whereDate('meta_value', '<=', $endDate);
+                      });
+                });
             } else {
-                $query->whereHas('metas', function ($mq) use ($filters, $dateField) {
-                    $mq->where('meta_key', $dateField)
-                       ->whereDate('meta_value', '<=', $filters['end_date']);
+                $query->where(function ($q) use ($endDate, $dateField) {
+                    $q->whereDate('created_at', '<=', $endDate)
+                      ->orWhereHas('metas', function ($mq) use ($endDate, $dateField) {
+                          $mq->whereIn('meta_key', [$dateField, 'order_date', 'launch_date'])
+                             ->whereDate('meta_value', '<=', $endDate);
+                      });
                 });
             }
         }
@@ -160,14 +191,14 @@ class OrderExportService
     {
         $query = $this->buildFilteredQuery($filters);
 
-        $totalCount = $query->count();
-        $totalPages = (int)ceil($totalCount / $perPage);
+        $totalCount = (clone $query)->count();
+        $totalPages = max(1, (int)ceil($totalCount / $perPage));
         $offset = ($page - 1) * $perPage;
 
-        $orders = $query->orderBy('id', 'desc')
-                        ->skip($offset)
-                        ->take($perPage)
-                        ->get();
+        $orders = (clone $query)->orderBy('id', 'desc')
+                                ->skip($offset)
+                                ->take($perPage)
+                                ->get();
 
         $previewRows = $orders->map(function ($order) {
             $getMeta = function ($key, $fallback = '') use ($order) {
@@ -194,12 +225,15 @@ class OrderExportService
         });
 
         return [
-            'success'     => true,
-            'total_count' => $totalCount,
-            'page'        => $page,
-            'per_page'    => $perPage,
-            'total_pages' => $totalPages,
-            'data'        => $previewRows,
+            'success'      => true,
+            'total'        => $totalCount,
+            'total_count'  => $totalCount,
+            'page'         => $page,
+            'current_page' => $page,
+            'per_page'     => $perPage,
+            'total_pages'  => $totalPages,
+            'last_page'    => $totalPages,
+            'data'         => $previewRows,
         ];
     }
 
