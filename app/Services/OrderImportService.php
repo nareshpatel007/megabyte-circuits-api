@@ -1163,15 +1163,45 @@ class OrderImportService
             return $val->format('Y-m-d');
         }
 
-        if (is_numeric($val) && (float)$val > 10000 && (float)$val < 100000) {
+        $str = trim((string)$val);
+        if ($str === '' || $str === '-' || strtolower($str) === 'n/a') return null;
+
+        // 1. Excel numeric timestamp
+        if (is_numeric($str) && (float)$str > 10000 && (float)$str < 100000) {
             try {
-                $dt = ExcelDate::excelToDateTimeObject($val);
+                $dt = ExcelDate::excelToDateTimeObject((float)$str);
                 return $dt ? $dt->format('Y-m-d') : null;
             } catch (\Throwable $e) {}
         }
 
+        // 2. Custom regex parsing for M-D-Y / D-M-Y / Y-M-D formats with - or /
+        $normalized = str_replace('/', '-', $str);
+        $parts = explode('-', $normalized);
+        if (count($parts) === 3 && is_numeric($parts[0]) && is_numeric($parts[1]) && is_numeric($parts[2])) {
+            $p1 = (int)$parts[0];
+            $p2 = (int)$parts[1];
+            $p3 = (int)$parts[2];
+
+            if ($p3 > 1000) {
+                // Year at end (e.g. 6-30-2026 or 30-06-2026)
+                if ($p1 > 12 && $p2 <= 12) {
+                    return sprintf('%04d-%02d-%02d', $p3, $p2, $p1);
+                } elseif ($p2 > 12 && $p1 <= 12) {
+                    return sprintf('%04d-%02d-%02d', $p3, $p1, $p2);
+                } elseif ($p1 <= 12 && $p2 <= 12) {
+                    return sprintf('%04d-%02d-%02d', $p3, $p1, $p2);
+                }
+            } elseif ($p1 > 1000) {
+                // Year at start (e.g. 2026-06-30)
+                if ($p2 <= 12 && $p3 <= 31) {
+                    return sprintf('%04d-%02d-%02d', $p1, $p2, $p3);
+                }
+            }
+        }
+
+        // 3. Fallback Carbon parse
         try {
-            $c = Carbon::parse((string)$val);
+            $c = Carbon::parse($str);
             return $c->format('Y-m-d');
         } catch (\Throwable $e) {
             return null;
