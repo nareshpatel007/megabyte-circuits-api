@@ -1137,6 +1137,25 @@ class OrderController extends Controller
         try {
             $duplicateAction = $request->input('duplicate_action', 'skip');
             $result = $importService->startStagedImport((int)$id, $duplicateAction);
+
+            if ($result['success'] && config('queue.default') === 'sync') {
+                $importId = (int)$id;
+                register_shutdown_function(function () use ($importId) {
+                    if (function_exists('fastcgi_finish_request')) {
+                        fastcgi_finish_request();
+                    }
+                    try {
+                        $service = app(OrderImportService::class);
+                        $import = \App\Models\PcbImport::find($importId);
+                        if ($import) {
+                            $service->processBackgroundImportFromStaging($import);
+                        }
+                    } catch (\Throwable $ex) {
+                        \Illuminate\Support\Facades\Log::error("Background import processing error: " . $ex->getMessage());
+                    }
+                });
+            }
+
             return response()->json($result, $result['success'] ? 200 : 422);
         } catch (\Throwable $th) {
             return response()->json([
@@ -1204,28 +1223,48 @@ class OrderController extends Controller
                 return response()->json(['status' => false, 'message' => 'Import record not found.'], 404);
             }
 
-            $fullPath = \Illuminate\Support\Facades\Storage::disk('local')->path($import->file_path);
-            if (!file_exists($fullPath)) {
-                $fullPath = storage_path('app/' . $import->file_path);
+            $stagedRowsExist = \App\Models\PcbImportRow::where('import_id', $import->id)->exists();
+
+            if (!$stagedRowsExist && !empty($import->file_path)) {
+                $fullPath = \Illuminate\Support\Facades\Storage::disk('local')->path($import->file_path);
+                if (!file_exists($fullPath)) {
+                    $fullPath = storage_path('app/' . $import->file_path);
+                }
+
+                if (!file_exists($fullPath)) {
+                    return response()->json([
+                        'status' => false,
+                        'message' => 'Original import file is no longer available. Please upload the file again.'
+                    ], 400);
+                }
             }
 
-            if (!file_exists($fullPath)) {
-                return response()->json([
-                    'status' => false,
-                    'message' => 'Original import file is no longer available. Please upload the file again.'
-                ], 400);
-            }
-
-            // Reset status & progress counters
+            // Reset status & dispatch background worker
             $import->update([
                 'status'          => 'queued',
                 'error_message'   => null,
                 'failed_at'       => null,
-                'started_at'      => null,
-                'completed_at'    => null,
             ]);
 
-            \App\Jobs\ProcessPcbImportJob::dispatch($import->id);
+            if (config('queue.default') !== 'sync') {
+                \App\Jobs\ProcessPcbImportJob::dispatch($import->id);
+            } else {
+                $importId = (int)$import->id;
+                register_shutdown_function(function () use ($importId) {
+                    if (function_exists('fastcgi_finish_request')) {
+                        fastcgi_finish_request();
+                    }
+                    try {
+                        $service = app(OrderImportService::class);
+                        $impRecord = \App\Models\PcbImport::find($importId);
+                        if ($impRecord) {
+                            $service->processBackgroundImportFromStaging($impRecord);
+                        }
+                    } catch (\Throwable $ex) {
+                        \Illuminate\Support\Facades\Log::error("Retry import background error: " . $ex->getMessage());
+                    }
+                });
+            }
 
             return response()->json([
                 'status' => true,
