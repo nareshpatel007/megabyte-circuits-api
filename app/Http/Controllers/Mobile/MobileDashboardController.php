@@ -79,6 +79,12 @@ class MobileDashboardController extends Controller
                     ->pluck('meta_value', 'meta_key')
                     ->toArray();
 
+                $orderQty = (int) ($order->order_qty ?? $order->quantity ?? $metaMap['quantity'] ?? $metaMap['order_qty'] ?? 50);
+                $launchQty = (int) ($order->launch_qty ?? $metaMap['launch_qty'] ?? $orderQty);
+                $finalQty = (int) ($order->final_qty ?? $order->completed_qty ?? $metaMap['final_qty'] ?? $metaMap['completed_qty'] ?? $orderQty);
+                $failedQty = (int) ($order->failed_qty ?? $metaMap['failed_qty'] ?? 0);
+                $pendingQty = (int) ($order->pending_qty ?? $metaMap['pending_qty'] ?? max(0, $launchQty - $finalQty - $failedQty));
+
                 return [
                     'id' => (string) $order->id,
                     'tool' => $order->order_number ?? ('M' . $order->id),
@@ -93,7 +99,11 @@ class MobileDashboardController extends Controller
                     'assignedTo' => $metaMap['assigned_to'] ?? 'Jignesh',
                     'maskColor' => $metaMap['mask_color'] ?? 'Green',
                     'layers' => isset($metaMap['layers']) ? (int)$metaMap['layers'] : 4,
-                    'quantity' => isset($metaMap['quantity']) ? (int)$metaMap['quantity'] : 100,
+                    'quantity' => $orderQty,
+                    'launchQty' => $launchQty,
+                    'finalQty' => $finalQty,
+                    'failedQty' => $failedQty,
+                    'pendingQty' => $pendingQty,
                     'lastUpdate' => $order->updated_at ? date('h:i A', strtotime($order->updated_at)) : 'Just now'
                 ];
             });

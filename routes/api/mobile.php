@@ -26,9 +26,13 @@ Route::prefix('mobile/v1')->group(function () {
         Route::get('bootstrap', [MobileBootstrapController::class, 'bootstrap']);
         Route::get('dashboard', [MobileDashboardController::class, 'dashboard']);
 
+        // Statuses
+        Route::get('statuses', [MobileOrderController::class, 'getStatuses']);
+
         // Orders
         Route::get('orders', [MobileOrderController::class, 'index']);
         Route::get('orders/{id}', [MobileOrderController::class, 'show']);
+        Route::get('orders/{id}/history', [MobileOrderController::class, 'getHistory']);
         Route::put('orders/{id}/status', [MobileOrderController::class, 'updateStatus']);
 
         // Inventory
