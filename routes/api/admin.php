@@ -30,6 +30,7 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::get('orders/import/{id}/rows', [OrderController::class, 'getStagedRows']);
         Route::put('orders/import/{id}/rows/{rowId}', [OrderController::class, 'updateStagedRowCell']);
         Route::post('orders/import/{id}/start', [OrderController::class, 'startStagedImport']);
+        Route::post('orders/import/{id}/process-chunk', [OrderController::class, 'processChunk']);
         Route::get('orders/imports', [OrderController::class, 'listImports']);
         Route::get('orders/imports/{id}', [OrderController::class, 'showImport']);
         Route::post('orders/imports/{id}/retry', [OrderController::class, 'retryImport']);

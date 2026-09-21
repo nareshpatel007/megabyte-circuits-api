@@ -22,6 +22,17 @@ class MobileProfileController extends Controller
                 ], 404);
             }
 
+            $roleName = $admin->role ?? null;
+            if (empty($roleName) && !empty($admin->role_id) && Schema::hasTable('roles')) {
+                $roleObj = DB::table('roles')->where('id', $admin->role_id)->first();
+                if ($roleObj && !empty($roleObj->name)) {
+                    $roleName = $roleObj->name;
+                }
+            }
+            if (empty($roleName)) {
+                $roleName = 'Super Admin';
+            }
+
             return response()->json([
                 'success' => true,
                 'data' => [
@@ -29,7 +40,7 @@ class MobileProfileController extends Controller
                     'name' => $admin->name ?? 'Jignesh Dave',
                     'email' => $admin->email ?? 'jignesh@megabyte.local',
                     'mobile' => $admin->mobile ?? ($admin->phone_number ?? '+91 98765 43210'),
-                    'role' => $admin->role ?? 'Production Operator',
+                    'role' => $roleName,
                     'department' => $admin->department ?? 'PCB Production',
                     'employeeCode' => 'MCS-' . str_pad($admin->id, 3, '0', STR_PAD_LEFT),
                     'shift' => 'Shift A · 08:00–18:00',

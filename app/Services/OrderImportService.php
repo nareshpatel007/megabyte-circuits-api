@@ -1724,30 +1724,32 @@ class OrderImportService
             'duplicate_action' => $duplicateAction,
         ]);
 
-        if (config('queue.default') !== 'sync') {
-            \App\Jobs\ProcessPcbImportJob::dispatch($importId);
-        }
-
         return [
             'success' => true,
-            'message' => 'Import successfully queued for background processing.',
+            'message' => 'Import successfully prepared for processing.',
             'import'  => $import->fresh(),
         ];
     }
 
     /**
-     * Process queued background import reading from pcb_import_rows staging table
+     * Process a single batch chunk (default 100 rows) of staged import data
      */
-    public function processBackgroundImportFromStaging(\App\Models\PcbImport $import): void
+    public function processImportBatch(\App\Models\PcbImport $import, int $batchSize = 100): array
     {
         if ($import->status === 'cancelled') {
-            return;
+            return [
+                'status'  => 'cancelled',
+                'message' => 'Import has been cancelled.',
+                'import'  => $import->fresh(),
+            ];
         }
 
-        $import->update([
-            'status'     => 'processing',
-            'started_at' => $import->started_at ?: now(),
-        ]);
+        if ($import->status !== 'processing') {
+            $import->update([
+                'status'     => 'processing',
+                'started_at' => $import->started_at ?: now(),
+            ]);
+        }
 
         $customerCache = $this->buildCustomerCache();
         $existingCustomersUsedCount = $import->existing_customers ?? 0;
@@ -1776,21 +1778,15 @@ class OrderImportService
             }
         }
 
-        $batchSize = 100;
+        // Fetch un-processed valid rows in chunk
+        $chunkRows = \App\Models\PcbImportRow::where('import_id', $import->id)
+            ->where('validation_status', 'valid')
+            ->where('status', 'pending')
+            ->orderBy('row_number', 'asc')
+            ->limit($batchSize)
+            ->get();
 
-        while (true) {
-            // Fetch un-processed valid rows in chunks of 100
-            $chunkRows = \App\Models\PcbImportRow::where('import_id', $import->id)
-                ->where('validation_status', 'valid')
-                ->where('status', 'pending')
-                ->orderBy('row_number', 'asc')
-                ->limit($batchSize)
-                ->get();
-
-            if ($chunkRows->isEmpty()) {
-                break;
-            }
-
+        if ($chunkRows->isNotEmpty()) {
             foreach ($chunkRows as $row) {
                 $data = $row->row_data ?? [];
                 $excelRowNumber = $row->row_number;
@@ -1902,29 +1898,16 @@ class OrderImportService
                     ]);
                 }
             }
-
-            // Update live metrics after each 100-row batch
-            $processedCount = \App\Models\PcbImportRow::where('import_id', $import->id)->where('status', '!=', 'pending')->count();
-            $successfulCount = \App\Models\PcbImportRow::where('import_id', $import->id)->whereIn('status', ['completed', 'skipped'])->count();
-            $failedCount = \App\Models\PcbImportRow::where('import_id', $import->id)->where('status', 'failed')->count();
-
-            $import->update([
-                'processed_rows'     => $processedCount,
-                'successful_rows'    => $successfulCount,
-                'failed_rows'        => $failedCount,
-                'existing_customers' => $existingCustomersUsedCount,
-                'new_customers'      => $newCustomersCreatedCount,
-            ]);
         }
 
-        // Final total count recalculation & status resolution
+        // Recalculate metrics
         $totalValidRows = \App\Models\PcbImportRow::where('import_id', $import->id)->where('validation_status', 'valid')->count();
         $finalProcessed = \App\Models\PcbImportRow::where('import_id', $import->id)->where('status', '!=', 'pending')->count();
         $finalSuccessful = \App\Models\PcbImportRow::where('import_id', $import->id)->whereIn('status', ['completed', 'skipped'])->count();
         $finalFailed = \App\Models\PcbImportRow::where('import_id', $import->id)->where('status', 'failed')->count();
 
         $isFullyDone = ($finalProcessed >= $totalValidRows) && ($totalValidRows > 0);
-        $finalStatus = $isFullyDone ? ($finalFailed > 0 && $finalSuccessful === 0 ? 'failed' : 'completed') : 'failed';
+        $finalStatus = $isFullyDone ? ($finalFailed > 0 && $finalSuccessful === 0 ? 'failed' : 'completed') : 'processing';
 
         $import->update([
             'status'             => $finalStatus,
@@ -1938,6 +1921,29 @@ class OrderImportService
 
         if ($finalStatus === 'completed') {
             $this->cleanupCompletedImport($import);
+        }
+
+        return [
+            'status'          => $finalStatus,
+            'is_completed'    => $isFullyDone,
+            'processed_rows'  => $finalProcessed,
+            'total_rows'      => $totalValidRows,
+            'successful_rows' => $finalSuccessful,
+            'failed_rows'     => $finalFailed,
+            'import'          => $isFullyDone ? null : $import->fresh(),
+        ];
+    }
+
+    /**
+     * Process queued background import reading from pcb_import_rows staging table
+     */
+    public function processBackgroundImportFromStaging(\App\Models\PcbImport $import): void
+    {
+        while (true) {
+            $res = $this->processImportBatch($import, 100);
+            if (!empty($res['is_completed']) || $res['status'] === 'cancelled' || $res['status'] === 'completed' || $res['status'] === 'failed') {
+                break;
+            }
         }
     }
 

@@ -1173,24 +1173,6 @@ class OrderController extends Controller
             $importValidOnly = filter_var($request->input('import_valid_only', false), FILTER_VALIDATE_BOOLEAN);
             $result = $importService->startStagedImport((int)$id, $duplicateAction, $importValidOnly);
 
-            if ($result['success'] && config('queue.default') === 'sync') {
-                $importId = (int)$id;
-                register_shutdown_function(function () use ($importId) {
-                    if (function_exists('fastcgi_finish_request')) {
-                        fastcgi_finish_request();
-                    }
-                    try {
-                        $service = app(OrderImportService::class);
-                        $import = \App\Models\PcbImport::find($importId);
-                        if ($import) {
-                            $service->processBackgroundImportFromStaging($import);
-                        }
-                    } catch (\Throwable $ex) {
-                        \Illuminate\Support\Facades\Log::error("Background import processing error: " . $ex->getMessage());
-                    }
-                });
-            }
-
             return response()->json($result, $result['success'] ? 200 : 422);
         } catch (\Throwable $th) {
             return response()->json([
@@ -1248,9 +1230,32 @@ class OrderController extends Controller
     }
 
     /**
-     * Retry a failed import
+     * Process a chunk of import rows synchronously (for real-time progress page)
      */
-    public function retryImport($id, OrderImportService $importService)
+    public function processChunk(Request $request, $id, OrderImportService $importService)
+    {
+        try {
+            $import = \App\Models\PcbImport::find($id);
+            if (!$import) {
+                return response()->json(['status' => false, 'message' => 'Import session expired or completed.'], 404);
+            }
+
+            $batchSize = (int)$request->input('batch_size', 100);
+            $result = $importService->processImportBatch($import, $batchSize);
+
+            return response()->json([
+                'status' => true,
+                'data'   => $result
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => 'Chunk processing error: ' . $th->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Retry an import session
+     */
+    public function retryImport(Request $request, $id)
     {
         try {
             $import = \App\Models\PcbImport::find($id);
@@ -1274,36 +1279,16 @@ class OrderController extends Controller
                 }
             }
 
-            // Reset status & dispatch background worker
+            // Reset status for page chunk processing
             $import->update([
-                'status'          => 'queued',
-                'error_message'   => null,
-                'failed_at'       => null,
+                'status'        => 'queued',
+                'error_message' => null,
+                'failed_at'     => null,
             ]);
-
-            if (config('queue.default') !== 'sync') {
-                \App\Jobs\ProcessPcbImportJob::dispatch($import->id);
-            } else {
-                $importId = (int)$import->id;
-                register_shutdown_function(function () use ($importId) {
-                    if (function_exists('fastcgi_finish_request')) {
-                        fastcgi_finish_request();
-                    }
-                    try {
-                        $service = app(OrderImportService::class);
-                        $impRecord = \App\Models\PcbImport::find($importId);
-                        if ($impRecord) {
-                            $service->processBackgroundImportFromStaging($impRecord);
-                        }
-                    } catch (\Throwable $ex) {
-                        \Illuminate\Support\Facades\Log::error("Retry import background error: " . $ex->getMessage());
-                    }
-                });
-            }
 
             return response()->json([
                 'status' => true,
-                'message' => 'Import queued for retry.',
+                'message' => 'Import ready for chunk processing.',
                 'import' => $import
             ]);
         } catch (\Throwable $th) {

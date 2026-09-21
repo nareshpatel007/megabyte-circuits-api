@@ -85,7 +85,7 @@ class MobileDashboardController extends Controller
                     'status' => ucfirst($order->status ?? 'Traveler'),
                     'film' => isset($metaMap['film']) ? (bool)$metaMap['film'] : false,
                     'orderNumber' => $metaMap['order_number'] ?? (string)$order->id,
-                    'client' => $order->customer_name ?: ($metaMap['client'] ?? 'Apex Controls'),
+                    'client' => ($order->customer_name ?? null) ?: ($metaMap['client'] ?? 'Apex Controls'),
                     'department' => $metaMap['department'] ?? 'Production',
                     'priority' => $metaMap['priority'] ?? 'Normal',
                     'orderDate' => $order->created_at ? date('d M Y', strtotime($order->created_at)) : date('d M Y'),
@@ -153,10 +153,6 @@ class MobileDashboardController extends Controller
                     'company' => [
                         'name' => "Megabyte's Circuit Systems",
                         'logo' => null
-                    ],
-                    'shift' => [
-                        'name' => 'Shift A',
-                        'display' => 'Shift A · Live floor'
                     ],
                     'summary' => [
                         'total_jobs' => $totalJobs ?: 186,

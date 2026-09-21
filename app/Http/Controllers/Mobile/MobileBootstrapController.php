@@ -60,22 +60,9 @@ class MobileBootstrapController extends Controller
                         'inventory' => $hasInventoryPermission,
                         'profile' => true,
                     ],
-                    'company' => [
-                        'name' => "Megabyte's Circuit Systems",
-                        'short_name' => 'Megabyte Circuits',
-                        'logo' => null,
-                    ],
-                    'shift' => [
-                        'name' => 'Shift A',
-                        'start' => '08:00',
-                        'end' => '18:00',
-                        'status' => 'active',
-                        'display' => 'Shift A · Live floor'
-                    ],
                     'notification_count' => $unreadNotificationsCount
                 ]
             ]);
-
         } catch (\Throwable $th) {
             return response()->json([
                 'success' => false,

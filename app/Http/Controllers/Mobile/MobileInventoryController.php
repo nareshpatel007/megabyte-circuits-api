@@ -69,8 +69,8 @@ class MobileInventoryController extends Controller
             $outOfStockCount = DB::table('inventory_items')->whereNull('deleted_at')->where('available_quantity', '=', 0)->count();
 
             $formattedItems = $items->map(function ($item) {
-                $qty = (int) $item->available_quantity;
-                $threshold = (int) ($item->low_stock_threshold ?: 50);
+                $qty = (int) ($item->available_quantity ?? $item->quantity ?? 0);
+                $threshold = (int) ($item->low_stock_threshold ?? $item->threshold ?? 50);
 
                 $statusStr = 'In stock';
                 if ($qty === 0) {
@@ -81,8 +81,8 @@ class MobileInventoryController extends Controller
 
                 return [
                     'id' => (string) $item->id,
-                    'sku' => $item->sku,
-                    'name' => $item->name,
+                    'sku' => $item->sku ?? ('SKU-' . $item->id),
+                    'name' => $item->name ?? 'Component',
                     'category' => $item->category ?? 'Passive',
                     'supplier' => $item->supplier ?? 'Vendor',
                     'quantity' => $qty,
@@ -91,7 +91,7 @@ class MobileInventoryController extends Controller
                     'unitPrice' => (float) ($item->unit_price ?? 0),
                     'location' => $item->location ?? 'Rack A-01',
                     'status' => $statusStr,
-                    'lastUpdated' => $item->updated_at ? date('d M Y', strtotime($item->updated_at)) : date('d M Y')
+                    'lastUpdated' => ($item->updated_at ?? null) ? date('d M Y', strtotime($item->updated_at)) : date('d M Y')
                 ];
             });
 
@@ -139,8 +139,8 @@ class MobileInventoryController extends Controller
                 ], 404);
             }
 
-            $qty = (int) $item->available_quantity;
-            $threshold = (int) ($item->low_stock_threshold ?: 50);
+            $qty = (int) ($item->available_quantity ?? $item->quantity ?? 0);
+            $threshold = (int) ($item->low_stock_threshold ?? $item->threshold ?? 50);
 
             $statusStr = 'In stock';
             if ($qty === 0) {
@@ -153,8 +153,8 @@ class MobileInventoryController extends Controller
                 'success' => true,
                 'data' => [
                     'id' => (string) $item->id,
-                    'sku' => $item->sku,
-                    'name' => $item->name,
+                    'sku' => $item->sku ?? ('SKU-' . $item->id),
+                    'name' => $item->name ?? 'Component',
                     'category' => $item->category ?? 'Passive',
                     'supplier' => $item->supplier ?? 'Vendor',
                     'quantity' => $qty,
@@ -163,7 +163,7 @@ class MobileInventoryController extends Controller
                     'unitPrice' => (float) ($item->unit_price ?? 0),
                     'location' => $item->location ?? 'Rack A-01',
                     'status' => $statusStr,
-                    'lastUpdated' => $item->updated_at ? date('d M Y', strtotime($item->updated_at)) : date('d M Y')
+                    'lastUpdated' => ($item->updated_at ?? null) ? date('d M Y', strtotime($item->updated_at)) : date('d M Y')
                 ]
             ]);
 

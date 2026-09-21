@@ -65,6 +65,17 @@ class MobileAuthController extends Controller
 
                 $token = JWT::encode($payload, $secret, 'HS256');
 
+                $roleName = $admin->role ?? null;
+                if (empty($roleName) && !empty($admin->role_id) && Schema::hasTable('roles')) {
+                    $roleObj = DB::table('roles')->where('id', $admin->role_id)->first();
+                    if ($roleObj && !empty($roleObj->name)) {
+                        $roleName = $roleObj->name;
+                    }
+                }
+                if (empty($roleName)) {
+                    $roleName = 'Super Admin';
+                }
+
                 return response()->json([
                     'success' => true,
                     'message' => 'Login successful',
@@ -75,7 +86,7 @@ class MobileAuthController extends Controller
                             'name' => $admin->name,
                             'username' => $admin->username ?? strtok($admin->email, '@'),
                             'email' => $admin->email,
-                            'role' => $admin->role ?? 'Employee',
+                            'role' => $roleName,
                             'department' => $admin->department ?? 'Production',
                             'employee_code' => 'MCS-' . str_pad($admin->id, 3, '0', STR_PAD_LEFT),
                         ],
