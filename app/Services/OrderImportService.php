@@ -242,9 +242,9 @@ class OrderImportService
             'started_at' => now(),
         ]);
 
-        $fullPath = Storage::disk('local')->path($import->file_path);
+        $fullPath = storage_path('app/' . ltrim($import->file_path, '/\\'));
         if (!file_exists($fullPath)) {
-            $fullPath = storage_path('app/' . $import->file_path);
+            $fullPath = storage_path('app/public/' . ltrim($import->file_path, '/\\'));
         }
 
         if (!file_exists($fullPath)) {
@@ -999,15 +999,16 @@ class OrderImportService
      */
     protected function createPcbOrderRecord(string $orderNumber, array $data, ?int $userId = null): PcbOrder
     {
-        $orderDate = $this->parseDate($data['order_date']);
-        $deliveryDate = $this->parseDate($data['delivery_date']);
+        $orderDate = $this->parseDate($data['order_date'] ?? null);
+        $launchDate = $this->parseDate($data['launch_date'] ?? null);
+        $deliveryDate = $this->parseDate($data['delivery_date'] ?? null);
 
         $completedQty = isset($data['final_qty']) && is_numeric($data['final_qty']) ? (int)$data['final_qty'] : 0;
         $status = !empty($data['status']) ? (string)$data['status'] : 'move';
         $customerName = !empty($data['customer_name']) ? (string)$data['customer_name'] : null;
         $billNumber = !empty($data['bill_number']) ? (string)$data['bill_number'] : null;
 
-        $order = PcbOrder::create([
+        $orderPayload = [
             'user_id'       => $userId,
             'order_number'  => $orderNumber,
             'status'        => $status,
@@ -1016,7 +1017,13 @@ class OrderImportService
             'bill_number'   => $billNumber,
             'created_at'    => $orderDate ? Carbon::parse($orderDate) : now(),
             'updated_at'    => now(),
-        ]);
+        ];
+
+        if ($launchDate) {
+            $orderPayload['launch_date'] = $launchDate;
+        }
+
+        $order = PcbOrder::create($orderPayload);
 
         $this->saveOrderMetas($order->id, $data);
 
@@ -1037,7 +1044,12 @@ class OrderImportService
      */
     protected function updatePcbOrderRecord(PcbOrder $order, array $data, ?int $userId = null): PcbOrder
     {
-        $deliveryDate = $this->parseDate($data['delivery_date']);
+        $launchDate = $this->parseDate($data['launch_date'] ?? null);
+        if ($launchDate) {
+            $order->launch_date = $launchDate;
+        }
+
+        $deliveryDate = $this->parseDate($data['delivery_date'] ?? null);
         if ($deliveryDate) {
             $order->delivery_date = $deliveryDate;
         }

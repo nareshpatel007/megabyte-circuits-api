@@ -24,6 +24,7 @@ class PcbOrder extends Model
         'unit_price',
         'completed_qty',
         'order_value',
+        'launch_date',
         'delivery_date',
         'bill_number',
     ];
@@ -43,8 +44,39 @@ class PcbOrder extends Model
     protected $casts = [
         'unit_price' => 'decimal:2',
         'order_value' => 'decimal:2',
+        'launch_date' => 'date',
         'delivery_date' => 'date',
     ];
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        static::updating(function ($order) {
+            $statusChanged = $order->isDirty('status') || $order->isDirty('status_id');
+            if ($statusChanged) {
+                $oldStatus = strtolower(trim((string)$order->getOriginal('status')));
+                $newStatus = strtolower(trim((string)$order->status));
+
+                $wasPending = empty($oldStatus) || $oldStatus === 'pending' || $oldStatus === 'move';
+                $isNowPending = empty($newStatus) || $newStatus === 'pending' || $newStatus === 'move';
+
+                if ($wasPending && !$isNowPending) {
+                    if (empty($order->launch_date)) {
+                        $order->launch_date = now()->toDateString();
+                    }
+                }
+            }
+        });
+
+        static::creating(function ($order) {
+            $status = strtolower(trim((string)($order->status ?? '')));
+            $isPending = empty($status) || $status === 'pending' || $status === 'move';
+            if (!$isPending && empty($order->launch_date)) {
+                $order->launch_date = now()->toDateString();
+            }
+        });
+    }
 
     // Meta relationship
     public function metas()

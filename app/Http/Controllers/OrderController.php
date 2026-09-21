@@ -385,6 +385,10 @@ class OrderController extends Controller
                 $order->status_id = $request->status_id;
             }
 
+            if ($request->has('launch_date')) {
+                $order->launch_date = $request->launch_date;
+            }
+
             if ($request->has('delivery_date')) {
                 $order->delivery_date = $request->delivery_date;
             }
@@ -1059,7 +1063,7 @@ class OrderController extends Controller
             $file = $request->file('file');
             $originalName = $file->getClientOriginalName();
             $storedPath = $file->store('pcb_imports', 'local');
-            $fullPath = \Illuminate\Support\Facades\Storage::disk('local')->path($storedPath);
+            $fullPath = storage_path('app/' . ltrim($storedPath, '/\\'));
             $adminId = $request->attributes->get('admin_id') ?: 1;
 
             $import = $importService->stageImportFile($fullPath, $originalName, $adminId);
@@ -1226,9 +1230,9 @@ class OrderController extends Controller
             $stagedRowsExist = \App\Models\PcbImportRow::where('import_id', $import->id)->exists();
 
             if (!$stagedRowsExist && !empty($import->file_path)) {
-                $fullPath = \Illuminate\Support\Facades\Storage::disk('local')->path($import->file_path);
+                $fullPath = storage_path('app/' . ltrim($import->file_path, '/\\'));
                 if (!file_exists($fullPath)) {
-                    $fullPath = storage_path('app/' . $import->file_path);
+                    $fullPath = storage_path('app/public/' . ltrim($import->file_path, '/\\'));
                 }
 
                 if (!file_exists($fullPath)) {
