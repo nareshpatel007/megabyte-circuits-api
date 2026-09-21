@@ -1,37 +1,14 @@
 <?php
 
 /**
- * JLCPCB Gerber Upload Tester
+ * JLCPCB Gerber Upload Tester - PHP only
  *
- * Requirements:
- * - PHP 7.4+
- * - cURL extension enabled
- *
- * This page:
- * 1. Accepts a .zip/.rar Gerber file
- * 2. Generates JLCPCB JOP authentication using HMAC-SHA256 + Base64
- * 3. Sends multipart/form-data to the JLCPCB uploadGerber endpoint
- * 4. Displays the raw API response, request details, and server IP information
- *
- * IMPORTANT:
- * The JLCPCB signature documentation says that for file uploads the
- * Request Body used for signing is the "meta JSON".
- *
- * The uploaded Gerber API document exposes fileName + file as multipart
- * fields, but does not define a separate "meta" field. This implementation
- * therefore signs:
- *     {"fileName":"<filename>"}
- *
- * If JLCPCB provides a different meta JSON definition for this endpoint,
- * update buildMetaJson() below to exactly match it.
+ * JLCPCB support confirmed that the Upload Gerber signing/meta JSON is exactly {}.
+ * The actual request remains multipart/form-data with fileName + file.
  */
-
 $result = null;
 $requestDebug = null;
 
-/**
- * Get server IP addresses
- */
 function getServerIPs(): array
 {
     $ips = [
@@ -42,57 +19,40 @@ function getServerIPs(): array
         'forwarded_for' => $_SERVER['HTTP_X_FORWARDED_FOR'] ?? 'Not available',
         'real_ip' => $_SERVER['HTTP_X_REAL_IP'] ?? 'Not available'
     ];
-
-    // Try to get the actual server's public IP address
     $ips['server_public_ip'] = getServerPublicIP();
-
     return $ips;
 }
 
-/**
- * Get the server's public IP address
- */
 function getServerPublicIP(): string
 {
     $cacheFile = sys_get_temp_dir() . '/server_public_ip_cache.txt';
-    $cacheTime = 3600; // Cache for 1 hour
-
-    // Check cache first
-    if (file_exists($cacheFile) && (time() - filemtime($cacheFile) < $cacheTime)) {
-        return file_get_contents($cacheFile);
+    if (file_exists($cacheFile) && (time() - filemtime($cacheFile) < 3600)) {
+        return trim((string)file_get_contents($cacheFile));
     }
-
-    $publicIP = 'Unable to determine';
-
-    // Try multiple services
     $services = [
         'https://api.ipify.org',
         'https://ifconfig.me/ip',
         'https://icanhazip.com',
         'https://checkip.amazonaws.com'
     ];
-
     foreach ($services as $service) {
         $ch = curl_init($service);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 5,
-            CURLOPT_SSL_VERIFYPEER => true
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4
         ]);
-
         $ip = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
-
-        if ($ip !== false && $httpCode === 200) {
-            $publicIP = trim($ip);
-            // Cache the result
-            file_put_contents($cacheFile, $publicIP);
-            break;
+        if ($ip !== false && $code === 200) {
+            $ip = trim($ip);
+            file_put_contents($cacheFile, $ip);
+            return $ip;
         }
     }
-
-    return $publicIP;
+    return 'Unable to determine';
 }
 
 function h($value): string
@@ -104,45 +64,15 @@ function generateNonce(int $length = 32): string
 {
     $chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     $result = '';
-
     for ($i = 0; $i < $length; $i++) {
         $result .= $chars[random_int(0, strlen($chars) - 1)];
     }
-
     return $result;
 }
 
-function buildMetaJson(string $metaJsonInput, string $fileName): string
+function buildStringToSign(string $method, string $path, int $timestamp, string $nonce, string $body): string
 {
-    if (trim($metaJsonInput) === '') {
-        // Default only when the field is empty.
-        return json_encode(
-            ['fileName' => $fileName],
-            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
-        );
-    }
-
-    $decoded = json_decode($metaJsonInput, true);
-
-    if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) {
-        throw new InvalidArgumentException(
-            'Meta JSON is invalid: ' . json_last_error_msg()
-        );
-    }
-
-    // IMPORTANT: return the exact JSON text entered by the user.
-    // Do not re-encode it because whitespace/escaping can affect the signature.
-    return $metaJsonInput;
-}
-
-function buildStringToSign(
-    string $method,
-    string $path,
-    int $timestamp,
-    string $nonce,
-    string $body
-): string {
-    // Five lines, INCLUDING the final newline.
+    // JLCPCB format: five lines with a final newline.
     return $method . "\n"
         . $path . "\n"
         . $timestamp . "\n"
@@ -152,255 +82,147 @@ function buildStringToSign(
 
 function generateSignature(string $stringToSign, string $secretKey): string
 {
-    $hash = hash_hmac('sha256', $stringToSign, $secretKey, true);
-    return base64_encode($hash);
+    return base64_encode(hash_hmac('sha256', $stringToSign, $secretKey, true));
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $appId = trim($_POST['app_id'] ?? '');
     $accessKey = trim($_POST['access_key'] ?? '');
     $secretKey = trim($_POST['secret_key'] ?? '');
-    $metaJsonInput = trim($_POST['meta_json'] ?? '');
 
     if ($appId === '' || $accessKey === '' || $secretKey === '') {
-        $result = [
-            'ok' => false,
-            'error' => 'App ID, Access Key and Secret Key are required.'
-        ];
+        $result = ['ok' => false, 'error' => 'App ID, Access Key and Secret Key are required.'];
     } elseif (!isset($_FILES['gerber_file'])) {
-        $result = [
-            'ok' => false,
-            'error' => 'Please select a Gerber ZIP/RAR file.'
-        ];
+        $result = ['ok' => false, 'error' => 'Please select a Gerber ZIP/RAR file.'];
     } else {
         $file = $_FILES['gerber_file'];
-
         if ($file['error'] !== UPLOAD_ERR_OK) {
-            $result = [
-                'ok' => false,
-                'error' => 'PHP upload error code: ' . $file['error']
-            ];
+            $result = ['ok' => false, 'error' => 'PHP upload error code: ' . $file['error']];
         } else {
             $originalName = basename($file['name']);
             $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
-
             if (!in_array($extension, ['zip', 'rar'], true)) {
-                $result = [
-                    'ok' => false,
-                    'error' => 'Only .zip and .rar Gerber files are allowed.'
-                ];
+                $result = ['ok' => false, 'error' => 'Only .zip and .rar Gerber files are allowed.'];
             } else {
                 $endpoint = 'https://open.jlcpcb.com/overseas/openapi/pcb/uploadGerber';
                 $method = 'POST';
-
                 $urlPath = parse_url($endpoint, PHP_URL_PATH);
                 $urlQuery = parse_url($endpoint, PHP_URL_QUERY);
-
                 if ($urlQuery !== null && $urlQuery !== '') {
                     $urlPath .= '?' . $urlQuery;
                 }
 
-                $executionMode = trim($_POST['execution_mode'] ?? 'php_native');
+                $timestamp = time();
+                $nonce = generateNonce(32);
 
-                if ($executionMode === 'java_sdk') {
-                    $sdkDir = __DIR__ . '/jlcpcb-java-sdk';
-                    $tmpFilePath = $file['tmp_name'];
+                // CRITICAL: JLCPCB support confirmed this exact value.
+                $metaJson = '{}';
 
-                    // Call Java SDK CLI bridge
-                    $cmd = sprintf(
-                        'java -cp %s com.jlc.overseas.openapi.pcb.client.PcbOrderApiClient %s %s %s %s 2>&1',
-                        escapeshellarg($sdkDir),
-                        escapeshellarg($appId),
-                        escapeshellarg($accessKey),
-                        escapeshellarg($secretKey),
-                        escapeshellarg($tmpFilePath)
-                    );
+                $stringToSign = buildStringToSign(
+                    $method,
+                    $urlPath,
+                    $timestamp,
+                    $nonce,
+                    $metaJson
+                );
 
-                    $output = shell_exec($cmd);
-                    $decoded = json_decode($output, true);
+                $signature = generateSignature($stringToSign, $secretKey);
+                $authorization = 'JOP '
+                    . 'appid="' . $appId . '",'
+                    . 'accesskey="' . $accessKey . '",'
+                    . 'nonce="' . $nonce . '",'
+                    . 'timestamp="' . $timestamp . '",'
+                    . 'signature="' . $signature . '"';
 
-                    $requestDebug = [
-                        'execution_mode' => 'JLCPCB Java SDK (Java CLI Bridge)',
-                        'endpoint' => $endpoint,
-                        'file_name' => $originalName,
-                        'file_size' => $file['size'],
-                        'java_command' => $cmd,
-                        'raw_output' => $output,
-                        'server_ips' => getServerIPs()
-                    ];
+                $curlFile = new CURLFile(
+                    $file['tmp_name'],
+                    $file['type'] ?: 'application/octet-stream',
+                    $originalName
+                );
 
-                    if ($decoded !== null) {
-                        $result = [
-                            'ok' => ($decoded['code'] ?? 0) == 200 || ($decoded['success'] ?? false) === true,
-                            'http_code' => 200,
-                            'body' => $output,
-                            'json' => $decoded,
-                            'error' => $decoded['message'] ?? $decoded['msg'] ?? null
-                        ];
-                    } else {
-                        $result = [
-                            'ok' => false,
-                            'http_code' => 500,
-                            'body' => $output,
-                            'error' => 'Java SDK execution response could not be parsed as JSON: ' . trim($output)
-                        ];
-                    }
+                $postFields = [
+                    'fileName' => $originalName,
+                    'file' => $curlFile
+                ];
+
+                $ch = curl_init($endpoint);
+                curl_setopt_array($ch, [
+                    CURLOPT_POST => true,
+                    CURLOPT_POSTFIELDS => $postFields,
+                    CURLOPT_HTTPHEADER => [
+                        'Authorization: ' . $authorization,
+                        'Accept: application/json'
+                    ],
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_HEADER => true,
+                    CURLOPT_CONNECTTIMEOUT => 30,
+                    CURLOPT_TIMEOUT => 180,
+                    CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
+                    CURLOPT_SSL_VERIFYPEER => true,
+                    CURLOPT_SSL_VERIFYHOST => 2
+                ]);
+
+                $rawResponse = curl_exec($ch);
+                $curlError = curl_error($ch);
+                $curlErrno = curl_errno($ch);
+                $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $headerSize = (int)curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+                $localIP = curl_getinfo($ch, CURLINFO_LOCAL_IP);
+                $localPort = curl_getinfo($ch, CURLINFO_LOCAL_PORT);
+                $primaryIP = curl_getinfo($ch, CURLINFO_PRIMARY_IP);
+                $primaryPort = curl_getinfo($ch, CURLINFO_PRIMARY_PORT);
+                curl_close($ch);
+
+                $responseHeaders = '';
+                $responseBody = '';
+                if ($rawResponse !== false) {
+                    $responseHeaders = substr($rawResponse, 0, $headerSize);
+                    $responseBody = substr($rawResponse, $headerSize);
+                }
+
+                $requestDebug = [
+                    'execution_mode' => 'PHP Native cURL ONLY',
+                    'endpoint' => $endpoint,
+                    'method' => $method,
+                    'path' => $urlPath,
+                    'timestamp' => $timestamp,
+                    'nonce' => $nonce,
+                    'meta_json' => $metaJson,
+                    'string_to_sign' => $stringToSign,
+                    'string_to_sign_sha256' => hash('sha256', $stringToSign),
+                    'signature' => $signature,
+                    'authorization' => $authorization,
+                    'file_name' => $originalName,
+                    'file_size' => $file['size'],
+                    'http_code' => $httpCode,
+                    'response_headers' => $responseHeaders,
+                    'server_ips' => getServerIPs(),
+                    'connection_info' => [
+                        'local_ip' => $localIP,
+                        'local_port' => $localPort,
+                        'primary_ip' => $primaryIP,
+                        'primary_port' => $primaryPort
+                    ]
+                ];
+
+                if ($rawResponse === false) {
+                    $result = ['ok' => false, 'error' => "cURL error ({$curlErrno}): {$curlError}"];
                 } else {
-                    $timestamp = time();
-                    $nonce = generateNonce(32);
-
-                    // This is the JSON body used for signing the upload request.
-                    try {
-                        $metaJson = buildMetaJson($metaJsonInput, $originalName);
-                    } catch (InvalidArgumentException $e) {
-                        $result = [
-                            'ok' => false,
-                            'error' => $e->getMessage()
-                        ];
-                        $metaJson = '';
-                    }
-
-                    if ($metaJson === '') {
-                        $requestDebug = [
-                            'execution_mode' => 'PHP Native cURL',
-                            'endpoint' => $endpoint,
-                            'method' => $method,
-                            'path' => $urlPath,
-                            'timestamp' => $timestamp,
-                            'nonce' => $nonce,
-                            'meta_json' => '',
-                            'string_to_sign' => '',
-                            'signature' => '',
-                            'authorization' => '',
-                            'file_name' => $originalName,
-                            'file_size' => $file['size'],
-                            'http_code' => 0,
-                            'response_headers' => '',
-                            'server_ips' => getServerIPs(),
-                            'connection_info' => []
-                        ];
-                    } else {
-                        $stringToSign = buildStringToSign(
-                            $method,
-                            $urlPath,
-                            $timestamp,
-                            $nonce,
-                            $metaJson
-                        );
-
-                        $signature = generateSignature($stringToSign, $secretKey);
-
-                        $authorization =
-                            'JOP ' .
-                            'appid="' . $appId . '",' .
-                            'accesskey="' . $accessKey . '",' .
-                            'nonce="' . $nonce . '",' .
-                            'timestamp="' . $timestamp . '",' .
-                            'signature="' . $signature . '"';
-
-                        $curlFile = new CURLFile(
-                            $file['tmp_name'],
-                            $file['type'] ?: 'application/octet-stream',
-                            $originalName
-                        );
-
-                        $postFields = [
-                            'fileName' => $originalName,
-                            'file' => $curlFile
-                        ];
-
-                        $ch = curl_init($endpoint);
-
-                        curl_setopt_array($ch, [
-                            CURLOPT_POST => true,
-                            CURLOPT_POSTFIELDS => $postFields,
-
-                            CURLOPT_HTTPHEADER => [
-                                'Authorization: ' . $authorization,
-                                'Accept: application/json'
-                            ],
-
-                            CURLOPT_RETURNTRANSFER => true,
-                            CURLOPT_HEADER => true,
-
-                            CURLOPT_CONNECTTIMEOUT => 30,
-                            CURLOPT_TIMEOUT => 180,
-
-                            CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
-
-                            CURLOPT_SSL_VERIFYPEER => true,
-                            CURLOPT_SSL_VERIFYHOST => 2
-                        ]);
-
-                        $rawResponse = curl_exec($ch);
-                        $curlError = curl_error($ch);
-                        $curlErrno = curl_errno($ch);
-                        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                        $headerSize = (int)curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-                        $localIP = curl_getinfo($ch, CURLINFO_LOCAL_IP);
-                        $localPort = curl_getinfo($ch, CURLINFO_LOCAL_PORT);
-                        $primaryIP = curl_getinfo($ch, CURLINFO_PRIMARY_IP);
-                        $primaryPort = curl_getinfo($ch, CURLINFO_PRIMARY_PORT);
-
-                        curl_close($ch);
-
-                        $responseHeaders = '';
-                        $responseBody = '';
-
-                        if ($rawResponse !== false) {
-                            $responseHeaders = substr($rawResponse, 0, $headerSize);
-                            $responseBody = substr($rawResponse, $headerSize);
-                        }
-
-                        $serverIPs = getServerIPs();
-
-                        $requestDebug = [
-                            'execution_mode' => 'PHP Native cURL',
-                            'endpoint' => $endpoint,
-                            'method' => $method,
-                            'path' => $urlPath,
-                            'timestamp' => $timestamp,
-                            'nonce' => $nonce,
-                            'meta_json' => $metaJson,
-                            'string_to_sign' => $stringToSign,
-                            'signature' => $signature,
-                            'authorization' => $authorization,
-                            'file_name' => $originalName,
-                            'file_size' => $file['size'],
-                            'http_code' => $httpCode,
-                            'response_headers' => $responseHeaders,
-                            'server_ips' => $serverIPs,
-                            'connection_info' => [
-                                'local_ip' => $localIP,
-                                'local_port' => $localPort,
-                                'primary_ip' => $primaryIP,
-                                'primary_port' => $primaryPort
-                            ]
-                        ];
-
-                        if ($rawResponse === false) {
-                            $result = [
-                                'ok' => false,
-                                'error' => "cURL error ({$curlErrno}): {$curlError}"
-                            ];
-                        } else {
-                            $decoded = json_decode($responseBody, true);
-
-                            $result = [
-                                'ok' => ($httpCode >= 200 && $httpCode < 300),
-                                'http_code' => $httpCode,
-                                'body' => $responseBody,
-                                'json' => $decoded,
-                                'error' => null
-                            ];
-                        }
-                    }
-                } // end valid meta JSON branch
+                    $decoded = json_decode($responseBody, true);
+                    $result = [
+                        'ok' => ($httpCode >= 200 && $httpCode < 300),
+                        'http_code' => $httpCode,
+                        'body' => $responseBody,
+                        'json' => $decoded,
+                        'error' => null
+                    ];
+                }
             }
         }
     }
 }
 ?>
+
 <!doctype html>
 <html lang="en">
 
@@ -621,24 +443,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="grid" style="margin-top: 15px;">
                     <div>
                         <label for="secret_key">Secret Key</label>
-                        <input id="secret_key" name="secret_key" type="password"
-                            value=""
-                            placeholder="Your JLCPCB Secret Key" required>
+                        <input id="secret_key" name="secret_key" type="password" value="" placeholder="Your JLCPCB Secret Key" required>
                     </div>
-
                     <div>
-                        <label for="execution_mode">SDK / Execution Mode</label>
-                        <select id="execution_mode" name="execution_mode" style="width:100%;padding:11px 12px;border:1px solid #cbd3dc;border-radius:7px;background:#fff;font-size:14px;">
-                            <option value="php_native" <?= (($_POST['execution_mode'] ?? '') === 'php_native') ? 'selected' : '' ?>>PHP Native cURL (JOP HMAC-SHA256)</option>
-                            <option value="java_sdk" <?= (($_POST['execution_mode'] ?? '') === 'java_sdk') ? 'selected' : '' ?>>JLCPCB Java SDK (via Java CLI Bridge)</option>
-                        </select>
+                        <label>Signature Meta JSON</label>
+                        <input type="text" value="{}" readonly style="width:100%;padding:11px 12px;border:1px solid #cbd3dc;border-radius:7px;background:#f5f5f5;">
                     </div>
                 </div>
-
-                <p class="hint">
-                    The Secret Key is used only server-side to generate the
-                    HMAC-SHA256 + Base64 JOP signature or pass to Java SDK. It is never sent to JLCPCB.
-                </p>
+                <p class="hint">JLCPCB support confirmed the Upload Gerber signing/meta JSON is exactly <code>{}</code>.</p>
 
                 <label for="gerber_file">Gerber File (.zip or .rar)</label>
                 <input id="gerber_file" name="gerber_file" type="file"
@@ -763,6 +575,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 <h3>String to Sign</h3>
                 <pre><?= h($requestDebug['string_to_sign']) ?></pre>
+
+                <h3>SHA-256 of Exact String to Sign</h3>
+                <pre><?= h($requestDebug['string_to_sign_sha256'] ?? '') ?></pre>
 
                 <h3>Generated Signature</h3>
                 <pre><?= h($requestDebug['signature']) ?></pre>
