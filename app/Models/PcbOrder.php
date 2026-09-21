@@ -16,6 +16,9 @@ class PcbOrder extends Model
         'user_id',
         'status_id',
         'order_number',
+        'q_no',
+        'c_g',
+        'combo',
         'board_name',
         'customer_name',
         'user_email',
@@ -23,6 +26,12 @@ class PcbOrder extends Model
         'status',
         'unit_price',
         'completed_qty',
+        'order_qty',
+        'launch_qty',
+        'panel_qty',
+        'ups_qty',
+        'final_qty',
+        'failed_qty',
         'order_value',
         'launch_date',
         'delivery_date',
@@ -42,8 +51,14 @@ class PcbOrder extends Model
     }
 
     protected $casts = [
-        'unit_price' => 'decimal:2',
+        'unit_price'  => 'decimal:2',
         'order_value' => 'decimal:2',
+        'order_qty'   => 'integer',
+        'launch_qty'  => 'integer',
+        'panel_qty'   => 'integer',
+        'ups_qty'     => 'integer',
+        'final_qty'   => 'integer',
+        'failed_qty'  => 'integer',
         'launch_date' => 'date',
         'delivery_date' => 'date',
     ];

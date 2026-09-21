@@ -1003,7 +1003,7 @@ class OrderImportService
         $launchDate = $this->parseDate($data['launch_date'] ?? null);
         $deliveryDate = $this->parseDate($data['delivery_date'] ?? null);
 
-        $completedQty = isset($data['final_qty']) && is_numeric($data['final_qty']) ? (int)$data['final_qty'] : 0;
+        $completedQty = isset($data['final_qty']) && is_numeric($data['final_qty']) ? (int)$data['final_qty'] : (isset($data['qty']) && is_numeric($data['qty']) ? (int)$data['qty'] : 0);
         $status = !empty($data['status']) ? (string)$data['status'] : 'move';
         $customerName = !empty($data['customer_name']) ? (string)$data['customer_name'] : null;
         $billNumber = !empty($data['bill_number']) ? (string)$data['bill_number'] : null;
@@ -1011,8 +1011,17 @@ class OrderImportService
         $orderPayload = [
             'user_id'       => $userId,
             'order_number'  => $orderNumber,
+            'q_no'          => !empty($data['quote_number']) ? (string)$data['quote_number'] : (!empty($data['q_no']) ? (string)$data['q_no'] : null),
+            'c_g'           => !empty($data['c_g']) ? (string)$data['c_g'] : null,
+            'combo'         => !empty($data['combo']) ? (string)$data['combo'] : null,
             'status'        => $status,
             'completed_qty' => $completedQty,
+            'order_qty'     => isset($data['qty']) && is_numeric($data['qty']) ? (int)$data['qty'] : (isset($data['order_qty']) && is_numeric($data['order_qty']) ? (int)$data['order_qty'] : 0),
+            'launch_qty'    => isset($data['launch_qty']) && is_numeric($data['launch_qty']) ? (int)$data['launch_qty'] : 0,
+            'panel_qty'     => isset($data['panel_qty']) && is_numeric($data['panel_qty']) ? (int)$data['panel_qty'] : 0,
+            'ups_qty'       => isset($data['ups']) && is_numeric($data['ups']) ? (int)$data['ups'] : (isset($data['ups_qty']) && is_numeric($data['ups_qty']) ? (int)$data['ups_qty'] : 0),
+            'final_qty'     => isset($data['final_qty']) && is_numeric($data['final_qty']) ? (int)$data['final_qty'] : 0,
+            'failed_qty'    => isset($data['failed_qty']) && is_numeric($data['failed_qty']) ? (int)$data['failed_qty'] : 0,
             'delivery_date' => $deliveryDate,
             'bill_number'   => $billNumber,
             'created_at'    => $orderDate ? Carbon::parse($orderDate) : now(),
@@ -1054,8 +1063,47 @@ class OrderImportService
             $order->delivery_date = $deliveryDate;
         }
 
+        if (isset($data['quote_number'])) {
+            $order->q_no = (string)$data['quote_number'];
+        } elseif (isset($data['q_no'])) {
+            $order->q_no = (string)$data['q_no'];
+        }
+
+        if (isset($data['c_g'])) {
+            $order->c_g = (string)$data['c_g'];
+        }
+
+        if (isset($data['combo'])) {
+            $order->combo = (string)$data['combo'];
+        }
+
+        if (isset($data['qty']) && is_numeric($data['qty'])) {
+            $order->order_qty = (int)$data['qty'];
+        } elseif (isset($data['order_qty']) && is_numeric($data['order_qty'])) {
+            $order->order_qty = (int)$data['order_qty'];
+        }
+
+        if (isset($data['launch_qty']) && is_numeric($data['launch_qty'])) {
+            $order->launch_qty = (int)$data['launch_qty'];
+        }
+
+        if (isset($data['panel_qty']) && is_numeric($data['panel_qty'])) {
+            $order->panel_qty = (int)$data['panel_qty'];
+        }
+
+        if (isset($data['ups']) && is_numeric($data['ups'])) {
+            $order->ups_qty = (int)$data['ups'];
+        } elseif (isset($data['ups_qty']) && is_numeric($data['ups_qty'])) {
+            $order->ups_qty = (int)$data['ups_qty'];
+        }
+
         if (isset($data['final_qty']) && is_numeric($data['final_qty'])) {
+            $order->final_qty = (int)$data['final_qty'];
             $order->completed_qty = (int)$data['final_qty'];
+        }
+
+        if (isset($data['failed_qty']) && is_numeric($data['failed_qty'])) {
+            $order->failed_qty = (int)$data['failed_qty'];
         }
 
         if (!empty($data['status'])) {

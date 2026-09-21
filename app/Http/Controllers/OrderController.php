@@ -397,6 +397,32 @@ class OrderController extends Controller
                 $order->bill_number = $request->bill_number;
             }
 
+            if ($request->has('q_no')) {
+                $order->q_no = $request->q_no;
+            }
+            if ($request->has('c_g')) {
+                $order->c_g = $request->c_g;
+            }
+            if ($request->has('combo')) {
+                $order->combo = $request->combo;
+            }
+            if ($request->has('order_qty')) {
+                $order->order_qty = intval($request->order_qty);
+            }
+            if ($request->has('launch_qty')) {
+                $order->launch_qty = intval($request->launch_qty);
+            }
+            if ($request->has('panel_qty')) {
+                $order->panel_qty = intval($request->panel_qty);
+            }
+            if ($request->has('ups_qty')) {
+                $order->ups_qty = intval($request->ups_qty);
+            }
+            if ($request->has('final_qty')) {
+                $order->final_qty = intval($request->final_qty);
+                $order->completed_qty = intval($request->final_qty);
+            }
+
             $oldCompletedQty = $order->completed_qty ?? 0;
             $qtyUpdated = false;
             if ($request->has('completed_qty')) {
@@ -408,6 +434,7 @@ class OrderController extends Controller
             }
 
             if ($request->has('failed_qty')) {
+                $order->failed_qty = intval($request->failed_qty);
                 PcbOrderMeta::updateOrCreate(
                     ['pcb_order_id' => $order->id, 'meta_key' => 'failed_qty'],
                     ['meta_value' => (string)intval($request->failed_qty)]
