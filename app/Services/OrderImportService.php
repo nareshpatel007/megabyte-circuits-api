@@ -997,35 +997,78 @@ class OrderImportService
     /**
      * Create a new PCB Order record and its associated metadata
      */
+    /**
+     * Create a new PCB Order record and its associated metadata
+     */
     protected function createPcbOrderRecord(string $orderNumber, array $data, ?int $userId = null): PcbOrder
     {
         $orderDate = $this->parseDate($data['order_date'] ?? null);
         $launchDate = $this->parseDate($data['launch_date'] ?? null);
         $deliveryDate = $this->parseDate($data['delivery_date'] ?? null);
 
-        $completedQty = isset($data['final_qty']) && is_numeric($data['final_qty']) ? (int)$data['final_qty'] : (isset($data['qty']) && is_numeric($data['qty']) ? (int)$data['qty'] : 0);
+        $orderQty = isset($data['qty']) && is_numeric($data['qty']) ? (int)$data['qty'] : (isset($data['order_qty']) && is_numeric($data['order_qty']) ? (int)$data['order_qty'] : 0);
+        $launchQty = isset($data['launch_qty']) && is_numeric($data['launch_qty']) ? (int)$data['launch_qty'] : 0;
+        $panelQty = isset($data['panel_qty']) && is_numeric($data['panel_qty']) ? (int)$data['panel_qty'] : 0;
+        $upsQty = isset($data['ups']) && is_numeric($data['ups']) ? (int)$data['ups'] : (isset($data['ups_qty']) && is_numeric($data['ups_qty']) ? (int)$data['ups_qty'] : 0);
+        $finalQty = isset($data['final_qty']) && is_numeric($data['final_qty']) ? (int)$data['final_qty'] : 0;
+
+        // failed_qty logic: launch_qty - final_qty
+        $failedQty = max(0, $launchQty - $finalQty);
+
+        $completedQty = $finalQty > 0 ? $finalQty : $orderQty;
         $status = !empty($data['status']) ? (string)$data['status'] : 'move';
-        $customerName = !empty($data['customer_name']) ? (string)$data['customer_name'] : null;
         $billNumber = !empty($data['bill_number']) ? (string)$data['bill_number'] : null;
 
+        // P/N Resolution -> gerber_files table
+        $gerberFileId = null;
+        $pnVal = trim((string)($data['p_n'] ?? ''));
+        if ($pnVal !== '') {
+            if (\Illuminate\Support\Facades\Schema::hasTable('gerber_files')) {
+                $gf = \Illuminate\Support\Facades\DB::table('gerber_files')
+                    ->where('original_name', $pnVal)
+                    ->when($userId, fn($q) => $q->where('user_id', $userId))
+                    ->whereNull('deleted_at')
+                    ->first();
+
+                if ($gf) {
+                    $gerberFileId = $gf->id;
+                } else {
+                    $gerberFileId = \Illuminate\Support\Facades\DB::table('gerber_files')->insertGetId([
+                        'user_id'       => $userId,
+                        'original_name' => $pnVal,
+                        'file_name'      => $pnVal,
+                        'board_name'     => $pnVal,
+                        'created_at'    => now(),
+                        'updated_at'    => now(),
+                    ]);
+                }
+            }
+        }
+
+        $layers = !empty($data['layer']) ? (string)$data['layer'] : null;
+        $mask = !empty($data['mask']) ? (string)$data['mask'] : null;
+
         $orderPayload = [
-            'user_id'       => $userId,
-            'order_number'  => $orderNumber,
-            'q_no'          => !empty($data['quote_number']) ? (string)$data['quote_number'] : (!empty($data['q_no']) ? (string)$data['q_no'] : null),
-            'c_g'           => !empty($data['c_g']) ? (string)$data['c_g'] : null,
-            'combo'         => !empty($data['combo']) ? (string)$data['combo'] : null,
-            'status'        => $status,
-            'completed_qty' => $completedQty,
-            'order_qty'     => isset($data['qty']) && is_numeric($data['qty']) ? (int)$data['qty'] : (isset($data['order_qty']) && is_numeric($data['order_qty']) ? (int)$data['order_qty'] : 0),
-            'launch_qty'    => isset($data['launch_qty']) && is_numeric($data['launch_qty']) ? (int)$data['launch_qty'] : 0,
-            'panel_qty'     => isset($data['panel_qty']) && is_numeric($data['panel_qty']) ? (int)$data['panel_qty'] : 0,
-            'ups_qty'       => isset($data['ups']) && is_numeric($data['ups']) ? (int)$data['ups'] : (isset($data['ups_qty']) && is_numeric($data['ups_qty']) ? (int)$data['ups_qty'] : 0),
-            'final_qty'     => isset($data['final_qty']) && is_numeric($data['final_qty']) ? (int)$data['final_qty'] : 0,
-            'failed_qty'    => isset($data['failed_qty']) && is_numeric($data['failed_qty']) ? (int)$data['failed_qty'] : 0,
-            'delivery_date' => $deliveryDate,
-            'bill_number'   => $billNumber,
-            'created_at'    => $orderDate ? Carbon::parse($orderDate) : now(),
-            'updated_at'    => now(),
+            'user_id'        => $userId,
+            'order_number'   => $orderNumber,
+            'q_no'           => !empty($data['quote_number']) ? (string)$data['quote_number'] : (!empty($data['q_no']) ? (string)$data['q_no'] : null),
+            'c_g'            => !empty($data['c_g']) ? (string)$data['c_g'] : null,
+            'combo'          => !empty($data['combo']) ? (string)$data['combo'] : null,
+            'layers'         => $layers,
+            'mask'           => $mask,
+            'gerber_file_id' => $gerberFileId,
+            'status'         => $status,
+            'completed_qty'  => $completedQty,
+            'order_qty'      => $orderQty,
+            'launch_qty'     => $launchQty,
+            'panel_qty'      => $panelQty,
+            'ups_qty'        => $upsQty,
+            'final_qty'      => $finalQty,
+            'failed_qty'     => $failedQty,
+            'delivery_date'  => $deliveryDate,
+            'bill_number'    => $billNumber,
+            'created_at'     => $orderDate ? Carbon::parse($orderDate) : now(),
+            'updated_at'     => now(),
         ];
 
         if ($launchDate) {
@@ -1033,6 +1076,21 @@ class OrderImportService
         }
 
         $order = PcbOrder::create($orderPayload);
+
+        // Production noted logic -> pcb_order_notes table
+        $prodNote = trim((string)($data['production_noted'] ?? ''));
+        if ($prodNote !== '') {
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_notes')) {
+                \Illuminate\Support\Facades\DB::table('pcb_order_notes')->insert([
+                    'pcb_order_id' => $order->id,
+                    'admin_id'     => null,
+                    'note'         => $prodNote,
+                    'is_internal'  => true,
+                    'created_at'   => now(),
+                    'updated_at'   => now(),
+                ]);
+            }
+        }
 
         $this->saveOrderMetas($order->id, $data);
 
@@ -1053,6 +1111,11 @@ class OrderImportService
      */
     protected function updatePcbOrderRecord(PcbOrder $order, array $data, ?int $userId = null): PcbOrder
     {
+        $orderDate = $this->parseDate($data['order_date'] ?? null);
+        if ($orderDate) {
+            $order->created_at = Carbon::parse($orderDate);
+        }
+
         $launchDate = $this->parseDate($data['launch_date'] ?? null);
         if ($launchDate) {
             $order->launch_date = $launchDate;
@@ -1075,6 +1138,14 @@ class OrderImportService
 
         if (isset($data['combo'])) {
             $order->combo = (string)$data['combo'];
+        }
+
+        if (isset($data['layer'])) {
+            $order->layers = (string)$data['layer'];
+        }
+
+        if (isset($data['mask'])) {
+            $order->mask = (string)$data['mask'];
         }
 
         if (isset($data['qty']) && is_numeric($data['qty'])) {
@@ -1102,9 +1173,10 @@ class OrderImportService
             $order->completed_qty = (int)$data['final_qty'];
         }
 
-        if (isset($data['failed_qty']) && is_numeric($data['failed_qty'])) {
-            $order->failed_qty = (int)$data['failed_qty'];
-        }
+        // failed_qty logic: launch_qty - final_qty
+        $launchQty = (int)($order->launch_qty ?? 0);
+        $finalQty = (int)($order->final_qty ?? 0);
+        $order->failed_qty = max(0, $launchQty - $finalQty);
 
         if (!empty($data['status'])) {
             $order->status = (string)$data['status'];
@@ -1118,7 +1190,48 @@ class OrderImportService
             $order->user_id = $userId;
         }
 
+        // P/N Resolution -> gerber_files table
+        $pnVal = trim((string)($data['p_n'] ?? ''));
+        if ($pnVal !== '') {
+            if (\Illuminate\Support\Facades\Schema::hasTable('gerber_files')) {
+                $gf = \Illuminate\Support\Facades\DB::table('gerber_files')
+                    ->where('original_name', $pnVal)
+                    ->when($order->user_id, fn($q) => $q->where('user_id', $order->user_id))
+                    ->whereNull('deleted_at')
+                    ->first();
+
+                if ($gf) {
+                    $order->gerber_file_id = $gf->id;
+                } else {
+                    $order->gerber_file_id = \Illuminate\Support\Facades\DB::table('gerber_files')->insertGetId([
+                        'user_id'       => $order->user_id,
+                        'original_name' => $pnVal,
+                        'file_name'      => $pnVal,
+                        'board_name'     => $pnVal,
+                        'created_at'    => now(),
+                        'updated_at'    => now(),
+                    ]);
+                }
+            }
+        }
+
         $order->save();
+
+        // Production noted logic -> pcb_order_notes table
+        $prodNote = trim((string)($data['production_noted'] ?? ''));
+        if ($prodNote !== '') {
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_notes')) {
+                \Illuminate\Support\Facades\DB::table('pcb_order_notes')->insert([
+                    'pcb_order_id' => $order->id,
+                    'admin_id'     => null,
+                    'note'         => $prodNote,
+                    'is_internal'  => true,
+                    'created_at'   => now(),
+                    'updated_at'   => now(),
+                ]);
+            }
+        }
+
         $this->saveOrderMetas($order->id, $data);
 
         return $order;

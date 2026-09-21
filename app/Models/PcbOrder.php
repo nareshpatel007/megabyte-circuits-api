@@ -15,10 +15,13 @@ class PcbOrder extends Model
     protected $fillable = [
         'user_id',
         'status_id',
+        'gerber_file_id',
         'order_number',
         'q_no',
         'c_g',
         'combo',
+        'layers',
+        'mask',
         'board_name',
         'customer_name',
         'user_email',
@@ -48,6 +51,12 @@ class PcbOrder extends Model
     public function user()
     {
         return $this->belongsTo(PcbUser::class, 'user_id');
+    }
+
+    // Gerber File relationship
+    public function gerberFile()
+    {
+        return $this->belongsTo(GerberFile::class, 'gerber_file_id');
     }
 
     protected $casts = [
