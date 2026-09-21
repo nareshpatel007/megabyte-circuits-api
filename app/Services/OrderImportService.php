@@ -141,7 +141,7 @@ class OrderImportService
         }
 
         try {
-            $spreadsheet = IOFactory::load($filePath);
+            $spreadsheet = $this->loadSpreadsheetFast($filePath);
             $sheet = $spreadsheet->getActiveSheet();
             $allRows = $sheet->toArray(null, true, true, false);
 
@@ -256,7 +256,7 @@ class OrderImportService
             return;
         }
 
-        $spreadsheet = IOFactory::load($fullPath);
+        $spreadsheet = $this->loadSpreadsheetFast($fullPath);
         $sheet = $spreadsheet->getActiveSheet();
         $allRows = $sheet->toArray(null, true, true, false);
 
@@ -484,6 +484,8 @@ class OrderImportService
                 'existing_customers' => $existingCustomersUsedCount,
                 'new_customers'      => $newCustomersCreatedCount,
             ]);
+
+            $this->cleanupCompletedImport($import);
         } catch (\Throwable $e) {
             DB::rollBack();
             $import->update([
@@ -548,7 +550,7 @@ class OrderImportService
      */
     public function previewImport(string $filePath): array
     {
-        $spreadsheet = IOFactory::load($filePath);
+        $spreadsheet = $this->loadSpreadsheetFast($filePath);
         $sheet = $spreadsheet->getActiveSheet();
         $allRows = $sheet->toArray(null, true, true, false);
 
@@ -691,7 +693,7 @@ class OrderImportService
      */
     public function executeImport(string $filePath, string $duplicateAction = 'skip'): array
     {
-        $spreadsheet = IOFactory::load($filePath);
+        $spreadsheet = $this->loadSpreadsheetFast($filePath);
         $sheet = $spreadsheet->getActiveSheet();
         $allRows = $sheet->toArray(null, true, true, false);
 
@@ -898,8 +900,8 @@ class OrderImportService
         }
 
         $missing = [];
-        // Customer name, P/N, and Order Date are core requirements
-        $essentialKeys = ['customer_name', 'p_n', 'order_date'];
+        // Customer name and Order Date are core requirements
+        $essentialKeys = ['customer_name', 'order_date'];
         foreach ($essentialKeys as $reqKey) {
             if (!isset($foundKeys[$reqKey])) {
                 $missing[] = array_values(static::$headerAliases[$reqKey])[0] ?? $reqKey;
@@ -931,7 +933,21 @@ class OrderImportService
                     $val = $parsed ?: $val;
                 }
 
+                // Default numeric quantity fields to 0 if invalid or missing
+                if (in_array($key, ['qty', 'launch_qty', 'panel_qty', 'ups', 'final_qty'], true)) {
+                    if ($val === null || $val === '' || !is_numeric(trim((string)$val)) || floatval(trim((string)$val)) < 0) {
+                        $val = 0;
+                    } else {
+                        $val = (int)trim((string)$val);
+                    }
+                }
+
                 $extracted[$key] = is_string($val) ? trim($val) : $val;
+            } else {
+                // If column not found in spreadsheet header, default quantity fields to 0
+                if (in_array($key, ['qty', 'launch_qty', 'panel_qty', 'ups', 'final_qty'], true)) {
+                    $extracted[$key] = 0;
+                }
             }
         }
 
@@ -950,10 +966,6 @@ class OrderImportService
             $errors['Customer name'] = 'Customer name is required.';
         }
 
-        if (empty($data['p_n']) || trim((string)$data['p_n']) === '') {
-            $errors['P/N'] = 'P/N (Board/Part name) is required.';
-        }
-
         if (empty($data['order_date']) || trim((string)$data['order_date']) === '') {
             $errors['Order Date'] = 'Order date is required.';
         } else {
@@ -963,27 +975,12 @@ class OrderImportService
             }
         }
 
-        if ($data['qty'] === null || $data['qty'] === '' || trim((string)$data['qty']) === '') {
-            $errors['Qty'] = 'Order Qty is required.';
-        } elseif (!is_numeric($data['qty']) || floatval($data['qty']) < 0) {
-            $errors['Qty'] = "'{$data['qty']}' must be a valid numeric value >= 0.";
-        }
-
         // Other Date fields validation
         foreach (['launch_date' => 'Launch Date', 'delivery_date' => 'Delivery date'] as $k => $label) {
             if (!empty($data[$k])) {
                 $parsedDate = $this->parseDate($data[$k]);
                 if (!$parsedDate) {
                     $errors[$label] = "Invalid date format for '{$data[$k]}'. Expected YYYY-MM-DD or M/D/YYYY.";
-                }
-            }
-        }
-
-        // Other Numeric fields validation
-        foreach (['launch_qty' => 'Launch', 'panel_qty' => 'Panel', 'ups' => 'ups', 'final_qty' => 'Final qty'] as $nk => $nLabel) {
-            if (isset($data[$nk]) && $data[$nk] !== null && $data[$nk] !== '' && trim((string)$data[$nk]) !== '') {
-                if (!is_numeric($data[$nk]) || floatval($data[$nk]) < 0) {
-                    $errors[$nLabel] = "'{$data[$nk]}' must be a valid numeric value >= 0.";
                 }
             }
         }
@@ -1326,7 +1323,7 @@ class OrderImportService
     }
 
     /**
-     * Parse date input into standard YYYY-MM-DD
+     * Parse and auto-correct date input into standard YYYY-MM-DD
      */
     protected function parseDate($val): ?string
     {
@@ -1347,28 +1344,56 @@ class OrderImportService
             } catch (\Throwable $e) {}
         }
 
-        // 2. Custom regex parsing for M-D-Y / D-M-Y / Y-M-D formats with - or /
-        $normalized = str_replace('/', '-', $str);
-        $parts = explode('-', $normalized);
+        // Clean up common separators: replace slashes, dots, underscores, spaces with dash
+        $normalized = preg_replace('/[\/\._\s]+/', '-', $str);
+        $normalized = preg_replace('/[^\d\-]/', '', $normalized);
+        $parts = array_values(array_filter(explode('-', $normalized), fn($p) => $p !== ''));
+
         if (count($parts) === 3 && is_numeric($parts[0]) && is_numeric($parts[1]) && is_numeric($parts[2])) {
             $p1 = (int)$parts[0];
             $p2 = (int)$parts[1];
             $p3 = (int)$parts[2];
 
-            if ($p3 > 1000) {
-                // Year at end (e.g. 6-30-2026 or 30-06-2026)
+            $year = null;
+            $month = null;
+            $day = null;
+
+            if ($p1 > 1000) {
+                // Year at start (e.g. 2026-04-24)
+                $year = $p1;
+                $month = min(12, max(1, $p2));
+                $day = min(31, max(1, $p3));
+            } else {
+                // Year at end (e.g. 24-04-223 or 24-04-23 or 24-04-2023)
+                if ($p3 >= 1000 && $p3 <= 2100) {
+                    $year = $p3;
+                } elseif ($p3 >= 100 && $p3 < 1000) {
+                    // Typo year like 223 or 023 -> 2023
+                    $year = 2000 + ($p3 % 100);
+                } elseif ($p3 >= 0 && $p3 < 100) {
+                    // 2-digit year like 23 or 26 -> 2023 or 2026
+                    $year = 2000 + $p3;
+                } else {
+                    $year = 2000 + (int)substr((string)$p3, -2);
+                }
+
                 if ($p1 > 12 && $p2 <= 12) {
-                    return sprintf('%04d-%02d-%02d', $p3, $p2, $p1);
+                    // DD-MM-YYYY (e.g. 24-04-2023)
+                    $day = min(31, max(1, $p1));
+                    $month = min(12, max(1, $p2));
                 } elseif ($p2 > 12 && $p1 <= 12) {
-                    return sprintf('%04d-%02d-%02d', $p3, $p1, $p2);
-                } elseif ($p1 <= 12 && $p2 <= 12) {
-                    return sprintf('%04d-%02d-%02d', $p3, $p1, $p2);
+                    // MM-DD-YYYY (e.g. 04-24-2023)
+                    $month = min(12, max(1, $p1));
+                    $day = min(31, max(1, $p2));
+                } else {
+                    // Both <= 12 (e.g. 24-04-2023 -> 24 is day), default DD-MM-YYYY
+                    $day = min(31, max(1, $p1));
+                    $month = min(12, max(1, $p2));
                 }
-            } elseif ($p1 > 1000) {
-                // Year at start (e.g. 2026-06-30)
-                if ($p2 <= 12 && $p3 <= 31) {
-                    return sprintf('%04d-%02d-%02d', $p1, $p2, $p3);
-                }
+            }
+
+            if ($year && $month && $day) {
+                return sprintf('%04d-%02d-%02d', $year, $month, $day);
             }
         }
 
@@ -1382,11 +1407,39 @@ class OrderImportService
     }
 
     /**
+     * Helper to load Excel spreadsheet in high-performance mode:
+     * - Disables PHP time execution limits
+     * - Increases memory limit to 1024M
+     * - Uses setReadDataOnly(true) to avoid loading cell formatting overhead
+     */
+    public function loadSpreadsheetFast(string $filePath): \PhpOffice\PhpSpreadsheet\Spreadsheet
+    {
+        @set_time_limit(0);
+        @ini_set('memory_limit', '1024M');
+
+        try {
+            $reader = IOFactory::createReaderForFile($filePath);
+            if (method_exists($reader, 'setReadDataOnly')) {
+                $reader->setReadDataOnly(true);
+            }
+            if (method_exists($reader, 'setReadEmptyCells')) {
+                $reader->setReadEmptyCells(false);
+            }
+            return $reader->load($filePath);
+        } catch (\Throwable $e) {
+            return IOFactory::load($filePath);
+        }
+    }
+
+    /**
      * Stage an Excel file into pcb_imports and pcb_import_rows without modifying production tables
      */
     public function stageImportFile(string $filePath, string $originalFileName, ?int $userId = null): \App\Models\PcbImport
     {
-        $spreadsheet = IOFactory::load($filePath);
+        @set_time_limit(0);
+        @ini_set('memory_limit', '1024M');
+
+        $spreadsheet = $this->loadSpreadsheetFast($filePath);
         $sheet = $spreadsheet->getActiveSheet();
         $allRows = $sheet->toArray(null, true, true, false);
 
@@ -1423,6 +1476,8 @@ class OrderImportService
         $existingCustomersUsed = 0;
         $virtualCustomerMap = [];
         $totalRows = 0;
+        $now = now()->toDateTimeString();
+        $insertBatch = [];
 
         $totalRowsInSheet = count($allRows);
         for ($i = 1; $i < $totalRowsInSheet; $i++) {
@@ -1475,19 +1530,30 @@ class OrderImportService
                 $invalidCount++;
             }
 
-            \App\Models\PcbImportRow::create([
+            $insertBatch[] = [
                 'import_id'            => $import->id,
                 'row_number'           => $excelRowNumber,
-                'row_data'             => $extracted,
+                'row_data'             => json_encode($extracted),
                 'status'               => 'pending',
                 'validation_status'    => $isValid ? 'valid' : 'invalid',
-                'validation_errors'    => $validation['errors'],
+                'validation_errors'    => json_encode($validation['errors']),
                 'customer_action'      => $customerAction,
                 'resolved_customer_id' => $resolvedCustomerId,
-                'is_new_customer'      => $isNewCustomer,
-                'is_duplicate'         => $isDuplicate,
+                'is_new_customer'      => $isNewCustomer ? 1 : 0,
+                'is_duplicate'         => $isDuplicate ? 1 : 0,
                 'matched_order_number' => $matchedOrderNumber,
-            ]);
+                'created_at'           => $now,
+                'updated_at'           => $now,
+            ];
+
+            if (count($insertBatch) >= 250) {
+                \App\Models\PcbImportRow::insert($insertBatch);
+                $insertBatch = [];
+            }
+        }
+
+        if (!empty($insertBatch)) {
+            \App\Models\PcbImportRow::insert($insertBatch);
         }
 
         $import->update([
@@ -1562,6 +1628,15 @@ class OrderImportService
             }
         }
 
+        if (in_array($fieldKey, ['qty', 'launch_qty', 'panel_qty', 'ups', 'final_qty'], true)) {
+            $valStr = is_scalar($data[$fieldKey]) ? trim((string)$data[$fieldKey]) : '';
+            if ($valStr === '' || !is_numeric($valStr) || floatval($valStr) < 0) {
+                $data[$fieldKey] = 0;
+            } else {
+                $data[$fieldKey] = (int)$valStr;
+            }
+        }
+
         $validation = $this->validateRow($data, $row->row_number);
         $isValid = $validation['valid'];
 
@@ -1611,17 +1686,37 @@ class OrderImportService
     /**
      * Final validation & queue dispatch for staged import session
      */
-    public function startStagedImport(int $importId, string $duplicateAction = 'skip'): array
+    public function startStagedImport(int $importId, string $duplicateAction = 'update', bool $importValidOnly = false): array
     {
         $import = \App\Models\PcbImport::findOrFail($importId);
 
         $invalidCount = \App\Models\PcbImportRow::where('import_id', $importId)->where('validation_status', 'invalid')->count();
-        if ($invalidCount > 0) {
+        $validCount = \App\Models\PcbImportRow::where('import_id', $importId)->where('validation_status', 'valid')->count();
+
+        if ($validCount === 0) {
+            return [
+                'success' => false,
+                'message' => "Import cannot start: No valid rows available for import.",
+                'valid_rows' => 0,
+            ];
+        }
+
+        if ($invalidCount > 0 && !$importValidOnly) {
             return [
                 'success' => false,
                 'message' => "Import cannot start: {$invalidCount} invalid rows need attention.",
                 'invalid_rows' => $invalidCount,
             ];
+        }
+
+        if ($invalidCount > 0 && $importValidOnly) {
+            \App\Models\PcbImportRow::where('import_id', $importId)
+                ->where('validation_status', 'invalid')
+                ->update([
+                    'status'        => 'skipped',
+                    'error_message' => 'Skipped during valid-only import',
+                    'processed_at'  => now(),
+                ]);
         }
 
         $import->update([
@@ -1829,9 +1924,10 @@ class OrderImportService
         $finalFailed = \App\Models\PcbImportRow::where('import_id', $import->id)->where('status', 'failed')->count();
 
         $isFullyDone = ($finalProcessed >= $totalValidRows) && ($totalValidRows > 0);
+        $finalStatus = $isFullyDone ? ($finalFailed > 0 && $finalSuccessful === 0 ? 'failed' : 'completed') : 'failed';
 
         $import->update([
-            'status'             => $isFullyDone ? ($finalFailed > 0 && $finalSuccessful === 0 ? 'failed' : 'completed') : 'failed',
+            'status'             => $finalStatus,
             'processed_rows'     => $finalProcessed,
             'successful_rows'    => $finalSuccessful,
             'failed_rows'        => $finalFailed,
@@ -1839,6 +1935,39 @@ class OrderImportService
             'new_customers'      => $newCustomersCreatedCount,
             'completed_at'       => $isFullyDone ? now() : null,
         ]);
+
+        if ($finalStatus === 'completed') {
+            $this->cleanupCompletedImport($import);
+        }
+    }
+
+    /**
+     * Purge import history, file from disk, errors, and staged rows upon successful import completion.
+     */
+    public function cleanupCompletedImport(\App\Models\PcbImport $import): void
+    {
+        try {
+            // Delete file from disk if file_path exists
+            if (!empty($import->file_path)) {
+                $fullPath = storage_path('app/' . ltrim($import->file_path, '/\\'));
+                if (file_exists($fullPath)) {
+                    @unlink($fullPath);
+                }
+                $publicPath = storage_path('app/public/' . ltrim($import->file_path, '/\\'));
+                if (file_exists($publicPath)) {
+                    @unlink($publicPath);
+                }
+            }
+
+            // Purge related staging data
+            \App\Models\PcbImportError::where('import_id', $import->id)->delete();
+            \App\Models\PcbImportRow::where('import_id', $import->id)->delete();
+
+            // Purge import entry from pcb_imports table
+            $import->delete();
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning("Failed to cleanup completed import ID {$import->id}: " . $e->getMessage());
+        }
     }
 
     /**

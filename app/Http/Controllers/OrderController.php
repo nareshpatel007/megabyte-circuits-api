@@ -1087,6 +1087,9 @@ class OrderController extends Controller
         }
 
         try {
+            @set_time_limit(0);
+            @ini_set('memory_limit', '1024M');
+
             $file = $request->file('file');
             $originalName = $file->getClientOriginalName();
             $storedPath = $file->store('pcb_imports', 'local');
@@ -1166,8 +1169,9 @@ class OrderController extends Controller
     public function startStagedImport(Request $request, $id, OrderImportService $importService)
     {
         try {
-            $duplicateAction = $request->input('duplicate_action', 'skip');
-            $result = $importService->startStagedImport((int)$id, $duplicateAction);
+            $duplicateAction = $request->input('duplicate_action', 'update');
+            $importValidOnly = filter_var($request->input('import_valid_only', false), FILTER_VALIDATE_BOOLEAN);
+            $result = $importService->startStagedImport((int)$id, $duplicateAction, $importValidOnly);
 
             if ($result['success'] && config('queue.default') === 'sync') {
                 $importId = (int)$id;
