@@ -33,7 +33,10 @@ Route::prefix('mobile/v1')->group(function () {
         Route::get('orders', [MobileOrderController::class, 'index']);
         Route::get('orders/{id}', [MobileOrderController::class, 'show']);
         Route::get('orders/{id}/history', [MobileOrderController::class, 'getHistory']);
+        Route::get('orders/{id}/notes', [MobileOrderController::class, 'getNotes']);
+        Route::post('orders/{id}/notes', [MobileOrderController::class, 'addNote']);
         Route::put('orders/{id}/status', [MobileOrderController::class, 'updateStatus']);
+        Route::put('orders/{id}/quantities', [MobileOrderController::class, 'updateQuantities']);
 
         // Inventory
         Route::get('inventory', [MobileInventoryController::class, 'index']);

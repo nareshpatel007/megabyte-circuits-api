@@ -98,11 +98,13 @@ class OrderExportService
         if (!empty($filters['customer_name'])) {
             $cust = trim($filters['customer_name']);
             $query->where(function ($q) use ($cust) {
-                $q->where('customer_name', 'LIKE', "%{$cust}%")
-                  ->orWhereHas('metas', function ($mq) use ($cust) {
-                      $mq->where('meta_key', 'customer_name')
-                        ->where('meta_value', 'LIKE', "%{$cust}%");
-                  });
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'customer_name')) {
+                    $q->where('customer_name', 'LIKE', "%{$cust}%");
+                }
+                $q->orWhereHas('metas', function ($mq) use ($cust) {
+                    $mq->where('meta_key', 'customer_name')
+                      ->where('meta_value', 'LIKE', "%{$cust}%");
+                });
             });
         }
 
@@ -137,11 +139,13 @@ class OrderExportService
         if (!empty($filters['p_n'])) {
             $pn = trim($filters['p_n']);
             $query->where(function ($q) use ($pn) {
-                $q->where('board_name', 'LIKE', "%{$pn}%")
-                  ->orWhereHas('metas', function ($mq) use ($pn) {
-                      $mq->whereIn('meta_key', ['p_n', 'part_number', 'board_name'])
-                        ->where('meta_value', 'LIKE', "%{$pn}%");
-                  });
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'board_name')) {
+                    $q->where('board_name', 'LIKE', "%{$pn}%");
+                }
+                $q->orWhereHas('metas', function ($mq) use ($pn) {
+                    $mq->whereIn('meta_key', ['p_n', 'part_number', 'board_name'])
+                      ->where('meta_value', 'LIKE', "%{$pn}%");
+                });
             });
         }
 
@@ -167,12 +171,16 @@ class OrderExportService
         if (!empty($filters['search'])) {
             $search = trim($filters['search']);
             $query->where(function ($q) use ($search) {
-                $q->where('order_number', 'LIKE', "%{$search}%")
-                  ->orWhere('customer_name', 'LIKE', "%{$search}%")
-                  ->orWhere('board_name', 'LIKE', "%{$search}%")
-                  ->orWhereHas('metas', function ($mq) use ($search) {
-                      $mq->where('meta_value', 'LIKE', "%{$search}%");
-                  });
+                $q->where('order_number', 'LIKE', "%{$search}%");
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'customer_name')) {
+                    $q->orWhere('customer_name', 'LIKE', "%{$search}%");
+                }
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'board_name')) {
+                    $q->orWhere('board_name', 'LIKE', "%{$search}%");
+                }
+                $q->orWhereHas('metas', function ($mq) use ($search) {
+                    $mq->where('meta_value', 'LIKE', "%{$search}%");
+                });
             });
         }
 
@@ -208,19 +216,32 @@ class OrderExportService
             $orderDateVal = $getMeta('order_date', '');
             $orderDateStr = !empty($orderDateVal) ? Carbon::parse($orderDateVal)->format('M d, Y') : ($order->created_at ? $order->created_at->format('M d, Y') : 'N/A');
 
+            $launchDateVal = $getMeta('launch_date', '');
+            $launchDateStr = !empty($launchDateVal) ? Carbon::parse($launchDateVal)->format('M d, Y') : 'N/A';
+
+            $deliveryDateVal = $order->delivery_date ? $order->delivery_date->format('M d, Y') : $getMeta('delivery_date', 'N/A');
+
             return [
-                'id'            => $order->id,
-                'order_number'  => $order->order_number,
-                'order_date'    => $orderDateStr,
-                'quote_number'  => $getMeta('quote_number', $getMeta('q_no', 'N/A')),
-                'customer_name' => $order->customer_name ?: $getMeta('customer_name', 'N/A'),
-                'board_name'    => $order->board_name ?: $getMeta('part_number', $getMeta('p_n', 'N/A')),
-                'layer'         => $getMeta('layer', $getMeta('layers', '1')),
-                'mask'          => $getMeta('solder_mask', $getMeta('mask', $getMeta('pcb_color', 'Green'))),
-                'qty'           => is_numeric($getMeta('qty')) ? (int)$getMeta('qty') : (int)$getMeta('quantity', 0),
-                'completed_qty' => (int)($order->completed_qty ?? $getMeta('final_qty', 0)),
-                'status'        => $order->status ?: $getMeta('status', 'move'),
-                'bill_number'   => $getMeta('bill_number', 'N/A'),
+                'id'                => $order->id,
+                'order_date'        => $orderDateStr,
+                'launch_date'       => $launchDateStr,
+                'delivery_date'     => $deliveryDateVal,
+                'quote_number'      => $getMeta('quote_number', $getMeta('q_no', 'N/A')),
+                'c_g'               => $getMeta('c_g', 'GST'),
+                'tool'              => $getMeta('tool', $order->order_number),
+                'combo'             => $getMeta('combo', '-'),
+                'customer_name'     => $order->customer_name ?: $getMeta('customer_name', 'N/A'),
+                'layer'             => $getMeta('layer', $getMeta('layers', '1')),
+                'mask'              => $getMeta('solder_mask', $getMeta('mask', $getMeta('pcb_color', 'Green'))),
+                'board_name'        => $order->board_name ?: $getMeta('part_number', $getMeta('p_n', 'N/A')),
+                'production_noted'  => $getMeta('production_noted', '-'),
+                'qty'               => is_numeric($getMeta('qty')) ? (int)$getMeta('qty') : (int)$getMeta('quantity', 0),
+                'launch_qty'        => is_numeric($getMeta('launch_qty')) ? (int)$getMeta('launch_qty') : 0,
+                'panel_qty'         => is_numeric($getMeta('panel_qty')) ? (int)$getMeta('panel_qty') : 0,
+                'ups'               => is_numeric($getMeta('ups')) ? (int)$getMeta('ups') : 1,
+                'completed_qty'     => (int)($order->completed_qty ?? $getMeta('final_qty', 0)),
+                'status'            => $order->status ?: $getMeta('status', 'move'),
+                'bill_number'       => $getMeta('bill_number', 'N/A'),
             ];
         });
 

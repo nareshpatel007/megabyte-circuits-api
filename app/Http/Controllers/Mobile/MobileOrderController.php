@@ -99,21 +99,46 @@ class MobileOrderController extends Controller
 
             if ($search !== '') {
                 $query->where(function ($q) use ($search) {
-                    $q->where('order_number', 'LIKE', "%{$search}%")
-                      ->orWhere('board_name', 'LIKE', "%{$search}%")
-                      ->orWhere('user_email', 'LIKE', "%{$search}%")
-                      ->orWhere('status', 'LIKE', "%{$search}%");
+                    $hasClause = false;
 
+                    if (Schema::hasColumn('pcb_orders', 'order_number')) {
+                        $q->where('order_number', 'LIKE', "%{$search}%");
+                        $hasClause = true;
+                    }
+                    if (Schema::hasColumn('pcb_orders', 'tool')) {
+                        $hasClause ? $q->orWhere('tool', 'LIKE', "%{$search}%") : $q->where('tool', 'LIKE', "%{$search}%");
+                        $hasClause = true;
+                    }
+                    if (Schema::hasColumn('pcb_orders', 'part_number')) {
+                        $hasClause ? $q->orWhere('part_number', 'LIKE', "%{$search}%") : $q->where('part_number', 'LIKE', "%{$search}%");
+                        $hasClause = true;
+                    }
+                    if (Schema::hasColumn('pcb_orders', 'board_name')) {
+                        $hasClause ? $q->orWhere('board_name', 'LIKE', "%{$search}%") : $q->where('board_name', 'LIKE', "%{$search}%");
+                        $hasClause = true;
+                    }
+                    if (Schema::hasColumn('pcb_orders', 'user_email')) {
+                        $hasClause ? $q->orWhere('user_email', 'LIKE', "%{$search}%") : $q->where('user_email', 'LIKE', "%{$search}%");
+                        $hasClause = true;
+                    }
                     if (Schema::hasColumn('pcb_orders', 'customer_name')) {
-                        $q->orWhere('customer_name', 'LIKE', "%{$search}%");
+                        $hasClause ? $q->orWhere('customer_name', 'LIKE', "%{$search}%") : $q->where('customer_name', 'LIKE', "%{$search}%");
+                        $hasClause = true;
+                    }
+                    if (Schema::hasColumn('pcb_orders', 'status')) {
+                        $hasClause ? $q->orWhere('status', 'LIKE', "%{$search}%") : $q->where('status', 'LIKE', "%{$search}%");
+                        $hasClause = true;
                     }
                 });
             }
 
-            // Default filter: "In Production" (exclude completed / cancelled / archived)
-            if ($status === '' || strtolower($status) === 'in_production' || strtolower($status) === 'in production') {
+            // Status filtering
+            $statusLower = strtolower(trim($status));
+            if ($statusLower === 'all' || $statusLower === 'all_statuses' || ($search !== '' && ($statusLower === '' || $statusLower === 'in_production' || $statusLower === 'in production'))) {
+                // When explicitly requested 'all' or when searching with a query, search across all statuses including completed/cancelled
+            } elseif ($statusLower === '' || $statusLower === 'in_production' || $statusLower === 'in production') {
                 $query->whereNotIn(DB::raw('LOWER(status)'), ['completed', 'cancelled', 'delivered', 'archived']);
-            } elseif (strtolower($status) !== 'all' && strtolower($status) !== 'all_statuses') {
+            } else {
                 $query->where('status', 'LIKE', "%{$status}%");
             }
 
@@ -143,6 +168,7 @@ class MobileOrderController extends Controller
 
                 $orderQty = (int) ($order->order_qty ?? $order->quantity ?? $metaMap['quantity'] ?? $metaMap['order_qty'] ?? 50);
                 $launchQty = (int) ($order->launch_qty ?? $metaMap['launch_qty'] ?? $orderQty);
+                $panelQty = (int) ($order->panel_qty ?? $order->panel ?? $metaMap['panel_qty'] ?? $metaMap['panel'] ?? 0);
                 $finalQty = (int) ($order->final_qty ?? $order->completed_qty ?? $metaMap['final_qty'] ?? $metaMap['completed_qty'] ?? $orderQty);
                 $failedQty = (int) ($order->failed_qty ?? $metaMap['failed_qty'] ?? 0);
                 $pendingQty = (int) ($order->pending_qty ?? $metaMap['pending_qty'] ?? max(0, $launchQty - $finalQty - $failedQty));
@@ -163,6 +189,8 @@ class MobileOrderController extends Controller
                     'layers' => isset($metaMap['layers']) ? (int)$metaMap['layers'] : 4,
                     'quantity' => $orderQty,
                     'launchQty' => $launchQty,
+                    'panel' => $panelQty,
+                    'panelQty' => $panelQty,
                     'finalQty' => $finalQty,
                     'failedQty' => $failedQty,
                     'pendingQty' => $pendingQty,
@@ -406,6 +434,184 @@ class MobileOrderController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Order status updated successfully'
+            ]);
+
+        } catch (\Throwable $th) {
+            return response()->json(['success' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function getNotes(Request $request, $id)
+    {
+        if ($forbidden = $this->checkPermission($request)) {
+            return $forbidden;
+        }
+
+        try {
+            $notes = [];
+            if (Schema::hasTable('pcb_order_notes')) {
+                $notes = DB::table('pcb_order_notes')
+                    ->leftJoin('admins', 'pcb_order_notes.admin_id', '=', 'admins.id')
+                    ->where('pcb_order_notes.pcb_order_id', $id)
+                    ->orderBy('pcb_order_notes.id', 'desc')
+                    ->select(
+                        'pcb_order_notes.id',
+                        'pcb_order_notes.note',
+                        'pcb_order_notes.created_at',
+                        'admins.name as name',
+                        'admins.name as admin_name'
+                    )
+                    ->get()
+                    ->map(function ($n) {
+                        return [
+                            'id' => (string) $n->id,
+                            'note' => $n->note,
+                            'name' => $n->name ?: 'System / Staff',
+                            'admin_name' => $n->admin_name ?: 'System / Staff',
+                            'created_at' => ($n->created_at ?? null) ? date('d M Y, h:i A', strtotime($n->created_at)) : ''
+                        ];
+                    });
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $notes
+            ]);
+
+        } catch (\Throwable $th) {
+            return response()->json(['success' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function addNote(Request $request, $id)
+    {
+        if ($forbidden = $this->checkPermission($request)) {
+            return $forbidden;
+        }
+
+        try {
+            $note = trim($request->input('note', ''));
+            if (empty($note)) {
+                return response()->json(['success' => false, 'message' => 'Note content is required'], 400);
+            }
+
+            $adminId = $request->attributes->get('admin_id') ?: 1;
+
+            if (Schema::hasTable('pcb_order_notes')) {
+                DB::table('pcb_order_notes')->insert([
+                    'pcb_order_id' => $id,
+                    'admin_id' => $adminId,
+                    'note' => $note,
+                    'is_internal' => 1,
+                    'created_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s')
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Note added successfully'
+            ]);
+
+        } catch (\Throwable $th) {
+            return response()->json(['success' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function updateQuantities(Request $request, $id)
+    {
+        if ($forbidden = $this->checkPermission($request)) {
+            return $forbidden;
+        }
+
+        try {
+            $order = DB::table('pcb_orders')->where('id', $id)->first();
+            if (!$order) {
+                return response()->json(['success' => false, 'message' => 'Order not found'], 404);
+            }
+
+            $adminId = $request->attributes->get('admin_id');
+            $adminUser = $adminId ? DB::table('admins')->where('id', $adminId)->first() : null;
+            $adminName = $adminUser ? $adminUser->name : 'Operator';
+
+            $now = date('Y-m-d H:i:s');
+            $updatedFields = [];
+            $logMessages = [];
+
+            // 1. Launch Qty
+            if ($request->has('launch_qty')) {
+                $newVal = (int) $request->input('launch_qty');
+                $oldVal = (int) ($order->launch_qty ?? 0);
+                if ($newVal !== $oldVal) {
+                    if (Schema::hasColumn('pcb_orders', 'launch_qty')) {
+                        $updatedFields['launch_qty'] = $newVal;
+                    }
+                    DB::table('pcb_order_meta')->updateOrInsert(
+                        ['pcb_order_id' => $id, 'meta_key' => 'launch_qty'],
+                        ['meta_value' => (string)$newVal, 'updated_at' => $now]
+                    );
+                    $logMessages[] = "Launched Qty: {$oldVal} → {$newVal}";
+                }
+            }
+
+            // 2. Final / Completed Qty
+            if ($request->has('final_qty')) {
+                $newVal = (int) $request->input('final_qty');
+                $oldVal = (int) ($order->final_qty ?? $order->completed_qty ?? 0);
+                if ($newVal !== $oldVal) {
+                    if (Schema::hasColumn('pcb_orders', 'final_qty')) {
+                        $updatedFields['final_qty'] = $newVal;
+                    }
+                    if (Schema::hasColumn('pcb_orders', 'completed_qty')) {
+                        $updatedFields['completed_qty'] = $newVal;
+                    }
+                    DB::table('pcb_order_meta')->updateOrInsert(
+                        ['pcb_order_id' => $id, 'meta_key' => 'final_qty'],
+                        ['meta_value' => (string)$newVal, 'updated_at' => $now]
+                    );
+                    $logMessages[] = "Final Qty: {$oldVal} → {$newVal}";
+                }
+            }
+
+            // 3. Failed Qty
+            if ($request->has('failed_qty')) {
+                $newVal = (int) $request->input('failed_qty');
+                $oldVal = (int) ($order->failed_qty ?? 0);
+                if ($newVal !== $oldVal) {
+                    if (Schema::hasColumn('pcb_orders', 'failed_qty')) {
+                        $updatedFields['failed_qty'] = $newVal;
+                    }
+                    DB::table('pcb_order_meta')->updateOrInsert(
+                        ['pcb_order_id' => $id, 'meta_key' => 'failed_qty'],
+                        ['meta_value' => (string)$newVal, 'updated_at' => $now]
+                    );
+                    $logMessages[] = "Failed Qty: {$oldVal} → {$newVal}";
+                }
+            }
+
+            if (!empty($updatedFields)) {
+                $updatedFields['updated_at'] = $now;
+                DB::table('pcb_orders')->where('id', $id)->update($updatedFields);
+            }
+
+            // Write to pcb_order_logs audit log
+            if (!empty($logMessages) && Schema::hasTable('pcb_order_logs')) {
+                $desc = "Quantities updated by {$adminName}: " . implode(', ', $logMessages);
+                DB::table('pcb_order_logs')->insert([
+                    'pcb_order_id' => $order->id,
+                    'order_number' => $order->order_number ?? (string)$order->id,
+                    'admin_id' => $adminId,
+                    'status' => $order->status ?? 'Production',
+                    'action' => 'Quantities Updated',
+                    'description' => $desc,
+                    'created_at' => $now,
+                    'updated_at' => $now
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Order quantities updated successfully'
             ]);
 
         } catch (\Throwable $th) {
