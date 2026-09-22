@@ -37,6 +37,7 @@ Route::prefix('mobile/v1')->group(function () {
         Route::post('orders/{id}/notes', [MobileOrderController::class, 'addNote']);
         Route::put('orders/{id}/status', [MobileOrderController::class, 'updateStatus']);
         Route::put('orders/{id}/quantities', [MobileOrderController::class, 'updateQuantities']);
+        Route::put('orders/{id}/film-applied', [MobileOrderController::class, 'updateFilmApplied']);
 
         // Inventory
         Route::get('inventory', [MobileInventoryController::class, 'index']);

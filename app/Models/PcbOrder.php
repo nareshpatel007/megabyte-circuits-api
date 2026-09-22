@@ -39,6 +39,7 @@ class PcbOrder extends Model
         'launch_date',
         'delivery_date',
         'bill_number',
+        'film_applied',
     ];
 
     // Status relationship
@@ -70,6 +71,7 @@ class PcbOrder extends Model
         'failed_qty'  => 'integer',
         'launch_date' => 'date',
         'delivery_date' => 'date',
+        'film_applied' => 'boolean',
     ];
 
     protected static function boot()

@@ -178,6 +178,7 @@ class MobileOrderController extends Controller
                     'tool' => $order->order_number ?? ('M' . $order->id),
                     'status' => ucfirst($order->status ?? 'Traveler'),
                     'film' => isset($metaMap['film']) ? (bool)$metaMap['film'] : false,
+                    'film_applied' => isset($order->film_applied) ? (bool)$order->film_applied : (isset($metaMap['film_applied']) ? (bool)$metaMap['film_applied'] : false),
                     'orderNumber' => $metaMap['order_number'] ?? (string)$order->id,
                     'client' => ($order->customer_name ?? null) ?: ($metaMap['client'] ?? 'Apex Controls'),
                     'department' => $metaMap['department'] ?? 'Production',
@@ -300,6 +301,7 @@ class MobileOrderController extends Controller
                 'tool' => $order->order_number ?? ('M' . $order->id),
                 'status' => ucfirst($order->status ?? 'Traveler'),
                 'film' => isset($metaMap['film']) ? (bool)$metaMap['film'] : false,
+                'film_applied' => isset($order->film_applied) ? (bool)$order->film_applied : (isset($metaMap['film_applied']) ? (bool)$metaMap['film_applied'] : false),
                 'orderNumber' => $metaMap['order_number'] ?? (string)$order->id,
                 'client' => ($order->customer_name ?? null) ?: ($metaMap['client'] ?? 'Apex Controls'),
                 'department' => $metaMap['department'] ?? 'Production',
@@ -612,6 +614,62 @@ class MobileOrderController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Order quantities updated successfully'
+            ]);
+
+        } catch (\Throwable $th) {
+            return response()->json(['success' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function updateFilmApplied(Request $request, $id)
+    {
+        if ($forbidden = $this->checkPermission($request)) {
+            return $forbidden;
+        }
+
+        try {
+            $order = DB::table('pcb_orders')->where('id', $id)->orWhere('order_number', $id)->first();
+            if (!$order) {
+                return response()->json(['success' => false, 'message' => 'Order not found'], 404);
+            }
+
+            $filmApplied = filter_var($request->input('film_applied'), FILTER_VALIDATE_BOOLEAN);
+            $now = date('Y-m-d H:i:s');
+
+            $updatedFields = ['updated_at' => $now];
+            if (Schema::hasColumn('pcb_orders', 'film_applied')) {
+                $updatedFields['film_applied'] = $filmApplied ? 1 : 0;
+            }
+
+            DB::table('pcb_orders')->where('id', $order->id)->update($updatedFields);
+
+            DB::table('pcb_order_meta')->updateOrInsert(
+                ['pcb_order_id' => $order->id, 'meta_key' => 'film_applied'],
+                ['meta_value' => $filmApplied ? '1' : '0', 'updated_at' => $now]
+            );
+
+            $adminId = $request->attributes->get('admin_id');
+            $adminUser = $adminId ? DB::table('admins')->where('id', $adminId)->first() : null;
+            $adminName = $adminUser ? $adminUser->name : 'Operator';
+            $statusStr = $filmApplied ? 'True (Applied)' : 'False (Not Applied)';
+
+            if (Schema::hasTable('pcb_order_logs')) {
+                DB::table('pcb_order_logs')->insert([
+                    'pcb_order_id' => $order->id,
+                    'order_number' => $order->order_number ?? (string)$order->id,
+                    'admin_id' => $adminId,
+                    'status' => $order->status ?? 'Production',
+                    'action' => 'Film Applied Updated',
+                    'description' => "Film Applied marked as {$statusStr} by {$adminName}.",
+                    'created_at' => $now,
+                    'updated_at' => $now
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Film applied status updated successfully',
+                'film_applied' => $filmApplied
             ]);
 
         } catch (\Throwable $th) {
