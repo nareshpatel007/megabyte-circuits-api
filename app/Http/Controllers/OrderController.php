@@ -368,8 +368,12 @@ class OrderController extends Controller
             $adminId = $request->input('admin_id') ?: $request->attributes->get('admin_id');
             $remark = $request->input('remark', null);
             
-            if ($request->has('status')) {
+            $changesLog = [];
+
+            if ($request->has('status') && $order->status !== $request->status) {
+                $oldVal = $order->status ?? 'Pending';
                 $order->status = $request->status;
+                $changesLog[] = "Status: '{$oldVal}' → '{$request->status}'";
                 if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses')) {
                     $st = \Illuminate\Support\Facades\DB::table('pcb_order_statuses')
                         ->whereRaw('LOWER(name) = ?', [strtolower($request->status)])
@@ -385,42 +389,64 @@ class OrderController extends Controller
                 $order->status_id = $request->status_id;
             }
 
-            if ($request->has('launch_date')) {
+            if ($request->has('launch_date') && $order->launch_date !== $request->launch_date) {
                 $order->launch_date = $request->launch_date;
             }
 
-            if ($request->has('delivery_date')) {
+            if ($request->has('delivery_date') && $order->delivery_date !== $request->delivery_date) {
                 $order->delivery_date = $request->delivery_date;
             }
 
-            if ($request->has('bill_number')) {
+            if ($request->has('bill_number') && (string)$order->bill_number !== (string)$request->bill_number) {
+                $oldVal = $order->bill_number ?? 'N/A';
                 $order->bill_number = $request->bill_number;
+                $changesLog[] = "Bill No: '{$oldVal}' → '{$request->bill_number}'";
             }
 
-            if ($request->has('q_no')) {
+            if ($request->has('q_no') && (string)$order->q_no !== (string)$request->q_no) {
+                $oldVal = $order->q_no ?? 'N/A';
                 $order->q_no = $request->q_no;
+                $changesLog[] = "Q.No: '{$oldVal}' → '{$request->q_no}'";
             }
-            if ($request->has('c_g')) {
+
+            if ($request->has('combo') && (string)$order->combo !== (string)$request->combo) {
+                $oldVal = $order->combo ?? 'N/A';
+                $order->combo = $request->combo;
+                $changesLog[] = "Combo: '{$oldVal}' → '{$request->combo}'";
+            }
+
+            if ($request->has('c_g') && (string)$order->c_g !== (string)$request->c_g) {
                 $order->c_g = $request->c_g;
             }
-            if ($request->has('combo')) {
-                $order->combo = $request->combo;
-            }
-            if ($request->has('order_qty')) {
+
+            if ($request->has('order_qty') && intval($order->order_qty) !== intval($request->order_qty)) {
+                $oldVal = intval($order->order_qty);
                 $order->order_qty = intval($request->order_qty);
+                $changesLog[] = "Order Qty: {$oldVal} → {$order->order_qty} Pcs";
             }
-            if ($request->has('launch_qty')) {
+
+            if ($request->has('launch_qty') && intval($order->launch_qty) !== intval($request->launch_qty)) {
+                $oldVal = intval($order->launch_qty);
                 $order->launch_qty = intval($request->launch_qty);
+                $changesLog[] = "Launch Qty: {$oldVal} → {$order->launch_qty} Pcs";
             }
-            if ($request->has('panel_qty')) {
+
+            if ($request->has('panel_qty') && intval($order->panel_qty) !== intval($request->panel_qty)) {
+                $oldVal = intval($order->panel_qty);
                 $order->panel_qty = intval($request->panel_qty);
+                $changesLog[] = "Panel Qty: {$oldVal} → {$order->panel_qty} Pcs";
             }
-            if ($request->has('ups_qty')) {
+
+            if ($request->has('ups_qty') && intval($order->ups_qty) !== intval($request->ups_qty)) {
+                $oldVal = intval($order->ups_qty);
                 $order->ups_qty = intval($request->ups_qty);
+                $changesLog[] = "Ups Qty: {$oldVal} → {$order->ups_qty} Pcs";
             }
-            if ($request->has('final_qty')) {
+
+            if ($request->has('final_qty') && intval($order->final_qty) !== intval($request->final_qty)) {
+                $oldVal = intval($order->final_qty);
                 $order->final_qty = intval($request->final_qty);
-                $order->completed_qty = intval($request->final_qty);
+                $changesLog[] = "Final Qty: {$oldVal} → {$order->final_qty} Pcs";
             }
 
             $oldCompletedQty = $order->completed_qty ?? 0;
@@ -430,11 +456,14 @@ class OrderController extends Controller
                 if ($newCompletedQty !== $oldCompletedQty) {
                     $order->completed_qty = $newCompletedQty;
                     $qtyUpdated = true;
+                    $changesLog[] = "Completed Qty: {$oldCompletedQty} → {$newCompletedQty} Pcs";
                 }
             }
 
-            if ($request->has('failed_qty')) {
+            if ($request->has('failed_qty') && intval($order->failed_qty) !== intval($request->failed_qty)) {
+                $oldVal = intval($order->failed_qty);
                 $order->failed_qty = intval($request->failed_qty);
+                $changesLog[] = "Failed Qty: {$oldVal} → {$order->failed_qty} Pcs";
                 PcbOrderMeta::updateOrCreate(
                     ['pcb_order_id' => $order->id, 'meta_key' => 'failed_qty'],
                     ['meta_value' => (string)intval($request->failed_qty)]
@@ -469,8 +498,8 @@ class OrderController extends Controller
                 ]);
             }
 
-            // 2. Create activity log in pcb_order_logs with admin_id for status or quantity updates
-            if (($request->has('status') || $qtyUpdated) && \Illuminate\Support\Facades\Schema::hasTable('pcb_order_logs')) {
+            // 2. Create activity log in pcb_order_logs with admin_id for status or field updates
+            if (!empty($changesLog) && \Illuminate\Support\Facades\Schema::hasTable('pcb_order_logs')) {
                 $statusName = $order->status ?? 'Pending';
                 
                 // Fetch admin user details for description and log record
@@ -482,16 +511,9 @@ class OrderController extends Controller
                 
                 $adminName = $adminUser ? $adminUser->name : ($request->attributes->get('admin_name') ?: ($request->input('admin_name') ?: ($effectiveAdminId ? "Admin #{$effectiveAdminId}" : "Admin")));
 
-                if ($qtyUpdated && $request->has('status')) {
-                    $actionName = "Partial Delivery / Status Updated";
-                    $descText = "Completed quantity updated from {$oldCompletedQty} to {$order->completed_qty} Pcs. Status set to '{$statusName}' by {$adminName}." . ($remark ? " Remark: {$remark}" : "");
-                } elseif ($qtyUpdated) {
-                    $actionName = "Quantity Updated";
-                    $descText = "Completed quantity updated from {$oldCompletedQty} to {$order->completed_qty} Pcs by {$adminName}." . ($remark ? " Remark: {$remark}" : "");
-                } else {
-                    $actionName = "Status Updated: {$statusName}";
-                    $descText = $remark ? "Order status updated to '{$statusName}' by {$adminName}. Remark: {$remark}" : "Order status updated to '{$statusName}' by {$adminName}.";
-                }
+                $actionName = $request->has('status') ? "Status & Details Updated" : "Order Parameters Updated";
+                $changesStr = implode(", ", $changesLog);
+                $descText = "Updated by {$adminName}: {$changesStr}." . ($remark ? " Remark: {$remark}" : "");
 
                 \Illuminate\Support\Facades\DB::table('pcb_order_logs')->insert([
                     'pcb_order_id' => $order->id,

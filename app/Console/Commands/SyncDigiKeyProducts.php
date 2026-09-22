@@ -247,26 +247,36 @@ class SyncDigiKeyProducts extends Command
             ? 'https://sandbox-api.digikey.com/v1/oauth2/token'
             : 'https://api.digikey.com/v1/oauth2/token';
 
-        $response = Http::timeout(30)->asForm()->post($url, [
-            'client_id' => $clientId,
-            'client_secret' => $clientSecret,
-            'grant_type' => 'client_credentials',
-        ]);
+        $response = null;
+        for ($attempt = 1; $attempt <= 3; $attempt++) {
+            $response = Http::timeout(30)->asForm()->post($url, [
+                'client_id' => $clientId,
+                'client_secret' => $clientSecret,
+                'grant_type' => 'client_credentials',
+            ]);
 
-        if ($response->status() === 429 || str_contains(strtolower($response->body()), 'ratelimit') || str_contains(strtolower($response->body()), 'too many requests')) {
-            throw new DigiKeyRateLimitException('Daily Ratelimit exceeded');
-        }
-
-        if ($response->successful()) {
-            $data = $response->json();
-            $token = $data['access_token'] ?? null;
-            if ($token) {
-                return $token;
+            if ($response->successful()) {
+                $data = $response->json();
+                $token = $data['access_token'] ?? null;
+                if ($token) {
+                    return $token;
+                }
             }
+
+            if ($response->status() === 429 || str_contains(strtolower($response->body()), 'ratelimit') || str_contains(strtolower($response->body()), 'too many requests')) {
+                throw new DigiKeyRateLimitException('Daily Ratelimit exceeded');
+            }
+
+            if ($response->status() === 500 && $attempt < 3) {
+                sleep(2);
+                continue;
+            }
+
+            break;
         }
 
-        $errorMsg = 'OAuth Error (' . $response->status() . '): ' . $response->body();
-        Log::error('DigiKey OAuth Token Error', ['account_id' => $account->id, 'body' => $response->body()]);
+        $errorMsg = 'OAuth Error (' . ($response ? $response->status() : 'Unknown') . '): ' . ($response ? $response->body() : 'No response');
+        Log::error('DigiKey OAuth Token Error', ['account_id' => $account->id, 'body' => $response ? $response->body() : '']);
         throw new DigiKeyAccountException($errorMsg);
     }
 
@@ -388,6 +398,11 @@ class SyncDigiKeyProducts extends Command
         }
 
         if (!$response->successful()) {
+            if ($response->status() === 500) {
+                $this->warn("\nDigiKey API Server Error (500) for Cat {$subcategory->category_id} and Mfg Batch (" . implode(',', $mfgIds) . "). Skipping batch...");
+                Log::warning("DigiKey API 500 Error skipped", ['category_id' => $subcategory->category_id, 'mfg_ids' => $mfgIds, 'body' => $response->body()]);
+                return 0;
+            }
             $this->error("Error fetching products for Cat {$subcategory->category_id} and Mfg Batch (" . implode(',', $mfgIds) . "): " . $response->body());
             throw new DigiKeyAccountException('HTTP Error ' . $response->status() . ': ' . $response->body());
         }
