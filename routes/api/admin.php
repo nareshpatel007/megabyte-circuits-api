@@ -98,6 +98,7 @@ Route::middleware('verify.admin.token')->group(function () {
 
         // Gerber Management
         Route::get('gerber-files', [AdminController::class, 'gerberFiles']);
+        Route::get('gerber-files/{id}/download', [AdminController::class, 'downloadGerberFile']);
         Route::delete('gerber-files/{id}', [AdminController::class, 'deleteGerberFile']);
 
         // Status Management

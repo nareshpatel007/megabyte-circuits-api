@@ -1655,6 +1655,55 @@ class AdminController extends Controller
     }
 
     /**
+     * Download a Gerber file directly from server storage
+     */
+    public function downloadGerberFile(Request $request, $id)
+    {
+        try {
+            $file = DB::table('gerber_files')->where('id', $id)->first();
+            if (!$file) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Gerber file record not found'
+                ], 404);
+            }
+
+            $originalName = $file->original_name ?: ($file->file_name ?: "gerber_{$id}.zip");
+
+            // 1. Check file_path via Storage disk 'public'
+            if (!empty($file->file_path) && Storage::disk('public')->exists($file->file_path)) {
+                $fullPath = Storage::disk('public')->path($file->file_path);
+                return response()->download($fullPath, $originalName);
+            }
+
+            // 2. Check full path or relative path on storage disk
+            $candidatePaths = [
+                storage_path('app/public/' . ltrim($file->file_path ?? '', '/')),
+                storage_path('app/public/gerber-files/' . ($file->file_name ?? '')),
+                storage_path('app/' . ltrim($file->file_path ?? '', '/')),
+                public_path('storage/' . ltrim($file->file_path ?? '', '/')),
+                public_path('storage/gerber-files/' . ($file->file_name ?? ''))
+            ];
+
+            foreach ($candidatePaths as $path) {
+                if (!empty($path) && file_exists($path) && is_file($path)) {
+                    return response()->download($path, $originalName);
+                }
+            }
+
+            return response()->json([
+                'status' => false,
+                'message' => "Gerber file '{$originalName}' is not available on server disk."
+            ], 404);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Failed to download Gerber file: ' . $th->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Delete a Gerber file
      */
     public function deleteGerberFile($id)
