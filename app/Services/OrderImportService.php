@@ -966,25 +966,6 @@ class OrderImportService
             $errors['Customer name'] = 'Customer name is required.';
         }
 
-        if (empty($data['order_date']) || trim((string)$data['order_date']) === '') {
-            $errors['Order Date'] = 'Order date is required.';
-        } else {
-            $parsedDate = $this->parseDate($data['order_date']);
-            if (!$parsedDate) {
-                $errors['Order Date'] = "Invalid date format for '{$data['order_date']}'. Expected YYYY-MM-DD or M/D/YYYY.";
-            }
-        }
-
-        // Other Date fields validation
-        foreach (['launch_date' => 'Launch Date', 'delivery_date' => 'Delivery date'] as $k => $label) {
-            if (!empty($data[$k])) {
-                $parsedDate = $this->parseDate($data[$k]);
-                if (!$parsedDate) {
-                    $errors[$label] = "Invalid date format for '{$data[$k]}'. Expected YYYY-MM-DD or M/D/YYYY.";
-                }
-            }
-        }
-
         return [
             'valid'  => empty($errors),
             'errors' => $errors,
@@ -1064,14 +1045,11 @@ class OrderImportService
             'final_qty'      => $finalQty,
             'failed_qty'     => $failedQty,
             'delivery_date'  => $deliveryDate,
+            'launch_date'    => $launchDate,
             'bill_number'    => $billNumber,
-            'created_at'     => $orderDate ? Carbon::parse($orderDate) : now(),
+            'created_at'     => $orderDate ? Carbon::parse($orderDate) : null,
             'updated_at'     => now(),
         ];
-
-        if ($launchDate) {
-            $orderPayload['launch_date'] = $launchDate;
-        }
 
         $order = PcbOrder::create($orderPayload);
 
@@ -1110,19 +1088,12 @@ class OrderImportService
     protected function updatePcbOrderRecord(PcbOrder $order, array $data, ?int $userId = null): PcbOrder
     {
         $orderDate = $this->parseDate($data['order_date'] ?? null);
-        if ($orderDate) {
-            $order->created_at = Carbon::parse($orderDate);
-        }
-
         $launchDate = $this->parseDate($data['launch_date'] ?? null);
-        if ($launchDate) {
-            $order->launch_date = $launchDate;
-        }
-
         $deliveryDate = $this->parseDate($data['delivery_date'] ?? null);
-        if ($deliveryDate) {
-            $order->delivery_date = $deliveryDate;
-        }
+
+        $order->created_at = $orderDate ? Carbon::parse($orderDate) : null;
+        $order->launch_date = $launchDate;
+        $order->delivery_date = $deliveryDate;
 
         if (isset($data['quote_number'])) {
             $order->q_no = (string)$data['quote_number'];
