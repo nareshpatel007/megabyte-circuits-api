@@ -313,13 +313,6 @@ class FileUploadController extends Controller
                 return response()->json(['error' => 'Record not found'], 404);
             }
 
-            // If preview_data is an SVG markup string, return directly as SVG image
-            if (!empty($file->preview_data) && (str_contains($file->preview_data, '<svg') || str_starts_with(trim($file->preview_data), '<svg'))) {
-                return response($file->preview_data, 200)
-                    ->header('Content-Type', 'image/svg+xml')
-                    ->header('Cache-Control', 'public, max-age=86400');
-            }
-
             $analysisData = $file->analysis_data ? json_decode($file->analysis_data, true) : [];
             $pythonUrl = config('services.python_gerber.url', env('PYTHON_GERBER_API_URL', 'http://127.0.0.1:8000'));
             
