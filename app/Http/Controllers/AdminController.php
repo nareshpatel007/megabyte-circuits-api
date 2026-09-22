@@ -1581,6 +1581,8 @@ class AdminController extends Controller
                     'gerber_files.file_size',
                     'gerber_files.board_name',
                     'gerber_files.preview_data',
+                    'gerber_files.front_preview_url',
+                    'gerber_files.back_preview_url',
                     'gerber_files.created_at',
                     'gerber_files.updated_at',
                     'users.name as client_name',
