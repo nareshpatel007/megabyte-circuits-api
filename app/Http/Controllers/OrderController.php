@@ -173,7 +173,7 @@ class OrderController extends Controller
     public function index(Request $request)
     {
         try {
-            $withRelations = ['metas'];
+            $withRelations = ['metas', 'user'];
             if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses') || \Illuminate\Support\Facades\Schema::hasTable('pcb_statuses')) {
                 $withRelations[] = 'statusDetails';
             }
@@ -188,7 +188,7 @@ class OrderController extends Controller
                 $query->whereDate('created_at', '<=', $request->end_date);
             }
 
-            // Search Filter (by Order #, Board Name, Email, Mobile, Customer Name, Metas, Razorpay Payment IDs)
+            // Search Filter (by Order #, Board Name, Email, Mobile, Customer Name, User/Company, Metas, Razorpay Payment IDs)
             if ($request->filled('search')) {
                 $search = trim($request->input('search'));
                 $query->where(function ($q) use ($search) {
@@ -199,6 +199,12 @@ class OrderController extends Controller
                     if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'board_name')) {
                         $q->orWhere('board_name', 'LIKE', "%{$search}%");
                     }
+                    $q->orWhereHas('user', function ($uq) use ($search) {
+                        $uq->where('name', 'LIKE', "%{$search}%")
+                            ->orWhere('company_name', 'LIKE', "%{$search}%")
+                            ->orWhere('email', 'LIKE', "%{$search}%")
+                            ->orWhere('mobile', 'LIKE', "%{$search}%");
+                    });
                     $q->orWhereHas('metas', function ($mq) use ($search) {
                         $mq->where('meta_value', 'LIKE', "%{$search}%");
                     });
@@ -369,6 +375,31 @@ class OrderController extends Controller
             $remark = $request->input('remark', null);
             
             $changesLog = [];
+
+            if ($request->has('user_id') && (string)$order->user_id !== (string)$request->user_id) {
+                $oldUserId = $order->user_id ?? 'N/A';
+                $order->user_id = $request->user_id;
+                $changesLog[] = "Customer ID: '{$oldUserId}' → '{$request->user_id}'";
+                if ($request->user_id) {
+                    $userObj = \App\Models\PcbUser::find($request->user_id);
+                    if ($userObj) {
+                        $newCustName = $userObj->company_name ?: $userObj->name;
+                        if ($newCustName) {
+                            $order->customer_name = $newCustName;
+                        }
+                        if (!empty($userObj->email)) {
+                            $order->user_email = $userObj->email;
+                        }
+                        if (!empty($userObj->mobile)) {
+                            $order->user_mobile = $userObj->mobile;
+                        }
+                    }
+                }
+            }
+
+            if ($request->has('customer_name') && $order->customer_name !== $request->customer_name) {
+                $order->customer_name = $request->customer_name;
+            }
 
             if ($request->has('status') && $order->status !== $request->status) {
                 $oldVal = $order->status ?? 'Pending';
