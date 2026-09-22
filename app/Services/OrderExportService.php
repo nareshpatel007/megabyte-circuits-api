@@ -213,13 +213,11 @@ class OrderExportService
                 return $order->getMeta($key, $fallback);
             };
 
-            $orderDateVal = $getMeta('order_date', '');
-            $orderDateStr = !empty($orderDateVal) ? Carbon::parse($orderDateVal)->format('M d, Y') : ($order->created_at ? $order->created_at->format('M d, Y') : 'N/A');
+            $orderDateStr = $order->created_at ? $order->created_at->format('M d, Y') : (!empty($getMeta('order_date')) ? Carbon::parse($getMeta('order_date'))->format('M d, Y') : 'N/A');
 
-            $launchDateVal = $getMeta('launch_date', '');
-            $launchDateStr = !empty($launchDateVal) ? Carbon::parse($launchDateVal)->format('M d, Y') : 'N/A';
+            $launchDateStr = $order->launch_date ? $order->launch_date->format('M d, Y') : (!empty($getMeta('launch_date')) ? Carbon::parse($getMeta('launch_date'))->format('M d, Y') : 'N/A');
 
-            $deliveryDateVal = $order->delivery_date ? $order->delivery_date->format('M d, Y') : $getMeta('delivery_date', 'N/A');
+            $deliveryDateVal = $order->delivery_date ? $order->delivery_date->format('M d, Y') : (!empty($getMeta('delivery_date')) ? Carbon::parse($getMeta('delivery_date'))->format('M d, Y') : 'N/A');
 
             return [
                 'id'                => $order->id,
@@ -371,16 +369,14 @@ class OrderExportService
             return $order->getMeta($key, $fallback);
         };
 
-        // Order Date
-        $orderDateVal = $getMeta('order_date', '');
-        $orderDateStr = !empty($orderDateVal) ? Carbon::parse($orderDateVal)->format('n/j/Y') : ($order->created_at ? $order->created_at->format('n/j/Y') : '');
+        // Order Date (pcb_orders.created_at)
+        $orderDateStr = $order->created_at ? $order->created_at->format('n/j/Y') : (!empty($getMeta('order_date')) ? Carbon::parse($getMeta('order_date'))->format('n/j/Y') : '');
 
-        // Launch Date
-        $launchDateVal = $getMeta('launch_date', '');
-        $launchDateStr = !empty($launchDateVal) ? Carbon::parse($launchDateVal)->format('n/j/Y') : '';
+        // Launch Date (pcb_orders.launch_date)
+        $launchDateStr = $order->launch_date ? $order->launch_date->format('n/j/Y') : (!empty($getMeta('launch_date')) ? Carbon::parse($getMeta('launch_date'))->format('n/j/Y') : '');
 
-        // Delivery Date
-        $deliveryDateVal = $order->delivery_date ? $order->delivery_date->format('n/j/Y') : $getMeta('delivery_date', '');
+        // Delivery Date (pcb_orders.delivery_date)
+        $deliveryDateVal = $order->delivery_date ? $order->delivery_date->format('n/j/Y') : (!empty($getMeta('delivery_date')) ? Carbon::parse($getMeta('delivery_date'))->format('n/j/Y') : '');
 
         return [
             $orderDateStr,                                                      // Col A: Order Date

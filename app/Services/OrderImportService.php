@@ -434,7 +434,7 @@ class OrderImportService
                     }
                 } else {
                     $orderNumber = $toolVal;
-                    if (empty($orderNumber) || ($existingOrderId && $duplicateAction === 'create_new')) {
+                    if (empty($orderNumber)) {
                         $nextNumericId++;
                         $orderNumber = 'M' . str_pad($nextNumericId, 4, '0', STR_PAD_LEFT);
                     }
@@ -835,7 +835,7 @@ class OrderImportService
                 } else {
                     // Create new order record
                     $orderNumber = $toolVal;
-                    if (empty($orderNumber) || ($existingOrderId && $duplicateAction === 'create_new')) {
+                    if (empty($orderNumber)) {
                         $nextNumericId++;
                         $orderNumber = 'M' . str_pad($nextNumericId, 4, '0', STR_PAD_LEFT);
                     }
@@ -1013,7 +1013,8 @@ class OrderImportService
         $failedQty = max(0, $launchQty - $finalQty);
 
         $completedQty = $finalQty > 0 ? $finalQty : $orderQty;
-        $status = !empty($data['status']) ? (string)$data['status'] : 'move';
+        $rawStatus = !empty($data['status']) ? trim((string)$data['status']) : '';
+        $status = (empty($rawStatus) || strtolower($rawStatus) === 'move') ? 'Completed' : $rawStatus;
         $billNumber = !empty($data['bill_number']) ? (string)$data['bill_number'] : null;
 
         // P/N Resolution -> gerber_files table
@@ -1176,7 +1177,8 @@ class OrderImportService
         $order->failed_qty = max(0, $launchQty - $finalQty);
 
         if (!empty($data['status'])) {
-            $order->status = (string)$data['status'];
+            $rawStatus = trim((string)$data['status']);
+            $order->status = strtolower($rawStatus) === 'move' ? 'Completed' : $rawStatus;
         }
 
         if (!empty($data['bill_number'])) {
@@ -1865,8 +1867,11 @@ class OrderImportService
                         }
                     }
 
-                    $nextNumericId++;
-                    $orderNum = 'M' . $nextNumericId;
+                    $orderNum = $toolVal;
+                    if (empty($orderNum)) {
+                        $nextNumericId++;
+                        $orderNum = 'M' . $nextNumericId;
+                    }
                     $order = $this->createPcbOrderRecord($orderNum, $data, $resolvedUserId);
 
                     if ($toolVal !== '') {
