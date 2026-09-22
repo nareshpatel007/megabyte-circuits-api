@@ -185,7 +185,30 @@ class OrderController extends Controller
                 return \Illuminate\Support\Facades\Schema::hasTable('payment_transactions');
             });
 
-            $withRelations = ['metas:id,pcb_order_id,meta_key,meta_value', 'user'];
+            $allowedMetaKeys = [
+                'gerber_file_name', 'gerber_name', 'file_name', 'gerber_file',
+                'gerber_file_url', 'gerber_url', 'gerber_path',
+                'payment_id', 'razorpay_payment_id', 'transaction_id',
+                'payment_status', 'payment_mode', 'payment_method',
+                'film_datetime', 'film_date',
+                'qty', 'quantity', 'product_type',
+                'pcb_color', 'solder_mask', 'layer', 'layers',
+                'min_hole', 'min_hole_size', 'panel_size', 'dimensions',
+                'cutting_size', 'material', 'base_material', 'board_thickness',
+                'thickness', 'copper_thickness', 'copper_weight',
+                'surface_finish', 'finish', 'legend_color', 'silkscreen',
+                'silkscreen_side', 'legend_side', 'route', 'routing',
+                'v_cut', 'fpt_program', 'second_stage', 'copper_area',
+                'tool', 'quote_number', 'p_n', 'part_number', 'ups', 'panels'
+            ];
+
+            $withRelations = [
+                'metas' => function ($mq) use ($allowedMetaKeys) {
+                    $mq->select(['id', 'pcb_order_id', 'meta_key', 'meta_value'])
+                       ->whereIn('meta_key', $allowedMetaKeys);
+                },
+                'user'
+            ];
             if ($hasStatusTable) {
                 $withRelations[] = 'statusDetails';
             }
@@ -421,8 +444,10 @@ class OrderController extends Controller
                 }
             }
 
-            if ($request->has('customer_name') && $order->customer_name !== $request->customer_name) {
+            if ($request->has('customer_name') && (string)$order->customer_name !== (string)$request->customer_name) {
+                $oldVal = $order->customer_name ?? 'N/A';
                 $order->customer_name = $request->customer_name;
+                $changesLog[] = "Customer: '{$oldVal}' → '{$request->customer_name}'";
             }
 
             if ($request->has('status') && $order->status !== $request->status) {
