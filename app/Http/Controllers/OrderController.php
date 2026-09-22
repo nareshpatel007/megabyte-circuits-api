@@ -276,6 +276,12 @@ class OrderController extends Controller
                 $query->orderBy($sortBy, $sortOrder);
             }
 
+            if ($request->filled('limit')) {
+                $query->take(max(1, intval($request->input('limit'))));
+            } else if ($request->filled('per_page') && $request->input('per_page') !== 'all') {
+                $query->take(max(1, intval($request->input('per_page'))));
+            }
+
             $orders = $query->get();
 
             $orders->transform(function ($order) {
@@ -425,13 +431,13 @@ class OrderController extends Controller
 
             if ($request->has('user_id') && (string)$order->user_id !== (string)$request->user_id) {
                 $oldUserId = $order->user_id ?? 'N/A';
-                $order->user_id = $request->user_id;
+                $order->user_id = $request->user_id ?: null;
                 $changesLog[] = "Customer ID: '{$oldUserId}' → '{$request->user_id}'";
                 if ($request->user_id) {
-                    $userObj = \App\Models\PcbUser::find($request->user_id);
+                    $userObj = \App\Models\PcbUser::find($request->user_id) ?: (\Illuminate\Support\Facades\Schema::hasTable('users') ? \App\Models\User::find($request->user_id) : null);
                     if ($userObj) {
-                        $newCustName = $userObj->company_name ?: $userObj->name;
-                        if ($newCustName) {
+                        $newCustName = $userObj->company_name ?: ($userObj->name ?: (isset($userObj->first_name) ? trim("{$userObj->first_name} {$userObj->last_name}") : null));
+                        if ($newCustName && !$request->has('customer_name')) {
                             $order->customer_name = $newCustName;
                         }
                         if (!empty($userObj->email)) {

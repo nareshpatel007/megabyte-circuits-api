@@ -143,33 +143,35 @@ class AdminController extends Controller
             $statusCounts = [];
 
             if ($hasOrders) {
+                $pendingOrders = DB::table('pcb_orders')
+                    ->whereNull('deleted_at')
+                    ->where(function ($q) {
+                        $q->whereNull('status')
+                          ->orWhere('status', '')
+                          ->orWhereRaw("LOWER(TRIM(status)) IN ('pending', 'move')");
+                    })
+                    ->count();
+
+                $mfgRuns = DB::table('pcb_orders')
+                    ->whereNull('deleted_at')
+                    ->whereNotIn(DB::raw("LOWER(TRIM(COALESCE(status, '')))"), ['cancelled', 'canceled', 'completed', 'shipped', 'delivered'])
+                    ->count();
+
+                $joinClause = $statusTable ? "COALESCE(NULLIF(TRIM(pcb_orders.status), ''), {$statusTable}.name, 'Pending')" : "COALESCE(NULLIF(TRIM(pcb_orders.status), ''), 'Pending')";
+
+                $query = DB::table('pcb_orders');
                 if ($statusTable) {
-                    $pendingOrders = DB::table('pcb_orders')
-                        ->leftJoin($statusTable, 'pcb_orders.status_id', '=', "{$statusTable}.id")
-                        ->where(function ($q) use ($statusTable) {
-                            $q->where("{$statusTable}.name", 'like', '%pending%')
-                              ->orWhere("{$statusTable}.name", 'like', '%move%')
-                              ->orWhereNull('pcb_orders.status_id');
-                        })
-                        ->count();
+                    $query->leftJoin($statusTable, 'pcb_orders.status_id', '=', "{$statusTable}.id");
+                }
 
-                    $mfgRuns = DB::table('pcb_orders')
-                        ->leftJoin($statusTable, 'pcb_orders.status_id', '=', "{$statusTable}.id")
-                        ->whereNotIn("{$statusTable}.name", ['Cancelled', 'Completed', 'Shipped'])
-                        ->count();
+                $rawCounts = $query->select(DB::raw("{$joinClause} as status_name"), DB::raw('count(*) as total'))
+                    ->whereNull('pcb_orders.deleted_at')
+                    ->groupBy('status_name')
+                    ->get();
 
-                    $rawCounts = DB::table('pcb_orders')
-                        ->leftJoin($statusTable, 'pcb_orders.status_id', '=', "{$statusTable}.id")
-                        ->select(DB::raw("COALESCE({$statusTable}.name, 'Pending') as status_name"), DB::raw('count(*) as total'))
-                        ->groupBy('status_name')
-                        ->get();
-
-                    foreach ($rawCounts as $row) {
-                        $statusCounts[$row->status_name] = $row->total;
-                    }
-                } else {
-                    $pendingOrders = $totalOrders;
-                    $statusCounts = ['Pending' => $totalOrders];
+                foreach ($rawCounts as $row) {
+                    $name = ucwords(strtolower(trim($row->status_name)));
+                    $statusCounts[$name] = ($statusCounts[$name] ?? 0) + intval($row->total);
                 }
             }
 
