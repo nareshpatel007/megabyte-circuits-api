@@ -224,6 +224,13 @@ class FileUploadController extends Controller
             $previewFrontRel = $pythonResponse['preview_front'] ?? ($pythonResponse['pcb_previews']['preview_top_2d'] ?? null);
             $previewBackRel = $pythonResponse['preview_back'] ?? ($pythonResponse['pcb_previews']['preview_bottom_2d'] ?? null);
 
+            if (!$previewFrontRel && $pythonProjectId) {
+                $previewFrontRel = "/projects/{$pythonProjectId}/renders/pcb_top_2d.png";
+            }
+            if (!$previewBackRel && $pythonProjectId) {
+                $previewBackRel = "/projects/{$pythonProjectId}/renders/pcb_bottom_2d.png";
+            }
+
             $frontPreviewUrl = "/api/gerber/{$gerberFileId}/preview/front";
             $backPreviewUrl = "/api/gerber/{$gerberFileId}/preview/back";
 
