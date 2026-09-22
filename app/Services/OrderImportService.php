@@ -351,7 +351,7 @@ class OrderImportService
 
                 if (!$validation['valid']) {
                     $failedCount++;
-                    
+
                     foreach ($validation['errors'] as $colName => $errMsg) {
                         \App\Models\PcbImportError::create([
                             'import_id'     => $import->id,
@@ -595,7 +595,7 @@ class OrderImportService
         for ($i = 1; $i < $totalRowsInSheet; $i++) {
             $rowData = $allRows[$i];
             $excelRowNumber = $i + 1;
-            
+
             // Skip entirely blank rows
             if ($this->isRowEmpty($rowData)) {
                 continue;
@@ -868,7 +868,6 @@ class OrderImportService
                 ],
                 'failed_rows' => $failedRows,
             ];
-
         } catch (\Throwable $e) {
             DB::rollBack();
             return [
@@ -1091,9 +1090,17 @@ class OrderImportService
         $launchDate = $this->parseDate($data['launch_date'] ?? null);
         $deliveryDate = $this->parseDate($data['delivery_date'] ?? null);
 
-        $order->created_at = $orderDate ? Carbon::parse($orderDate) : null;
-        $order->launch_date = $launchDate;
-        $order->delivery_date = $deliveryDate;
+        if ($orderDate) {
+            $order->created_at = Carbon::parse($orderDate);
+        }
+
+        if ($launchDate) {
+            $order->launch_date = Carbon::parse($launchDate);
+        }
+
+        if ($deliveryDate) {
+            $order->delivery_date = Carbon::parse($deliveryDate);
+        }
 
         if (isset($data['quote_number'])) {
             $order->q_no = (string)$data['quote_number'];
@@ -1307,14 +1314,15 @@ class OrderImportService
         }
 
         $str = trim((string)$val);
-        if ($str === '' || $str === '-' || strtolower($str) === 'n/a') return null;
+        if ($str === '' || $str === '-' || strtolower($str) === 'n/a' || strtolower($str) === 'null') return null;
 
         // 1. Excel numeric timestamp
         if (is_numeric($str) && (float)$str > 10000 && (float)$str < 100000) {
             try {
                 $dt = ExcelDate::excelToDateTimeObject((float)$str);
                 return $dt ? $dt->format('Y-m-d') : null;
-            } catch (\Throwable $e) {}
+            } catch (\Throwable $e) {
+            }
         }
 
         // Clean up common separators: replace slashes, dots, underscores, spaces with dash
@@ -1332,51 +1340,57 @@ class OrderImportService
             $day = null;
 
             if ($p1 > 1000) {
-                // Year at start (e.g. 2026-04-24)
+                // Year at start (e.g. 2026-06-02 or 2026-6-26)
                 $year = $p1;
-                $month = min(12, max(1, $p2));
-                $day = min(31, max(1, $p3));
+                if ($p2 > 12 && $p3 <= 12) {
+                    $day = $p2;
+                    $month = $p3;
+                } else {
+                    $month = $p2;
+                    $day = $p3;
+                }
             } else {
-                // Year at end (e.g. 24-04-223 or 24-04-23 or 24-04-2023)
-                if ($p3 >= 1000 && $p3 <= 2100) {
+                // Year at end (e.g. 02-06-2026, 6-26-2026, 26-6-26)
+                if ($p3 >= 1000) {
                     $year = $p3;
-                } elseif ($p3 >= 100 && $p3 < 1000) {
-                    // Typo year like 223 or 023 -> 2023
-                    $year = 2000 + ($p3 % 100);
                 } elseif ($p3 >= 0 && $p3 < 100) {
-                    // 2-digit year like 23 or 26 -> 2023 or 2026
                     $year = 2000 + $p3;
                 } else {
                     $year = 2000 + (int)substr((string)$p3, -2);
                 }
 
                 if ($p1 > 12 && $p2 <= 12) {
-                    // DD-MM-YYYY (e.g. 24-04-2023)
-                    $day = min(31, max(1, $p1));
-                    $month = min(12, max(1, $p2));
+                    // Day first: 26-06-2026 or 26-6-26
+                    $day = $p1;
+                    $month = $p2;
                 } elseif ($p2 > 12 && $p1 <= 12) {
-                    // MM-DD-YYYY (e.g. 04-24-2023)
-                    $month = min(12, max(1, $p1));
-                    $day = min(31, max(1, $p2));
+                    // Month first: 6-26-2026
+                    $month = $p1;
+                    $day = $p2;
                 } else {
-                    // Both <= 12 (e.g. 24-04-2023 -> 24 is day), default DD-MM-YYYY
-                    $day = min(31, max(1, $p1));
-                    $month = min(12, max(1, $p2));
+                    // Default to Day-Month-Year (e.g., 02-06-2026 -> Day 02, Month 06)
+                    $day = $p1;
+                    $month = $p2;
                 }
             }
 
-            if ($year && $month && $day) {
-                return sprintf('%04d-%02d-%02d', $year, $month, $day);
+            if ($year && $month >= 1 && $month <= 12 && $day >= 1 && $day <= 31) {
+                if (checkdate($month, $day, $year)) {
+                    return sprintf('%04d-%02d-%02d', $year, $month, $day);
+                }
             }
         }
 
-        // 3. Fallback Carbon parse
+        // 3. Fallback Carbon parse without falling back to today's date
         try {
             $c = Carbon::parse($str);
-            return $c->format('Y-m-d');
+            if ($c && $c->year >= 1970 && $c->year <= 2100) {
+                return $c->format('Y-m-d');
+            }
         } catch (\Throwable $e) {
-            return null;
         }
+
+        return null;
     }
 
     /**
@@ -1393,7 +1407,8 @@ class OrderImportService
         try {
             $reader = IOFactory::createReaderForFile($filePath);
             if (method_exists($reader, 'setReadDataOnly')) {
-                $reader->setReadDataOnly(true);
+                // Keep formatted strings (dates, strings) intact
+                $reader->setReadDataOnly(false);
             }
             if (method_exists($reader, 'setReadEmptyCells')) {
                 $reader->setReadEmptyCells(false);
@@ -1557,9 +1572,9 @@ class OrderImportService
             $search = trim($filters['search']);
             $query->where(function ($q) use ($search) {
                 $q->where('row_data->customer_name', 'LIKE', "%{$search}%")
-                  ->orWhere('row_data->p_n', 'LIKE', "%{$search}%")
-                  ->orWhere('row_data->quote_number', 'LIKE', "%{$search}%")
-                  ->orWhere('row_data->bill_number', 'LIKE', "%{$search}%");
+                    ->orWhere('row_data->p_n', 'LIKE', "%{$search}%")
+                    ->orWhere('row_data->quote_number', 'LIKE', "%{$search}%")
+                    ->orWhere('row_data->bill_number', 'LIKE', "%{$search}%");
             });
         }
 
@@ -1568,9 +1583,9 @@ class OrderImportService
         $offset = ($page - 1) * $perPage;
 
         $rows = (clone $query)->orderBy('row_number', 'asc')
-                              ->skip($offset)
-                              ->take($perPage)
-                              ->get();
+            ->skip($offset)
+            ->take($perPage)
+            ->get();
 
         return [
             'success'      => true,
