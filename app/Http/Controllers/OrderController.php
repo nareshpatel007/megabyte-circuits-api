@@ -173,12 +173,36 @@ class OrderController extends Controller
     public function index(Request $request)
     {
         try {
-            $withRelations = ['metas', 'user'];
-            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses') || \Illuminate\Support\Facades\Schema::hasTable('pcb_statuses')) {
+            $hasStatusTable = \Illuminate\Support\Facades\Cache::rememberForever('schema_has_status_table', function () {
+                return \Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses') || \Illuminate\Support\Facades\Schema::hasTable('pcb_statuses');
+            });
+
+            $hasBoardNameCol = \Illuminate\Support\Facades\Cache::rememberForever('schema_has_board_name_col', function () {
+                return \Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'board_name');
+            });
+
+            $hasPaymentTxTable = \Illuminate\Support\Facades\Cache::rememberForever('schema_has_payment_tx_table', function () {
+                return \Illuminate\Support\Facades\Schema::hasTable('payment_transactions');
+            });
+
+            $withRelations = ['metas:id,pcb_order_id,meta_key,meta_value', 'user'];
+            if ($hasStatusTable) {
                 $withRelations[] = 'statusDetails';
             }
 
             $query = PcbOrder::with($withRelations);
+
+            // Status Filter
+            if ($request->filled('status')) {
+                $statusParam = trim($request->input('status'));
+                if (strtolower($statusParam) === 'in production') {
+                    $excluded = ['pending', 'completed', 'shipped', 'delivered', 'cancelled', 'canceled'];
+                    $query->whereNotIn('status', $excluded);
+                } else if (strtolower($statusParam) !== 'all') {
+                    $statusLower = strtolower($statusParam);
+                    $query->whereRaw('LOWER(TRIM(status)) = ?', [$statusLower]);
+                }
+            }
 
             // Date Range Filtering
             if ($request->filled('start_date')) {
@@ -191,12 +215,12 @@ class OrderController extends Controller
             // Search Filter (by Order #, Board Name, Email, Mobile, Customer Name, User/Company, Metas, Razorpay Payment IDs)
             if ($request->filled('search')) {
                 $search = trim($request->input('search'));
-                $query->where(function ($q) use ($search) {
+                $query->where(function ($q) use ($search, $hasBoardNameCol, $hasPaymentTxTable) {
                     $q->where('order_number', 'LIKE', "%{$search}%")
                         ->orWhere('user_email', 'LIKE', "%{$search}%")
                         ->orWhere('user_mobile', 'LIKE', "%{$search}%")
                         ->orWhere('customer_name', 'LIKE', "%{$search}%");
-                    if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'board_name')) {
+                    if ($hasBoardNameCol) {
                         $q->orWhere('board_name', 'LIKE', "%{$search}%");
                     }
                     $q->orWhereHas('user', function ($uq) use ($search) {
@@ -208,7 +232,7 @@ class OrderController extends Controller
                     $q->orWhereHas('metas', function ($mq) use ($search) {
                         $mq->where('meta_value', 'LIKE', "%{$search}%");
                     });
-                    if (\Illuminate\Support\Facades\Schema::hasTable('payment_transactions')) {
+                    if ($hasPaymentTxTable) {
                         $q->orWhereIn('transaction_id', function ($tq) use ($search) {
                             $tq->select('id')->from('payment_transactions')
                                 ->where('transaction_number', 'LIKE', "%{$search}%")
