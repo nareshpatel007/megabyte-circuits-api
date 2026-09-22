@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Validator;
@@ -12,6 +13,7 @@ class FileUploadController extends Controller
 {
     public function upload(Request $request)
     {
+        @set_time_limit(300);
         try {
             // Validate the request
             $validator = Validator::make($request->all(), [
@@ -43,8 +45,10 @@ class FileUploadController extends Controller
             $userId = $request->input('user_id', null);
 
             $zipFileUrl = null;
+            $fileToAnalyzePath = $file->getRealPath();
+            $fileToAnalyzeName = $originalName;
 
-            // If RAR file, convert to ZIP on backend using UnRAR or RarArchive
+            // If RAR file, convert to ZIP on backend using 7z, UnRAR, WinRAR or RarArchive
             if ($originalExtension === 'rar') {
                 try {
                     $realPath = $file->getRealPath();
@@ -53,22 +57,47 @@ class FileUploadController extends Controller
                         mkdir($tempDir, 0755, true);
                     }
 
-                    $unrarExec = null;
-                    if (file_exists('C:\Program Files\WinRAR\UnRAR.exe')) {
-                        $unrarExec = '"C:\Program Files\WinRAR\UnRAR.exe"';
-                    } else if (file_exists('C:\Program Files (x86)\WinRAR\UnRAR.exe')) {
-                        $unrarExec = '"C:\Program Files (x86)\WinRAR\UnRAR.exe"';
-                    } else {
-                        exec('which unrar 2>&1', $whichOutput, $whichReturn);
-                        if ($whichReturn === 0) {
-                            $unrarExec = 'unrar';
+                    $execCandidates = [
+                        'C:\Program Files\7-Zip\7z.exe' => '7z',
+                        'C:\Program Files (x86)\7-Zip\7z.exe' => '7z',
+                        'C:\Program Files\WinRAR\UnRAR.exe' => 'unrar',
+                        'C:\Program Files (x86)\WinRAR\UnRAR.exe' => 'unrar',
+                        'C:\Program Files\WinRAR\WinRAR.exe' => 'winrar',
+                        'C:\Program Files (x86)\WinRAR\WinRAR.exe' => 'winrar',
+                    ];
+
+                    $foundExec = null;
+                    $foundType = null;
+                    foreach ($execCandidates as $exePath => $type) {
+                        if (file_exists($exePath)) {
+                            $foundExec = '"' . $exePath . '"';
+                            $foundType = $type;
+                            break;
+                        }
+                    }
+
+                    if (!$foundExec) {
+                        exec('which unrar 2>&1', $whichOut1, $whichRet1);
+                        if ($whichRet1 === 0) {
+                            $foundExec = 'unrar';
+                            $foundType = 'unrar';
+                        } else {
+                            exec('which 7z 2>&1', $whichOut2, $whichRet2);
+                            if ($whichRet2 === 0) {
+                                $foundExec = '7z';
+                                $foundType = '7z';
+                            }
                         }
                     }
 
                     $extractedSuccess = false;
 
-                    if ($unrarExec) {
-                        $cmd = "{$unrarExec} x -y " . escapeshellarg($realPath) . " " . escapeshellarg($tempDir . DIRECTORY_SEPARATOR);
+                    if ($foundExec) {
+                        if ($foundType === '7z') {
+                            $cmd = "{$foundExec} e -y -o" . escapeshellarg($tempDir) . " " . escapeshellarg($realPath);
+                        } else {
+                            $cmd = "{$foundExec} x -y " . escapeshellarg($realPath) . " " . escapeshellarg($tempDir . DIRECTORY_SEPARATOR);
+                        }
                         exec($cmd, $output, $returnVar);
                         if ($returnVar === 0) {
                             $extractedSuccess = true;
@@ -109,6 +138,8 @@ class FileUploadController extends Controller
                             }
                             $zip->close();
                             $zipFileUrl = Storage::url($folder . '/' . $zipFileName);
+                            $fileToAnalyzePath = $zipFullPath;
+                            $fileToAnalyzeName = str_replace('.rar', '.zip', $originalName);
                         }
                     }
 
@@ -138,7 +169,7 @@ class FileUploadController extends Controller
             $url = Storage::url($filePath);
             $formattedSize = $this->formatFileSize($file->getSize());
 
-            // Insert into gerber_files table
+            // Create initial gerber_files record
             $gerberFileId = DB::table('gerber_files')->insertGetId([
                 'user_id' => $userId,
                 'original_name' => $originalName,
@@ -147,28 +178,175 @@ class FileUploadController extends Controller
                 'file_url' => $url,
                 'file_size' => $formattedSize,
                 'board_name' => pathinfo($originalName, PATHINFO_FILENAME),
-                'preview_data' => $request->input('preview_data'),
+                'status' => 'processing',
                 'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s')
+            ]);
+
+            // Call Python Gerber Analyzer Service
+            $pythonUrl = config('services.python_gerber.url', env('PYTHON_GERBER_API_URL', 'http://127.0.0.1:8000'));
+            $fileData = file_get_contents($fileToAnalyzePath);
+            
+            $pythonResponse = null;
+            try {
+                $response = Http::timeout(120)
+                    ->attach('file', $fileData, $fileToAnalyzeName)
+                    ->post(rtrim($pythonUrl, '/') . '/api/analyze');
+
+                if ($response->successful()) {
+                    $pythonResponse = $response->json();
+                } else {
+                    logger()->error("Python Gerber analysis failed HTTP " . $response->status() . ": " . $response->body());
+                }
+            } catch (\Exception $ex) {
+                logger()->error("Python Gerber analysis exception: " . $ex->getMessage());
+            }
+
+            if (!$pythonResponse || empty($pythonResponse['project_id'])) {
+                DB::table('gerber_files')->where('id', $gerberFileId)->update([
+                    'status' => 'failed',
+                    'updated_at' => date('Y-m-d H:i:s')
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'status' => 'failed',
+                    'error' => 'PCB analysis service failed to process the Gerber archive. Please verify your ZIP/RAR archive contains valid Gerber files.'
+                ], 422);
+            }
+
+            // Extract Python analysis results
+            $pythonProjectId = $pythonResponse['project_id'];
+            $boardWidth = $pythonResponse['board_width'] ?? ($pythonResponse['board_size']['width_mm'] ?? null);
+            $boardHeight = $pythonResponse['board_height'] ?? ($pythonResponse['board_size']['height_mm'] ?? null);
+            $layerCount = $pythonResponse['layer_count'] ?? 0;
+
+            $previewFrontRel = $pythonResponse['preview_front'] ?? ($pythonResponse['pcb_previews']['preview_top_2d'] ?? null);
+            $previewBackRel = $pythonResponse['preview_back'] ?? ($pythonResponse['pcb_previews']['preview_bottom_2d'] ?? null);
+
+            $frontPreviewUrl = "/api/gerber/{$gerberFileId}/preview/front";
+            $backPreviewUrl = "/api/gerber/{$gerberFileId}/preview/back";
+
+            DB::table('gerber_files')->where('id', $gerberFileId)->update([
+                'status' => 'completed',
+                'python_project_id' => $pythonProjectId,
+                'board_width' => $boardWidth,
+                'board_height' => $boardHeight,
+                'layer_count' => $layerCount,
+                'front_preview_url' => $previewFrontRel,
+                'back_preview_url' => $previewBackRel,
+                'analysis_data' => json_encode($pythonResponse),
                 'updated_at' => date('Y-m-d H:i:s')
             ]);
 
             return response()->json([
                 'success' => true,
+                'status' => 'completed',
                 'gerber_file_id' => $gerberFileId,
+                'python_project_id' => $pythonProjectId,
+                'board_width' => $boardWidth,
+                'board_height' => $boardHeight,
+                'layer_count' => $layerCount,
+                'preview_front' => $frontPreviewUrl,
+                'preview_back' => $backPreviewUrl,
+                'preview_front_rel' => $previewFrontRel,
+                'preview_back_rel' => $previewBackRel,
                 'folder' => $folder,
                 'fileName' => $fileName,
                 'originalName' => $originalName,
                 'url' => $url,
                 'zip_url' => $zipFileUrl,
                 'path' => $filePath,
-                'size' => $formattedSize
+                'size' => $formattedSize,
+                'analysis' => $pythonResponse
             ], 200);
+
         } catch (\Exception $e) {
+            logger()->error("FileUploadController upload exception: " . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'error' => 'Failed to upload file',
                 'message' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    public function status(Request $request, $id)
+    {
+        try {
+            $file = DB::table('gerber_files')->where('id', $id)->first();
+            if (!$file) {
+                return response()->json([
+                    'success' => false,
+                    'status' => 'failed',
+                    'error' => 'Gerber analysis record not found'
+                ], 404);
+            }
+
+            $analysisData = $file->analysis_data ? json_decode($file->analysis_data, true) : null;
+
+            return response()->json([
+                'success' => true,
+                'status' => $file->status,
+                'gerber_file_id' => $file->id,
+                'board_width' => $file->board_width,
+                'board_height' => $file->board_height,
+                'layer_count' => $file->layer_count,
+                'preview_front' => "/api/gerber/{$file->id}/preview/front",
+                'preview_back' => "/api/gerber/{$file->id}/preview/back",
+                'analysis' => $analysisData
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Failed to retrieve analysis status',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function previewImage(Request $request, $id, $side)
+    {
+        try {
+            $file = DB::table('gerber_files')->where('id', $id)->first();
+            if (!$file) {
+                return response()->json(['error' => 'Record not found'], 404);
+            }
+
+            $analysisData = $file->analysis_data ? json_decode($file->analysis_data, true) : [];
+            $pythonUrl = config('services.python_gerber.url', env('PYTHON_GERBER_API_URL', 'http://127.0.0.1:8000'));
+            
+            $relPath = null;
+            if ($side === 'front') {
+                $relPath = $file->front_preview_url ?? ($analysisData['preview_front'] ?? null);
+            } else if ($side === 'back') {
+                $relPath = $file->back_preview_url ?? ($analysisData['preview_back'] ?? null);
+            }
+
+            if (!$relPath && $file->python_project_id) {
+                $relPath = ($side === 'back')
+                    ? "/projects/{$file->python_project_id}/renders/pcb_bottom_2d.png"
+                    : "/projects/{$file->python_project_id}/renders/pcb_top_2d.png";
+            }
+
+            if (!$relPath) {
+                return response()->json(['error' => 'Preview not available'], 404);
+            }
+
+            // Fetch from Python service
+            $targetUrl = rtrim($pythonUrl, '/') . '/' . ltrim($relPath, '/');
+            $imgRes = Http::timeout(10)->get($targetUrl);
+
+            if ($imgRes->successful()) {
+                return response($imgRes->body(), 200)
+                    ->header('Content-Type', 'image/png')
+                    ->header('Cache-Control', 'public, max-age=86400');
+            }
+
+            return response()->json(['error' => 'Failed to load preview from analysis engine'], 404);
+
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 
@@ -261,5 +439,3 @@ class FileUploadController extends Controller
         }
     }
 }
-
-

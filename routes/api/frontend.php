@@ -13,6 +13,8 @@ use App\Http\Controllers\ContactController;
 
 // File Upload (Public for testing)
 Route::post('upload', [FileUploadController::class, 'upload']);
+Route::get('gerber/{id}/status', [FileUploadController::class, 'status']);
+Route::get('gerber/{id}/preview/{side}', [FileUploadController::class, 'previewImage']);
 Route::post('upload/preview', [FileUploadController::class, 'updatePreview']);
 Route::post('upload/delete', [FileUploadController::class, 'delete']);
 
