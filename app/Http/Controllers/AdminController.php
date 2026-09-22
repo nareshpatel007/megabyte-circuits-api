@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Database\Schema\Blueprint;
 use Firebase\JWT\JWT;
 use App\CommonHelper;
@@ -1672,7 +1673,7 @@ class AdminController extends Controller
 
             // 1. Check file_path via Storage disk 'public'
             if (!empty($file->file_path) && Storage::disk('public')->exists($file->file_path)) {
-                $fullPath = Storage::disk('public')->path($file->file_path);
+                $fullPath = Storage::path('public/' . ltrim($file->file_path, '/'));
                 return response()->download($fullPath, $originalName);
             }
 
