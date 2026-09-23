@@ -240,8 +240,9 @@ class FileUploadController extends Controller
                 'board_width' => $boardWidth,
                 'board_height' => $boardHeight,
                 'layer_count' => $layerCount,
-                'front_preview_url' => $previewFrontRel,
-                'back_preview_url' => $previewBackRel,
+                'preview_data' => $frontPreviewUrl,
+                'front_preview_url' => $frontPreviewUrl,
+                'back_preview_url' => $backPreviewUrl,
                 'analysis_data' => json_encode($pythonResponse),
                 'updated_at' => date('Y-m-d H:i:s')
             ]);

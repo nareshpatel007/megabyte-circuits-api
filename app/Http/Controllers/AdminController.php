@@ -1706,7 +1706,21 @@ class AdminController extends Controller
             // Ordering & Pagination
             $query->orderBy('gerber_files.created_at', 'desc');
 
-            $files = $query->get();
+            $files = $query->get()->map(function ($file) {
+                $previewUrl = "/api/gerber/{$file->id}/preview/front";
+                $backUrl = "/api/gerber/{$file->id}/preview/back";
+
+                if (empty($file->front_preview_url) || str_starts_with($file->front_preview_url, '/projects/')) {
+                    $file->front_preview_url = $previewUrl;
+                }
+                if (empty($file->back_preview_url) || str_starts_with($file->back_preview_url, '/projects/')) {
+                    $file->back_preview_url = $backUrl;
+                }
+                if (empty($file->preview_data) || str_starts_with($file->preview_data, '/projects/')) {
+                    $file->preview_data = $previewUrl;
+                }
+                return $file;
+            });
 
             // Stats calculation
             $totalFiles = DB::table('gerber_files')->whereNull('deleted_at')->count();
