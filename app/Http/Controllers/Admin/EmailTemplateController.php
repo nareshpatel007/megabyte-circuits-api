@@ -157,7 +157,8 @@ class EmailTemplateController extends Controller
             $vars = EmailTemplateService::buildVariables($order);
 
             $renderedSubject = EmailTemplateService::replaceVariables($subjectText, $vars);
-            $renderedBody    = EmailTemplateService::replaceVariables($bodyText, $vars);
+            $innerBody       = EmailTemplateService::replaceVariables($bodyText, $vars);
+            $fullRenderedBody = EmailTemplateService::wrapInLayout($innerBody, $vars, $renderedSubject);
 
             $ccEmails  = EmailTemplateService::parseEmails($request->input('cc', $template->cc));
             $bccEmails = EmailTemplateService::parseEmails($request->input('bcc', $template->bcc));
@@ -169,7 +170,7 @@ class EmailTemplateController extends Controller
                     'name'             => $template->name,
                     'is_active'        => (bool)($request->has('is_active') ? $request->is_active : $template->is_active),
                     'rendered_subject' => $renderedSubject,
-                    'rendered_body'    => $renderedBody,
+                    'rendered_body'    => $fullRenderedBody,
                     'to'               => $vars['customer_email'],
                     'cc'               => $ccEmails,
                     'bcc'              => $bccEmails,
@@ -228,19 +229,19 @@ class EmailTemplateController extends Controller
                 'order_date'     => Carbon::now()->format('d M Y'),
                 'order_status'   => 'Completed',
                 'order_total'    => '₹5,000.00',
-                'company_name'   => CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('app.name', 'Megabyte Circuits')),
                 'order_url'      => config('app.frontend_url', 'http://localhost:3000') . '/dashboard/orders',
             ]);
 
             $renderedSubject = EmailTemplateService::replaceVariables($subjectText, $dummyVars);
-            $renderedBody    = EmailTemplateService::replaceVariables($bodyText, $dummyVars);
+            $innerBody       = EmailTemplateService::replaceVariables($bodyText, $dummyVars);
 
-            // Append Test Notice Banner only to test emails
+            // Append Test Notice Banner inside email body content
             $testBannerHtml = '<div style="margin-top: 30px; padding: 12px; background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; text-align: center; font-size: 12px; color: #92400e; font-family: sans-serif;">
                 <strong>TEST EMAIL:</strong> This is a test email generated from the Admin Email Template settings using sample data.
             </div>';
 
-            $finalTestBody = $renderedBody . $testBannerHtml;
+            $bodyWithBanner = $innerBody . $testBannerHtml;
+            $finalTestBody  = EmailTemplateService::wrapInLayout($bodyWithBanner, $dummyVars, $renderedSubject);
 
             // Configure dynamic mailer
             $mailer = 'smtp_global';
