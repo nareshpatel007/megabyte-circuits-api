@@ -284,12 +284,21 @@ class FileUploadController extends Controller
             
             $relPath = null;
             if ($side === 'front') {
-                $relPath = $file->front_preview_url ?? ($analysisData['preview_front'] ?? null);
+                $relPath = $file->front_preview_url ?? null;
             } else if ($side === 'back') {
-                $relPath = $file->back_preview_url ?? ($analysisData['preview_back'] ?? null);
+                $relPath = $file->back_preview_url ?? null;
             }
 
-            if (!$relPath && $file->python_project_id) {
+            // Fallback checks if relPath is empty or recursive api/gerber route
+            if (!$relPath || str_contains($relPath, '/api/gerber/')) {
+                if ($side === 'front') {
+                    $relPath = $analysisData['preview_front'] ?? ($analysisData['pcb_previews']['preview_top_2d'] ?? null);
+                } else if ($side === 'back') {
+                    $relPath = $analysisData['preview_back'] ?? ($analysisData['pcb_previews']['preview_bottom_2d'] ?? null);
+                }
+            }
+
+            if ((!$relPath || str_contains($relPath, '/api/gerber/')) && !empty($file->python_project_id)) {
                 $relPath = ($side === 'back')
                     ? "/projects/{$file->python_project_id}/renders/pcb_bottom_2d.png"
                     : "/projects/{$file->python_project_id}/renders/pcb_top_2d.png";
@@ -299,9 +308,14 @@ class FileUploadController extends Controller
                 return response()->json(['error' => 'Preview not available'], 404);
             }
 
+            // Normalize path: extract relative /projects/... if full system path was given
+            if (preg_match('#/projects/.*#', $relPath, $matches)) {
+                $relPath = $matches[0];
+            }
+
             // Fetch from Python service
             $targetUrl = rtrim($pythonUrl, '/') . '/' . ltrim($relPath, '/');
-            $imgRes = Http::timeout(10)->get($targetUrl);
+            $imgRes = Http::timeout(15)->get($targetUrl);
 
             if ($imgRes->successful()) {
                 return response($imgRes->body(), 200)
@@ -309,6 +323,7 @@ class FileUploadController extends Controller
                     ->header('Cache-Control', 'public, max-age=86400');
             }
 
+            logger()->error("Preview image fetch failed for URL {$targetUrl}, status: " . $imgRes->status());
             return response()->json(['error' => 'Failed to load preview from analysis engine'], 404);
 
         } catch (\Exception $e) {

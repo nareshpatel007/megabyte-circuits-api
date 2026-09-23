@@ -108,8 +108,8 @@ class ProcessGerberAnalysis extends Command
             'board_height' => $boardHeight,
             'layer_count' => $layerCount,
             'preview_data' => $frontPreviewUrl,
-            'front_preview_url' => $frontPreviewUrl,
-            'back_preview_url' => $backPreviewUrl,
+            'front_preview_url' => $previewFrontRel,
+            'back_preview_url' => $previewBackRel,
             'analysis_data' => json_encode($pythonResponse),
             'updated_at' => date('Y-m-d H:i:s')
         ]);
