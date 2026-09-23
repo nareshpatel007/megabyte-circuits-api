@@ -65,6 +65,8 @@ class SendInventoryTemplateEmailJob implements ShouldQueue
 
         // 1. Check if template exists & active
         if (!$rendered['success'] || !($rendered['is_active'] ?? false)) {
+            $skippedMsg = $rendered['message'] ?? "Email skipped: template '{$this->templateKey}' is inactive.";
+            Log::info("SendInventoryTemplateEmailJob: {$skippedMsg}");
             EmailLog::create([
                 'template_key'      => $this->templateKey,
                 'inventory_item_id' => $this->inventoryItemId,
@@ -75,7 +77,7 @@ class SendInventoryTemplateEmailJob implements ShouldQueue
                 'bcc'               => implode(', ', $rendered['bcc'] ?? []),
                 'subject'           => $rendered['subject'] ?? 'Inventory Alert',
                 'status'            => 'skipped',
-                'error_message'     => $rendered['message'] ?? 'Template inactive or missing',
+                'error_message'     => $skippedMsg,
             ]);
             return;
         }

@@ -130,11 +130,7 @@ class OrderController extends Controller
             }
 
             // Dispatch order_placed email notification
-            try {
-                \App\Jobs\SendTemplateEmailJob::dispatch('order_placed', $order->id);
-            } catch (\Throwable $th) {
-                \Illuminate\Support\Facades\Log::error("Failed to dispatch order_placed email job for Order #{$order->id}: " . $th->getMessage());
-            }
+            \App\Services\EmailTemplateService::sendOrderEmail('order_placed', $order->id);
 
             return response()->json([
                 'success' => true,
@@ -458,14 +454,25 @@ class OrderController extends Controller
             }
 
             $statusChangedToCompleted = false;
+            $statusChangedFromPendingToProduction = false;
+            $statusChanged = false;
+            $previousStatusName = $order->status ?? 'Pending';
 
             if ($request->has('status') && (string)$order->status !== (string)$request->status) {
                 $oldValStr = strtolower(trim((string)($order->status ?? 'Pending')));
                 $newValStr = strtolower(trim((string)$request->status));
                 $completedStatuses = ['completed', 'delivered', 'order completed', 'production completed'];
 
+                if ($oldValStr !== $newValStr) {
+                    $statusChanged = true;
+                }
+
                 if (!in_array($oldValStr, $completedStatuses) && in_array($newValStr, $completedStatuses)) {
                     $statusChangedToCompleted = true;
+                }
+
+                if ($oldValStr === 'pending' && $newValStr !== 'pending') {
+                    $statusChangedFromPendingToProduction = true;
                 }
 
                 $oldVal = $order->status ?? 'Pending';
@@ -571,12 +578,29 @@ class OrderController extends Controller
 
             $order->save();
 
+            // Dispatch order_status_updated email notification when status changes (previous != new)
+            if ($statusChanged) {
+                \App\Services\EmailTemplateService::sendOrderEmail('order_status_updated', $order->id, null, [
+                    'previous_order_status' => $previousStatusName,
+                ]);
+            }
+
             // Dispatch order_completed email notification if status transitioned to completed/delivered
             if ($statusChangedToCompleted) {
-                try {
-                    \App\Jobs\SendTemplateEmailJob::dispatch('order_completed', $order->id);
-                } catch (\Throwable $th) {
-                    \Illuminate\Support\Facades\Log::error("Failed to dispatch order_completed email job for Order #{$order->id}: " . $th->getMessage());
+                \App\Services\EmailTemplateService::sendOrderEmail('order_completed', $order->id);
+            }
+
+            // Dispatch order_production_film_not_applied email if transition was Pending -> Non-Pending and film_applied != 1
+            if ($statusChangedFromPendingToProduction) {
+                $freshFilmApplied = \Illuminate\Support\Facades\DB::table('pcb_orders')->where('id', $order->id)->value('film_applied');
+                if ($freshFilmApplied === null && isset($order->film_applied)) {
+                    $freshFilmApplied = $order->film_applied;
+                }
+                if ((int)$freshFilmApplied !== 1) {
+                    \App\Services\EmailTemplateService::sendOrderEmail('order_production_film_not_applied', $order->id, null, [
+                        'previous_order_status' => $previousStatusName,
+                        'film_applied'          => 'No',
+                    ]);
                 }
             }
 

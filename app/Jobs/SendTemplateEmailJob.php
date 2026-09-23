@@ -27,15 +27,17 @@ class SendTemplateEmailJob implements ShouldQueue
     protected string $templateKey;
     protected int $orderId;
     protected ?string $overrideTo;
+    protected array $customVars;
 
     /**
      * Create a new job instance.
      */
-    public function __construct(string $templateKey, int $orderId, ?string $overrideTo = null)
+    public function __construct(string $templateKey, int $orderId, ?string $overrideTo = null, array $customVars = [])
     {
         $this->templateKey = $templateKey;
         $this->orderId = $orderId;
         $this->overrideTo = $overrideTo;
+        $this->customVars = $customVars;
     }
 
     /**
@@ -50,18 +52,20 @@ class SendTemplateEmailJob implements ShouldQueue
             return;
         }
 
-        // Idempotency check: Don't send duplicate emails for same order & template
-        $alreadySent = EmailLog::where('order_id', $this->orderId)
-            ->where('template_key', $this->templateKey)
-            ->where('status', 'sent')
-            ->exists();
+        // Idempotency check: Don't send duplicate emails for same order & template (except generic order_status_updated which fires on distinct status changes)
+        if ($this->templateKey !== 'order_status_updated') {
+            $alreadySent = EmailLog::where('order_id', $this->orderId)
+                ->where('template_key', $this->templateKey)
+                ->where('status', 'sent')
+                ->exists();
 
-        if ($alreadySent) {
-            Log::info("SendTemplateEmailJob: Email '{$this->templateKey}' already sent for Order #{$this->orderId}. Skipping duplicate.");
-            return;
+            if ($alreadySent) {
+                Log::info("SendTemplateEmailJob: Email '{$this->templateKey}' already sent for Order #{$this->orderId}. Skipping duplicate.");
+                return;
+            }
         }
 
-        $rendered = EmailTemplateService::render($this->templateKey, $order);
+        $rendered = EmailTemplateService::render($this->templateKey, $order, $this->customVars);
 
         $toEmail   = $this->overrideTo ?: ($rendered['to'] ?? null);
         $fromEmail = $rendered['from_email'] ?? CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', config('mail.from.address'));
@@ -69,6 +73,8 @@ class SendTemplateEmailJob implements ShouldQueue
 
         // 1. Check if template exists & active
         if (!$rendered['success'] || !($rendered['is_active'] ?? false)) {
+            $skippedMsg = $rendered['message'] ?? "Email skipped: template '{$this->templateKey}' is inactive.";
+            Log::info("SendTemplateEmailJob: {$skippedMsg}");
             EmailLog::create([
                 'template_key'  => $this->templateKey,
                 'order_id'      => $this->orderId,
@@ -80,7 +86,7 @@ class SendTemplateEmailJob implements ShouldQueue
                 'bcc'           => implode(', ', $rendered['bcc'] ?? []),
                 'subject'       => $rendered['subject'] ?? 'Notification',
                 'status'        => 'skipped',
-                'error_message' => $rendered['message'] ?? 'Template inactive or missing',
+                'error_message' => $skippedMsg,
             ]);
             return;
         }

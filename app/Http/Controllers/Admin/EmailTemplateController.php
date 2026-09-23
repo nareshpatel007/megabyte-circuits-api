@@ -160,7 +160,13 @@ class EmailTemplateController extends Controller
             $ccText        = $request->input('cc', $template->cc);
             $bccText       = $request->input('bcc', $template->bcc);
 
-            if (str_starts_with($template->key, 'inventory_')) {
+            if ($template->key === 'daily_order_progress_report') {
+                $dateStr = Carbon::now()->format('d F Y');
+                $vars = \App\Services\DailyReportService::getSampleOrderReportVariables($dateStr);
+            } else if ($template->key === 'daily_inventory_report') {
+                $dateStr = Carbon::now()->format('d F Y');
+                $vars = \App\Services\DailyReportService::getSampleInventoryReportVariables($dateStr);
+            } else if (str_starts_with($template->key, 'inventory_')) {
                 $vars = EmailTemplateService::buildInventoryVariables(null, null);
             } else {
                 $orderId = $request->input('order_id');
@@ -242,17 +248,25 @@ class EmailTemplateController extends Controller
             }
 
             // Build dummy variables
-            if (str_starts_with($template->key, 'inventory_')) {
+            if ($template->key === 'daily_order_progress_report') {
+                $dateStr = Carbon::now()->format('d F Y');
+                $dummyVars = \App\Services\DailyReportService::getSampleOrderReportVariables($dateStr);
+            } else if ($template->key === 'daily_inventory_report') {
+                $dateStr = Carbon::now()->format('d F Y');
+                $dummyVars = \App\Services\DailyReportService::getSampleInventoryReportVariables($dateStr);
+            } else if (str_starts_with($template->key, 'inventory_')) {
                 $dummyVars = EmailTemplateService::buildInventoryVariables(null, null);
             } else {
                 $dummyVars = EmailTemplateService::buildVariables(null, [
-                    'customer_name'  => 'John Doe',
-                    'customer_email' => $recipientEmail,
-                    'order_number'   => 'ORD-TEST-10001',
-                    'order_date'     => Carbon::now()->format('d M Y'),
-                    'order_status'   => 'Completed',
-                    'order_total'    => '₹5,000.00',
-                    'order_url'      => config('app.frontend_url', 'http://localhost:3000') . '/dashboard/orders',
+                    'customer_name'         => 'John Doe',
+                    'customer_email'        => $recipientEmail,
+                    'order_number'          => 'ORD-TEST-10001',
+                    'order_date'            => Carbon::now()->format('d M Y'),
+                    'previous_order_status' => 'Pending',
+                    'order_status'          => (in_array($template->key, ['order_production_film_not_applied', 'order_status_updated']) ? 'In Production' : 'Completed'),
+                    'film_applied'          => 'No',
+                    'order_total'           => '₹5,000.00',
+                    'order_url'             => config('app.frontend_url', 'http://localhost:3000') . '/dashboard/orders',
                 ]);
             }
 
@@ -345,6 +359,35 @@ class EmailTemplateController extends Controller
                 'success' => false,
                 'message' => 'Unable to send test email. Please check the email configuration and try again.',
                 'error'   => $th->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Send real daily report now for specified date or today.
+     */
+    public function sendNow(Request $request, $id)
+    {
+        try {
+            $template = EmailTemplate::where('id', $id)->orWhere('key', $id)->firstOrFail();
+            $targetDate = $request->input('report_date') ?: $request->input('date');
+
+            if ($template->key === 'daily_order_progress_report') {
+                $res = \App\Services\DailyReportService::sendDailyOrderReport($targetDate, true);
+                return response()->json($res, $res['success'] ? 200 : 400);
+            } else if ($template->key === 'daily_inventory_report') {
+                $res = \App\Services\DailyReportService::sendDailyInventoryReport($targetDate, true);
+                return response()->json($res, $res['success'] ? 200 : 400);
+            } else {
+                return response()->json([
+                    'success' => false,
+                    'message' => "The 'Send Report Now' feature is only applicable for daily report templates."
+                ], 400);
+            }
+        } catch (\Throwable $th) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to send daily report: ' . $th->getMessage()
             ], 500);
         }
     }

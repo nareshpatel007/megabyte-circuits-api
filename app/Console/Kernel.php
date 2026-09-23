@@ -19,6 +19,7 @@ class Kernel extends ConsoleKernel
         $schedule->call(function () {
             \App\Services\DeliveryCalendarService::cleanupPastHolidays();
         })->dailyAt('00:05');
+        $schedule->command('reports:send-daily')->dailyAt('23:00');
     }
 
 

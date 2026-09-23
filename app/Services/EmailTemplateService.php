@@ -8,11 +8,88 @@ use App\Models\PcbUser;
 use App\Models\User;
 use App\Models\InventoryItem;
 use App\Models\InventoryLog;
+use App\Jobs\SendTemplateEmailJob;
+use App\Jobs\SendInventoryTemplateEmailJob;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Log;
 
 class EmailTemplateService
 {
+    /**
+     * Check if an email template exists and is currently active.
+     */
+    public static function isTemplateActive(string $templateKey): bool
+    {
+        $template = EmailTemplate::where('key', $templateKey)->first();
+        return $template ? (bool)$template->is_active : false;
+    }
+
+    /**
+     * Centralized method to trigger/dispatch an order-related email template.
+     *
+     * Rules:
+     * 1. Find template by template_key.
+     * 2. Check if template exists.
+     * 3. Check if is_active = 1.
+     * 4. ONLY if exists & active -> dispatch job.
+     * 5. If missing or inactive -> skip email, log message, return false (never fail caller).
+     */
+    public static function sendOrderEmail(string $templateKey, int $orderId, ?string $overrideTo = null, array $customVars = []): bool
+    {
+        $template = EmailTemplate::where('key', $templateKey)->first();
+
+        if (!$template) {
+            Log::info("Email skipped: template '{$templateKey}' does not exist.");
+            return false;
+        }
+
+        if (!$template->is_active) {
+            Log::info("Email skipped: template '{$templateKey}' is inactive.");
+            return false;
+        }
+
+        try {
+            SendTemplateEmailJob::dispatch($templateKey, $orderId, $overrideTo, $customVars);
+            return true;
+        } catch (\Throwable $th) {
+            Log::error("Failed to dispatch order email job for template '{$templateKey}': " . $th->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Centralized method to trigger/dispatch an inventory-related email template.
+     *
+     * Rules:
+     * 1. Find template by template_key.
+     * 2. Check if template exists.
+     * 3. Check if is_active = 1.
+     * 4. ONLY if exists & active -> dispatch job.
+     * 5. If missing or inactive -> skip email, log message, return false (never fail caller).
+     */
+    public static function sendInventoryEmail(string $templateKey, int $inventoryItemId, ?int $inventoryLogId = null, ?string $overrideTo = null, array $customVars = []): bool
+    {
+        $template = EmailTemplate::where('key', $templateKey)->first();
+
+        if (!$template) {
+            Log::info("Email skipped: template '{$templateKey}' does not exist.");
+            return false;
+        }
+
+        if (!$template->is_active) {
+            Log::info("Email skipped: template '{$templateKey}' is inactive.");
+            return false;
+        }
+
+        try {
+            SendInventoryTemplateEmailJob::dispatch($templateKey, $inventoryItemId, $inventoryLogId, $overrideTo, $customVars);
+            return true;
+        } catch (\Throwable $th) {
+            Log::error("Failed to dispatch inventory email job for template '{$templateKey}': " . $th->getMessage());
+            return false;
+        }
+    }
     /**
      * Parse and validate email address string into array of valid email addresses.
      */
@@ -74,21 +151,25 @@ class EmailTemplateService
         if (!$order) {
             // Sample variables for preview/testing
             $vars = array_merge($commonCompanyVars, [
-                'customer_name'    => 'John Doe',
-                'customer_email'   => 'john.doe@example.com',
-                'order_number'     => 'M00001',
-                'order_date'       => Carbon::now()->format('d M Y'),
-                'order_status'     => 'Pending',
-                'order_total'      => '₹5,000.00',
-                'order_url'        => rtrim($cartBaseUrl, '/') . '/orders',
-                'board_name'       => 'Main Control Board v1.2',
-                'gerber_file_name' => 'Main Control Board v1.2',
-                'delivery_date'    => Carbon::now()->addDays(5)->format('d M Y'),
+                'customer_name'          => 'John Doe',
+                'customer_email'         => 'john.doe@example.com',
+                'customer_phone'         => '+91-9876543210',
+                'order_number'           => 'ORD-TEST-10001',
+                'order_date'             => Carbon::now()->format('d M Y'),
+                'previous_order_status'  => 'Pending',
+                'order_status'           => 'In Production',
+                'film_applied'           => 'No',
+                'order_total'            => '₹5,000.00',
+                'order_url'              => rtrim($cartBaseUrl, '/') . '/orders',
+                'board_name'             => 'Main Control Board v1.2',
+                'gerber_file_name'       => 'Main Control Board v1.2',
+                'delivery_date'          => Carbon::now()->addDays(5)->format('d M Y'),
             ]);
         } else {
             // Real order variables
             $customerName = $order->customer_name;
             $customerEmail = $order->user_email;
+            $customerPhone = $order->user_mobile ?? ($order->user->mobile ?? ($order->user->phone ?? 'N/A'));
 
             if (empty($customerName) && $order->user) {
                 $customerName = $order->user->name ?? $order->user->company_name;
@@ -105,17 +186,22 @@ class EmailTemplateService
             $orderTotalStr = '₹' . number_format($order->order_value ?? 0, 2);
             $boardName = $order->board_name ?? $order->gerber_file_name ?? $order->gerber_filename ?? 'PCB Design';
 
+            $filmAppliedVal = isset($order->film_applied) ? ((int)$order->film_applied === 1 ? 'Yes' : 'No') : 'No';
+
             $vars = array_merge($commonCompanyVars, [
-                'customer_name'    => $customerName,
-                'customer_email'   => $customerEmail ?? '',
-                'order_number'     => $order->order_number ?? 'M' . $order->id,
-                'order_date'       => $orderDateStr,
-                'order_status'     => ucfirst($order->status ?? 'Pending'),
-                'order_total'      => $orderTotalStr,
-                'order_url'        => rtrim($cartBaseUrl, '/') . '/orders',
-                'board_name'       => $boardName,
-                'gerber_file_name' => $boardName,
-                'delivery_date'    => $deliveryDateStr,
+                'customer_name'          => $customerName,
+                'customer_email'         => $customerEmail ?? '',
+                'customer_phone'         => $customerPhone,
+                'order_number'           => $order->order_number ?? 'M' . $order->id,
+                'order_date'             => $orderDateStr,
+                'previous_order_status'  => $overrideVars['previous_order_status'] ?? 'Pending',
+                'order_status'           => ucfirst($order->status ?? 'Pending'),
+                'film_applied'           => $overrideVars['film_applied'] ?? $filmAppliedVal,
+                'order_total'            => $orderTotalStr,
+                'order_url'              => rtrim($cartBaseUrl, '/') . '/orders',
+                'board_name'             => $boardName,
+                'gerber_file_name'       => $boardName,
+                'delivery_date'          => $deliveryDateStr,
             ]);
         }
 
@@ -203,7 +289,7 @@ class EmailTemplateService
         if (!$template) {
             return [
                 'success' => false,
-                'message' => "Email template '{$templateKey}' not found.",
+                'message' => "Email skipped: template '{$templateKey}' does not exist.",
                 'is_active' => false,
             ];
         }
@@ -211,7 +297,7 @@ class EmailTemplateService
         if (!$template->is_active) {
             return [
                 'success' => false,
-                'message' => "Email template '{$templateKey}' is currently inactive.",
+                'message' => "Email skipped: template '{$templateKey}' is inactive.",
                 'is_active' => false,
                 'template' => $template,
             ];
@@ -371,6 +457,51 @@ class EmailTemplateService
      */
     public static function getAvailableVariables(string $templateKey): array
     {
+        if ($templateKey === 'daily_order_progress_report') {
+            return [
+                ['var' => '{{report_date}}', 'desc' => 'Report Date (e.g. 23 September 2026)'],
+                ['var' => '{{total_orders}}', 'desc' => 'Total Active Orders Count'],
+                ['var' => '{{new_orders_count}}', 'desc' => 'New Orders Count Today'],
+                ['var' => '{{completed_orders_count}}', 'desc' => 'Completed Orders Count Today'],
+                ['var' => '{{cancelled_orders_count}}', 'desc' => 'Cancelled Orders Count Today'],
+                ['var' => '{{production_orders_count}}', 'desc' => 'Orders Currently in Production Count'],
+                ['var' => '{{pending_orders_count}}', 'desc' => 'Pending Orders Count'],
+                ['var' => '{{total_order_value}}', 'desc' => 'Total Order Value Today (₹)'],
+                ['var' => '{{average_order_value}}', 'desc' => 'Average Order Value Today (₹)'],
+                ['var' => '{{new_orders_table}}', 'desc' => 'Rendered HTML Table: New Orders Today'],
+                ['var' => '{{status_movements_table}}', 'desc' => 'Rendered HTML Table: Order Status Movements Today'],
+                ['var' => '{{completed_orders_table}}', 'desc' => 'Rendered HTML Table: Orders Completed Today'],
+                ['var' => '{{cancelled_orders_table}}', 'desc' => 'Rendered HTML Table: Cancelled Orders Today'],
+                ['var' => '{{production_orders_table}}', 'desc' => 'Rendered HTML Table: Orders In Production'],
+                ['var' => '{{pending_orders_table}}', 'desc' => 'Rendered HTML Table: Pending Orders'],
+                ['var' => '{{film_not_applied_table}}', 'desc' => 'Rendered HTML Table: Film Not Applied Alerts'],
+                ['var' => '{{company_name}}', 'desc' => 'Company Name from Settings'],
+                ['var' => '{{company_email}}', 'desc' => 'Company Contact Email'],
+            ];
+        }
+
+        if ($templateKey === 'daily_inventory_report') {
+            return [
+                ['var' => '{{report_date}}', 'desc' => 'Report Date (e.g. 23 September 2026)'],
+                ['var' => '{{total_inventory_items}}', 'desc' => 'Total Inventory Items Count'],
+                ['var' => '{{items_with_stock}}', 'desc' => 'Items With Stock Count'],
+                ['var' => '{{low_stock_count}}', 'desc' => 'Low Stock Items Count'],
+                ['var' => '{{out_of_stock_count}}', 'desc' => 'Out of Stock Items Count'],
+                ['var' => '{{items_with_movement}}', 'desc' => 'Items With Movement Today Count'],
+                ['var' => '{{total_stock_added}}', 'desc' => 'Total Stock Quantity Added Today'],
+                ['var' => '{{total_stock_removed}}', 'desc' => 'Total Stock Quantity Removed Today'],
+                ['var' => '{{current_stock_table}}', 'desc' => 'Rendered HTML Table: Current Stock Position'],
+                ['var' => '{{stock_movements_table}}', 'desc' => 'Rendered HTML Table: Stock Movements Today'],
+                ['var' => '{{stock_added_table}}', 'desc' => 'Rendered HTML Table: Stock Added Today'],
+                ['var' => '{{stock_removed_table}}', 'desc' => 'Rendered HTML Table: Stock Removed Today'],
+                ['var' => '{{adjustments_table}}', 'desc' => 'Rendered HTML Table: Inventory Adjustments Today'],
+                ['var' => '{{low_stock_table}}', 'desc' => 'Rendered HTML Table: Low Stock Items'],
+                ['var' => '{{out_of_stock_table}}', 'desc' => 'Rendered HTML Table: Out of Stock Items'],
+                ['var' => '{{company_name}}', 'desc' => 'Company Name from Settings'],
+                ['var' => '{{company_email}}', 'desc' => 'Company Contact Email'],
+            ];
+        }
+
         if (str_starts_with($templateKey, 'inventory_')) {
             return [
                 ['var' => '{{product_name}}', 'desc' => 'Component / Product Name'],
@@ -396,9 +527,12 @@ class EmailTemplateService
         return [
             ['var' => '{{customer_name}}', 'desc' => 'Customer Full Name or Company Name'],
             ['var' => '{{customer_email}}', 'desc' => 'Customer Email Address'],
+            ['var' => '{{customer_phone}}', 'desc' => 'Customer Phone Number'],
             ['var' => '{{order_number}}', 'desc' => 'Unique Order Number (e.g. ORD-TEST-10001)'],
-            ['var' => '{{order_date}}', 'desc' => 'Formatted Date Order Was Placed'],
+            ['var' => '{{previous_order_status}}', 'desc' => 'Previous Order Status before change'],
             ['var' => '{{order_status}}', 'desc' => 'Current Order Status'],
+            ['var' => '{{film_applied}}', 'desc' => 'Film Applied Status (Yes / No)'],
+            ['var' => '{{order_date}}', 'desc' => 'Formatted Date Order Was Placed'],
             ['var' => '{{order_total}}', 'desc' => 'Total Amount Paid/Due (e.g. ₹5,000.00)'],
             ['var' => '{{company_name}}', 'desc' => 'Company Name from Settings'],
             ['var' => '{{order_url}}', 'desc' => 'Customer Dashboard Order URL'],
@@ -418,7 +552,7 @@ class EmailTemplateService
         if (!$template) {
             return [
                 'success'   => false,
-                'message'   => "Email template '{$templateKey}' not found.",
+                'message'   => "Email skipped: template '{$templateKey}' does not exist.",
                 'is_active' => false,
             ];
         }
@@ -426,7 +560,7 @@ class EmailTemplateService
         if (!$template->is_active) {
             return [
                 'success'   => false,
-                'message'   => "Email template '{$templateKey}' is currently inactive.",
+                'message'   => "Email skipped: template '{$templateKey}' is inactive.",
                 'is_active' => false,
                 'template'  => $template,
             ];

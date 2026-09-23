@@ -57,9 +57,10 @@ class MobileDashboardController extends Controller
                 ->where('delivery_date', '=', $today)
                 ->count();
 
-            // Today's Production (Top 5 orders)
+            // Today's Production (Top 5 orders currently in production / active stages)
             $ordersQuery = DB::table('pcb_orders')
                 ->whereNull('deleted_at')
+                ->whereNotIn(DB::raw('LOWER(COALESCE(status, ""))'), ['completed', 'cancelled', 'delivered', 'archived'])
                 ->orderBy('id', 'desc')
                 ->limit(5)
                 ->get();

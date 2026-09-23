@@ -159,6 +159,7 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::put('email-templates/{id}', [\App\Http\Controllers\Admin\EmailTemplateController::class, 'update']);
         Route::post('email-templates/{id}/preview', [\App\Http\Controllers\Admin\EmailTemplateController::class, 'preview']);
         Route::post('email-templates/{id}/test', [\App\Http\Controllers\Admin\EmailTemplateController::class, 'testEmail']);
+        Route::post('email-templates/{id}/send-now', [\App\Http\Controllers\Admin\EmailTemplateController::class, 'sendNow']);
     });
 });
 

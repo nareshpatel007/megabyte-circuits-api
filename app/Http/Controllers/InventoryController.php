@@ -91,9 +91,9 @@ class InventoryController extends Controller
 
         // Evaluate initial stock alerts
         if ($qty <= 0) {
-            SendInventoryTemplateEmailJob::dispatch('inventory_out_of_stock', $item->id);
+            \App\Services\EmailTemplateService::sendInventoryEmail('inventory_out_of_stock', $item->id);
         } elseif ($qty <= $threshold) {
-            SendInventoryTemplateEmailJob::dispatch('inventory_low_stock', $item->id);
+            \App\Services\EmailTemplateService::sendInventoryEmail('inventory_low_stock', $item->id);
         }
 
         return response()->json([
@@ -180,22 +180,22 @@ class InventoryController extends Controller
 
         // 1. Stock Added email
         if ($operationType === 'in') {
-            SendInventoryTemplateEmailJob::dispatch('inventory_stock_added', $item->id, $log ? $log->id : null);
+            \App\Services\EmailTemplateService::sendInventoryEmail('inventory_stock_added', $item->id, $log ? $log->id : null);
         }
 
         // 2. Stock Adjusted email (for manual adjustment out/update)
         if ($operationType === 'out' || $operationType === 'adjusted') {
-            SendInventoryTemplateEmailJob::dispatch('inventory_stock_adjusted', $item->id, $log ? $log->id : null);
+            \App\Services\EmailTemplateService::sendInventoryEmail('inventory_stock_adjusted', $item->id, $log ? $log->id : null);
         }
 
         // 3. Low Stock Alert transition check (crosses threshold downwards)
         if ($prevQty > $threshold && $newQty <= $threshold && $newQty > 0) {
-            SendInventoryTemplateEmailJob::dispatch('inventory_low_stock', $item->id, $log ? $log->id : null);
+            \App\Services\EmailTemplateService::sendInventoryEmail('inventory_low_stock', $item->id, $log ? $log->id : null);
         }
 
         // 4. Out of Stock Alert transition check (available stock reaches 0)
         if ($prevQty > 0 && $newQty <= 0) {
-            SendInventoryTemplateEmailJob::dispatch('inventory_out_of_stock', $item->id, $log ? $log->id : null);
+            \App\Services\EmailTemplateService::sendInventoryEmail('inventory_out_of_stock', $item->id, $log ? $log->id : null);
         }
     }
 

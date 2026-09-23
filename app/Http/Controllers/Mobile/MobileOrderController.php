@@ -399,11 +399,31 @@ class MobileOrderController extends Controller
             }
 
             $oldStatus = $order->status ?? 'Pending';
+            $oldValStr = strtolower(trim((string)$oldStatus));
+            $newValStr = strtolower(trim((string)$newStatus));
 
             DB::table('pcb_orders')->where('id', $id)->update([
                 'status' => $newStatus,
                 'updated_at' => date('Y-m-d H:i:s')
             ]);
+
+            // Dispatch order_status_updated email notification when status changes (previous != new)
+            if ($oldValStr !== $newValStr) {
+                \App\Services\EmailTemplateService::sendOrderEmail('order_status_updated', $id, null, [
+                    'previous_order_status' => $oldStatus,
+                ]);
+            }
+
+            // Dispatch order_production_film_not_applied email if transition was Pending -> Non-Pending and film_applied != 1
+            if ($oldValStr === 'pending' && $newValStr !== 'pending') {
+                $freshFilmApplied = DB::table('pcb_orders')->where('id', $id)->value('film_applied');
+                if ((int)$freshFilmApplied !== 1) {
+                    \App\Services\EmailTemplateService::sendOrderEmail('order_production_film_not_applied', $id, null, [
+                        'previous_order_status' => $oldStatus,
+                        'film_applied'          => 'No',
+                    ]);
+                }
+            }
 
             $adminId = $request->attributes->get('admin_id');
             $adminUser = $adminId ? DB::table('admins')->where('id', $adminId)->first() : null;
