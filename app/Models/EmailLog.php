@@ -14,7 +14,10 @@ class EmailLog extends Model
     protected $fillable = [
         'template_key',
         'order_id',
+        'inventory_item_id',
         'customer_id',
+        'from_email',
+        'from_name',
         'to',
         'cc',
         'bcc',
@@ -33,5 +36,10 @@ class EmailLog extends Model
     public function order()
     {
         return $this->belongsTo(PcbOrder::class, 'order_id');
+    }
+
+    public function inventoryItem()
+    {
+        return $this->belongsTo(InventoryItem::class, 'inventory_item_id');
     }
 }

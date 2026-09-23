@@ -63,7 +63,9 @@ class SendTemplateEmailJob implements ShouldQueue
 
         $rendered = EmailTemplateService::render($this->templateKey, $order);
 
-        $toEmail = $this->overrideTo ?: ($rendered['to'] ?? null);
+        $toEmail   = $this->overrideTo ?: ($rendered['to'] ?? null);
+        $fromEmail = $rendered['from_email'] ?? CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', config('mail.from.address'));
+        $fromName  = $rendered['from_name'] ?? CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('mail.from.name'));
 
         // 1. Check if template exists & active
         if (!$rendered['success'] || !($rendered['is_active'] ?? false)) {
@@ -71,6 +73,8 @@ class SendTemplateEmailJob implements ShouldQueue
                 'template_key'  => $this->templateKey,
                 'order_id'      => $this->orderId,
                 'customer_id'   => $order->user_id,
+                'from_email'    => $fromEmail,
+                'from_name'     => $fromName,
                 'to'            => $toEmail ?? 'N/A',
                 'cc'            => implode(', ', $rendered['cc'] ?? []),
                 'bcc'           => implode(', ', $rendered['bcc'] ?? []),
@@ -87,6 +91,8 @@ class SendTemplateEmailJob implements ShouldQueue
                 'template_key'  => $this->templateKey,
                 'order_id'      => $this->orderId,
                 'customer_id'   => $order->user_id,
+                'from_email'    => $fromEmail,
+                'from_name'     => $fromName,
                 'to'            => $toEmail ?? 'N/A',
                 'cc'            => implode(', ', $rendered['cc'] ?? []),
                 'bcc'           => implode(', ', $rendered['bcc'] ?? []),
@@ -103,12 +109,13 @@ class SendTemplateEmailJob implements ShouldQueue
         Config::set('mail.mailers.smtp_global.port', CredentialService::get('mail', 'MAIL_GLOBAL_PORT', 'MAIL_GLOBAL_PORT', config('mail.mailers.smtp.port', 587)));
         Config::set('mail.mailers.smtp_global.username', CredentialService::get('mail', 'MAIL_GLOBAL_USERNAME', 'MAIL_GLOBAL_USERNAME', config('mail.mailers.smtp.username')));
         Config::set('mail.mailers.smtp_global.password', CredentialService::get('mail', 'MAIL_GLOBAL_PASSWORD', 'MAIL_GLOBAL_PASSWORD', config('mail.mailers.smtp.password')));
-        Config::set('mail.from.address', CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', config('mail.from.address')));
-        Config::set('mail.from.name', CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('mail.from.name')));
+        Config::set('mail.from.address', $fromEmail);
+        Config::set('mail.from.name', $fromName);
 
         try {
-            Mail::mailer($mailer)->send([], [], function ($message) use ($toEmail, $rendered) {
+            Mail::mailer($mailer)->send([], [], function ($message) use ($toEmail, $fromEmail, $fromName, $rendered) {
                 $message->to($toEmail)
+                    ->from($fromEmail, $fromName)
                     ->subject($rendered['subject'])
                     ->html($rendered['body']);
 
@@ -125,6 +132,8 @@ class SendTemplateEmailJob implements ShouldQueue
                 'template_key'  => $this->templateKey,
                 'order_id'      => $this->orderId,
                 'customer_id'   => $order->user_id,
+                'from_email'    => $fromEmail,
+                'from_name'     => $fromName,
                 'to'            => $toEmail,
                 'cc'            => implode(', ', $rendered['cc']),
                 'bcc'           => implode(', ', $rendered['bcc']),
@@ -133,12 +142,14 @@ class SendTemplateEmailJob implements ShouldQueue
                 'sent_at'       => Carbon::now(),
             ]);
 
-            Log::info("SendTemplateEmailJob: Email '{$this->templateKey}' successfully sent to '{$toEmail}' for Order #{$this->orderId}.");
+            Log::info("SendTemplateEmailJob: Email '{$this->templateKey}' successfully sent to '{$toEmail}' from '{$fromName} <{$fromEmail}>' for Order #{$this->orderId}.");
         } catch (\Throwable $th) {
             EmailLog::create([
                 'template_key'  => $this->templateKey,
                 'order_id'      => $this->orderId,
                 'customer_id'   => $order->user_id,
+                'from_email'    => $fromEmail,
+                'from_name'     => $fromName,
                 'to'            => $toEmail,
                 'cc'            => implode(', ', $rendered['cc']),
                 'bcc'           => implode(', ', $rendered['bcc']),

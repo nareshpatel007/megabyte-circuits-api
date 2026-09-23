@@ -44,19 +44,7 @@ class EmailTemplateController extends Controller
         try {
             $template = EmailTemplate::where('id', $id)->orWhere('key', $id)->firstOrFail();
 
-            $availableVariables = [
-                ['var' => '{{customer_name}}', 'desc' => 'Customer Full Name or Company Name'],
-                ['var' => '{{customer_email}}', 'desc' => 'Customer Email Address'],
-                ['var' => '{{order_number}}', 'desc' => 'Unique Order Number (e.g. ORD-TEST-10001)'],
-                ['var' => '{{order_date}}', 'desc' => 'Formatted Date Order Was Placed'],
-                ['var' => '{{order_status}}', 'desc' => 'Current Order Status'],
-                ['var' => '{{order_total}}', 'desc' => 'Total Amount Paid/Due (e.g. ₹5,000.00)'],
-                ['var' => '{{company_name}}', 'desc' => 'Company Name from Settings'],
-                ['var' => '{{order_url}}', 'desc' => 'Customer Dashboard Order URL'],
-                ['var' => '{{board_name}}', 'desc' => 'Board / Design Name'],
-                ['var' => '{{gerber_file_name}}', 'desc' => 'Gerber File / Board Name'],
-                ['var' => '{{delivery_date}}', 'desc' => 'Estimated Delivery Date'],
-            ];
+            $availableVariables = EmailTemplateService::getAvailableVariables($template->key);
 
             return response()->json([
                 'success' => true,
@@ -79,12 +67,15 @@ class EmailTemplateController extends Controller
         $template = EmailTemplate::where('id', $id)->orWhere('key', $id)->firstOrFail();
 
         $validator = Validator::make($request->all(), [
-            'name'      => 'sometimes|required|string|max:255',
-            'subject'   => 'sometimes|required|string|max:255',
-            'body'      => 'sometimes|required|string',
-            'cc'        => 'nullable|string',
-            'bcc'       => 'nullable|string',
-            'is_active' => 'boolean',
+            'name'       => 'sometimes|required|string|max:255',
+            'subject'    => 'sometimes|required|string|max:255',
+            'body'       => 'sometimes|required|string',
+            'to'         => 'nullable|string',
+            'from_email' => 'nullable|string',
+            'from_name'  => 'nullable|string',
+            'cc'         => 'nullable|string',
+            'bcc'        => 'nullable|string',
+            'is_active'  => 'boolean',
         ]);
 
         if ($validator->fails()) {
@@ -95,12 +86,23 @@ class EmailTemplateController extends Controller
             ], 422);
         }
 
+        // Validate From Email if provided (and not a placeholder)
+        if ($request->filled('from_email')) {
+            $fromEmailVal = trim($request->from_email);
+            if (!empty($fromEmailVal) && !str_contains($fromEmailVal, '{{') && !filter_var($fromEmailVal, FILTER_VALIDATE_EMAIL)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Invalid FROM email address format: '{$fromEmailVal}'"
+                ], 422);
+            }
+        }
+
         // Validate individual CC emails if provided
         if ($request->filled('cc')) {
             $ccList = preg_split('/[\s,;]+/', $request->cc);
             foreach ($ccList as $email) {
                 $email = trim($email);
-                if (!empty($email) && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                if (!empty($email) && !str_contains($email, '{{') && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
                     return response()->json([
                         'success' => false,
                         'message' => "Invalid CC email address format: '{$email}'"
@@ -114,7 +116,7 @@ class EmailTemplateController extends Controller
             $bccList = preg_split('/[\s,;]+/', $request->bcc);
             foreach ($bccList as $email) {
                 $email = trim($email);
-                if (!empty($email) && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                if (!empty($email) && !str_contains($email, '{{') && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
                     return response()->json([
                         'success' => false,
                         'message' => "Invalid BCC email address format: '{$email}'"
@@ -126,6 +128,9 @@ class EmailTemplateController extends Controller
         if ($request->has('name')) $template->name = $request->name;
         if ($request->has('subject')) $template->subject = $request->subject;
         if ($request->has('body')) $template->body = $request->body;
+        if ($request->has('to')) $template->to = $request->to;
+        if ($request->has('from_email')) $template->from_email = $request->from_email;
+        if ($request->has('from_name')) $template->from_name = $request->from_name;
         if ($request->has('cc')) $template->cc = $request->cc;
         if ($request->has('bcc')) $template->bcc = $request->bcc;
         if ($request->has('is_active')) $template->is_active = $request->is_active;
@@ -140,28 +145,45 @@ class EmailTemplateController extends Controller
     }
 
     /**
-     * Preview template rendering with sample or specific order.
+     * Preview template rendering with sample or specific entity.
      */
     public function preview(Request $request, $id)
     {
         try {
             $template = EmailTemplate::where('id', $id)->orWhere('key', $id)->firstOrFail();
 
-            $orderId = $request->input('order_id');
-            $order = $orderId ? PcbOrder::with('user')->find($orderId) : null;
+            $subjectText   = $request->input('subject', $template->subject);
+            $bodyText      = $request->input('body', $template->body);
+            $toText        = $request->input('to', $template->to);
+            $fromEmailText = $request->input('from_email', $template->from_email);
+            $fromNameText  = $request->input('from_name', $template->from_name);
+            $ccText        = $request->input('cc', $template->cc);
+            $bccText       = $request->input('bcc', $template->bcc);
 
-            // Optional custom override of template subject or body from request for instant editor live-preview
-            $subjectText = $request->input('subject', $template->subject);
-            $bodyText    = $request->input('body', $template->body);
+            if (str_starts_with($template->key, 'inventory_')) {
+                $vars = EmailTemplateService::buildInventoryVariables(null, null);
+            } else {
+                $orderId = $request->input('order_id');
+                $order = $orderId ? PcbOrder::with('user')->find($orderId) : null;
+                $vars = EmailTemplateService::buildVariables($order);
+            }
 
-            $vars = EmailTemplateService::buildVariables($order);
-
-            $renderedSubject = EmailTemplateService::replaceVariables($subjectText, $vars);
-            $innerBody       = EmailTemplateService::replaceVariables($bodyText, $vars);
+            $renderedSubject  = EmailTemplateService::resolveTemplateField($subjectText, $vars);
+            $innerBody        = EmailTemplateService::resolveTemplateField($bodyText, $vars);
             $fullRenderedBody = EmailTemplateService::wrapInLayout($innerBody, $vars, $renderedSubject);
 
-            $ccEmails  = EmailTemplateService::parseEmails($request->input('cc', $template->cc));
-            $bccEmails = EmailTemplateService::parseEmails($request->input('bcc', $template->bcc));
+            $defaultFromAddress = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', config('mail.from.address', 'quote@megabytecircuit.com'));
+            $defaultFromName    = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('mail.from.name', 'Megabyte Circuit'));
+
+            $renderedFromEmailStr = !empty($fromEmailText) ? EmailTemplateService::resolveTemplateField($fromEmailText, $vars) : '';
+            $parsedFromEmails     = EmailTemplateService::parseEmails($renderedFromEmailStr);
+            $renderedFromEmail    = !empty($parsedFromEmails) ? $parsedFromEmails[0] : $defaultFromAddress;
+
+            $renderedFromName = !empty($fromNameText) ? EmailTemplateService::resolveTemplateField($fromNameText, $vars) : $defaultFromName;
+
+            $toEmails  = EmailTemplateService::resolveVariablesAndParseEmails($toText, $vars);
+            $ccEmails  = EmailTemplateService::resolveVariablesAndParseEmails($ccText, $vars);
+            $bccEmails = EmailTemplateService::resolveVariablesAndParseEmails($bccText, $vars);
 
             return response()->json([
                 'success' => true,
@@ -171,7 +193,9 @@ class EmailTemplateController extends Controller
                     'is_active'        => (bool)($request->has('is_active') ? $request->is_active : $template->is_active),
                     'rendered_subject' => $renderedSubject,
                     'rendered_body'    => $fullRenderedBody,
-                    'to'               => $vars['customer_email'],
+                    'from_email'       => $renderedFromEmail,
+                    'from_name'        => $renderedFromName,
+                    'to'               => !empty($toEmails) ? implode(', ', $toEmails) : 'N/A (Missing recipient variable)',
                     'cc'               => $ccEmails,
                     'bcc'              => $bccEmails,
                     'variables'        => $vars,
@@ -203,10 +227,12 @@ class EmailTemplateController extends Controller
             $template = EmailTemplate::where('id', $id)->orWhere('key', $id)->firstOrFail();
 
             // Support current unsaved/edited template parameters from request
-            $subjectText = $request->input('subject', $template->subject);
-            $bodyText    = $request->input('body', $template->body);
-            $ccStr       = $request->input('cc', $template->cc);
-            $bccStr      = $request->input('bcc', $template->bcc);
+            $subjectText   = $request->input('subject', $template->subject);
+            $bodyText      = $request->input('body', $template->body);
+            $fromEmailText = $request->input('from_email', $template->from_email);
+            $fromNameText  = $request->input('from_name', $template->from_name);
+            $ccStr         = $request->input('cc', $template->cc);
+            $bccStr        = $request->input('bcc', $template->bcc);
 
             if (empty($subjectText) || empty($bodyText)) {
                 return response()->json([
@@ -215,25 +241,37 @@ class EmailTemplateController extends Controller
                 ], 422);
             }
 
+            // Build dummy variables
+            if (str_starts_with($template->key, 'inventory_')) {
+                $dummyVars = EmailTemplateService::buildInventoryVariables(null, null);
+            } else {
+                $dummyVars = EmailTemplateService::buildVariables(null, [
+                    'customer_name'  => 'John Doe',
+                    'customer_email' => $recipientEmail,
+                    'order_number'   => 'ORD-TEST-10001',
+                    'order_date'     => Carbon::now()->format('d M Y'),
+                    'order_status'   => 'Completed',
+                    'order_total'    => '₹5,000.00',
+                    'order_url'      => config('app.frontend_url', 'http://localhost:3000') . '/dashboard/orders',
+                ]);
+            }
+
             // CC/BCC controls (Off by default for test emails for safety)
             $useConfiguredCcBcc = filter_var($request->input('use_configured_cc_bcc', false), FILTER_VALIDATE_BOOLEAN);
 
-            $ccEmails  = $useConfiguredCcBcc ? EmailTemplateService::parseEmails($ccStr) : [];
-            $bccEmails = $useConfiguredCcBcc ? EmailTemplateService::parseEmails($bccStr) : [];
+            $ccEmails  = $useConfiguredCcBcc ? EmailTemplateService::resolveVariablesAndParseEmails($ccStr, $dummyVars) : [];
+            $bccEmails = $useConfiguredCcBcc ? EmailTemplateService::resolveVariablesAndParseEmails($bccStr, $dummyVars) : [];
 
-            // Build dummy variables
-            $dummyVars = EmailTemplateService::buildVariables(null, [
-                'customer_name'  => 'John Doe',
-                'customer_email' => $recipientEmail,
-                'order_number'   => 'ORD-TEST-10001',
-                'order_date'     => Carbon::now()->format('d M Y'),
-                'order_status'   => 'Completed',
-                'order_total'    => '₹5,000.00',
-                'order_url'      => config('app.frontend_url', 'http://localhost:3000') . '/dashboard/orders',
-            ]);
+            $defaultFromAddress = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', config('mail.from.address', 'quote@megabytecircuit.com'));
+            $defaultFromName    = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('mail.from.name', 'Megabyte Circuit'));
 
-            $renderedSubject = EmailTemplateService::replaceVariables($subjectText, $dummyVars);
-            $innerBody       = EmailTemplateService::replaceVariables($bodyText, $dummyVars);
+            $resolvedFromEmailStr = !empty($fromEmailText) ? EmailTemplateService::resolveTemplateField($fromEmailText, $dummyVars) : '';
+            $parsedFromEmails     = EmailTemplateService::parseEmails($resolvedFromEmailStr);
+            $fromEmail            = !empty($parsedFromEmails) ? $parsedFromEmails[0] : $defaultFromAddress;
+            $fromName             = !empty($fromNameText) ? EmailTemplateService::resolveTemplateField($fromNameText, $dummyVars) : $defaultFromName;
+
+            $renderedSubject = EmailTemplateService::resolveTemplateField($subjectText, $dummyVars);
+            $innerBody       = EmailTemplateService::resolveTemplateField($bodyText, $dummyVars);
 
             // Append Test Notice Banner inside email body content
             $testBannerHtml = '<div style="margin-top: 30px; padding: 12px; background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; text-align: center; font-size: 12px; color: #92400e; font-family: sans-serif;">
@@ -249,11 +287,12 @@ class EmailTemplateController extends Controller
             Config::set('mail.mailers.smtp_global.port', CredentialService::get('mail', 'MAIL_GLOBAL_PORT', 'MAIL_GLOBAL_PORT', config('mail.mailers.smtp.port', 587)));
             Config::set('mail.mailers.smtp_global.username', CredentialService::get('mail', 'MAIL_GLOBAL_USERNAME', 'MAIL_GLOBAL_USERNAME', config('mail.mailers.smtp.username')));
             Config::set('mail.mailers.smtp_global.password', CredentialService::get('mail', 'MAIL_GLOBAL_PASSWORD', 'MAIL_GLOBAL_PASSWORD', config('mail.mailers.smtp.password')));
-            Config::set('mail.from.address', CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', config('mail.from.address')));
-            Config::set('mail.from.name', CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('mail.from.name')));
+            Config::set('mail.from.address', $fromEmail);
+            Config::set('mail.from.name', $fromName);
 
-            Mail::mailer($mailer)->send([], [], function ($message) use ($recipientEmail, $renderedSubject, $finalTestBody, $ccEmails, $bccEmails) {
+            Mail::mailer($mailer)->send([], [], function ($message) use ($recipientEmail, $fromEmail, $fromName, $renderedSubject, $finalTestBody, $ccEmails, $bccEmails) {
                 $message->to($recipientEmail)
+                    ->from($fromEmail, $fromName)
                     ->subject($renderedSubject)
                     ->html($finalTestBody);
 
@@ -270,6 +309,8 @@ class EmailTemplateController extends Controller
                 'template_key'  => $template->key,
                 'order_id'      => null,
                 'customer_id'   => null,
+                'from_email'    => $fromEmail,
+                'from_name'     => $fromName,
                 'to'            => $recipientEmail,
                 'cc'            => implode(', ', $ccEmails),
                 'bcc'           => implode(', ', $bccEmails),
