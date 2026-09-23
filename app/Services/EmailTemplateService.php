@@ -117,7 +117,8 @@ class EmailTemplateService
      */
     public static function buildVariables(?PcbOrder $order = null, array $overrideVars = []): array
     {
-        $companyName    = CredentialService::get('company', 'COMPANY_NAME', 'COMPANY_NAME', CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('app.name', 'Megabyte Circuit')));
+        $appName        = env('APP_NAME') ?: config('app.name', 'Megabyte Circuit');
+        $companyName    = CredentialService::get('company', 'COMPANY_NAME', 'COMPANY_NAME', $appName);
         $companyLogoUrl = CredentialService::get('company', 'COMPANY_LOGO_URL', 'COMPANY_LOGO_URL', 'https://megabytecircuit.com/images/logo.png');
         $companyEmail   = CredentialService::get('company', 'COMPANY_EMAIL', 'COMPANY_EMAIL', CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', 'quote@megabytecircuit.com'));
         $companyPhone   = CredentialService::get('company', 'COMPANY_PHONE', 'COMPANY_PHONE', '+91-9898842942');
@@ -311,7 +312,7 @@ class EmailTemplateService
 
         // Dynamic From Email & From Name
         $defaultFromAddress = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', config('mail.from.address', 'quote@megabytecircuit.com'));
-        $defaultFromName    = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('mail.from.name', 'Megabyte Circuit'));
+        $defaultFromName    = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', env('APP_NAME') ?: config('app.name', 'Megabyte Circuit'));
 
         $resolvedFromEmailStr = !empty($template->from_email) ? self::resolveTemplateField($template->from_email, $vars) : '';
         $parsedFromEmails     = self::parseEmails($resolvedFromEmailStr);
@@ -369,7 +370,8 @@ class EmailTemplateService
      */
     public static function buildInventoryVariables(?InventoryItem $item = null, ?InventoryLog $log = null, array $overrideVars = []): array
     {
-        $companyName    = CredentialService::get('company', 'COMPANY_NAME', 'COMPANY_NAME', CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('app.name', 'Megabyte Circuit')));
+        $appName        = env('APP_NAME') ?: config('app.name', 'Megabyte Circuit');
+        $companyName    = CredentialService::get('company', 'COMPANY_NAME', 'COMPANY_NAME', $appName);
         $companyLogoUrl = CredentialService::get('company', 'COMPANY_LOGO_URL', 'COMPANY_LOGO_URL', 'https://megabytecircuit.com/images/logo.png');
         $companyEmail   = CredentialService::get('company', 'COMPANY_EMAIL', 'COMPANY_EMAIL', CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', 'quote@megabytecircuit.com'));
         $companyPhone   = CredentialService::get('company', 'COMPANY_PHONE', 'COMPANY_PHONE', '+91-9898842942');
@@ -574,7 +576,7 @@ class EmailTemplateService
 
         // Dynamic From Email & From Name
         $defaultFromAddress = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', config('mail.from.address', 'quote@megabytecircuit.com'));
-        $defaultFromName    = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('mail.from.name', 'Megabyte Circuit'));
+        $defaultFromName    = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', env('APP_NAME') ?: config('app.name', 'Megabyte Circuit'));
 
         $resolvedFromEmailStr = !empty($template->from_email) ? self::resolveTemplateField($template->from_email, $vars) : '';
         $parsedFromEmails     = self::parseEmails($resolvedFromEmailStr);
