@@ -276,7 +276,7 @@ class FileUploadController extends Controller
         try {
             $file = DB::table('gerber_files')->where('id', $id)->first();
             if (!$file) {
-                return response()->json(['error' => 'Record not found'], 404);
+                return $this->renderFallbackPng($side);
             }
 
             $analysisData = $file->analysis_data ? json_decode($file->analysis_data, true) : [];
@@ -304,31 +304,73 @@ class FileUploadController extends Controller
                     : "/projects/{$file->python_project_id}/renders/pcb_top_2d.png";
             }
 
-            if (!$relPath) {
-                return response()->json(['error' => 'Preview not available'], 404);
+            if ($relPath) {
+                // Normalize path: extract relative /projects/... if full system path was given
+                if (preg_match('#/projects/.*#', $relPath, $matches)) {
+                    $relPath = $matches[0];
+                }
+
+                // Fetch from Python service
+                $targetUrl = rtrim($pythonUrl, '/') . '/' . ltrim($relPath, '/');
+                $imgRes = Http::timeout(15)->get($targetUrl);
+
+                if ($imgRes->successful()) {
+                    return response($imgRes->body(), 200)
+                        ->header('Content-Type', 'image/png')
+                        ->header('Cache-Control', 'public, max-age=86400');
+                }
+
+                // If back preview was requested and failed, try falling back to front preview
+                if ($side === 'back' && !empty($file->python_project_id)) {
+                    $frontRel = "/projects/{$file->python_project_id}/renders/pcb_top_2d.png";
+                    $frontUrl = rtrim($pythonUrl, '/') . '/' . ltrim($frontRel, '/');
+                    $frontImgRes = Http::timeout(10)->get($frontUrl);
+                    if ($frontImgRes->successful()) {
+                        return response($frontImgRes->body(), 200)
+                            ->header('Content-Type', 'image/png')
+                            ->header('Cache-Control', 'public, max-age=86400');
+                    }
+                }
             }
 
-            // Normalize path: extract relative /projects/... if full system path was given
-            if (preg_match('#/projects/.*#', $relPath, $matches)) {
-                $relPath = $matches[0];
-            }
-
-            // Fetch from Python service
-            $targetUrl = rtrim($pythonUrl, '/') . '/' . ltrim($relPath, '/');
-            $imgRes = Http::timeout(15)->get($targetUrl);
-
-            if ($imgRes->successful()) {
-                return response($imgRes->body(), 200)
-                    ->header('Content-Type', 'image/png')
-                    ->header('Cache-Control', 'public, max-age=86400');
-            }
-
-            logger()->error("Preview image fetch failed for URL {$targetUrl}, status: " . $imgRes->status());
-            return response()->json(['error' => 'Failed to load preview from analysis engine'], 404);
+            return $this->renderFallbackPng($side);
 
         } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage()], 500);
+            logger()->error("Preview image fetch exception: " . $e->getMessage());
+            return $this->renderFallbackPng($side);
         }
+    }
+
+    private function renderFallbackPng($side = 'front')
+    {
+        if (function_exists('imagecreatetruecolor')) {
+            $width = 400;
+            $height = 300;
+            $im = imagecreatetruecolor($width, $height);
+            $bg = imagecolorallocate($im, 30, 41, 59);
+            $border = imagecolorallocate($im, 71, 85, 105);
+            $textColor = imagecolorallocate($im, 148, 163, 184);
+
+            imagefill($im, 0, 0, $bg);
+            imagerectangle($im, 10, 10, $width - 11, $height - 11, $border);
+
+            $label = ($side === 'back') ? 'No Bottom Layer' : 'Preview Unavailable';
+            imagestring($im, 4, max(15, (int)(($width - strlen($label) * 9) / 2)), (int)($height / 2 - 8), $label, $textColor);
+
+            ob_start();
+            imagepng($im);
+            $pngData = ob_get_clean();
+            imagedestroy($im);
+
+            return response($pngData, 200)
+                ->header('Content-Type', 'image/png')
+                ->header('Cache-Control', 'public, max-age=3600');
+        }
+
+        $pixel = base64_decode('iVBORw0KGgoAAAANSU6EUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=');
+        return response($pixel, 200)
+            ->header('Content-Type', 'image/png')
+            ->header('Cache-Control', 'public, max-age=3600');
     }
 
     private function formatFileSize($bytes)
