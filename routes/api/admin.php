@@ -16,8 +16,9 @@ Route::prefix('admin')->group(function () {
 // Protected Admin Panel Endpoints
 Route::middleware('verify.admin.token')->group(function () {
     Route::prefix('admin')->group(function () {
-        // Dashboard Stats
+        // Dashboard Stats & Analytics
         Route::get('stats', [AdminController::class, 'stats']);
+        Route::get('revenue-trend', [AdminController::class, 'revenueTrend']);
 
         // Order Management
         Route::get('orders', [OrderController::class, 'index']);

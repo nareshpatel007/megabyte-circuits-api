@@ -193,6 +193,81 @@ class AdminController extends Controller
         }
     }
 
+    // Dynamic Revenue & Orders Trend Analytics
+    public function revenueTrend(Request $request)
+    {
+        try {
+            $period = strtolower($request->input('period', 'day'));
+            if (!in_array($period, ['day', 'month', 'year'])) {
+                $period = 'day';
+            }
+
+            if (!Schema::hasTable('pcb_orders')) {
+                return response()->json(['status' => true, 'data' => [], 'period' => $period]);
+            }
+
+            $driver = DB::connection()->getDriverName();
+
+            if ($period === 'year') {
+                if ($driver === 'sqlite') {
+                    $dateFormat = "strftime('%Y', created_at)";
+                } else {
+                    $dateFormat = "DATE_FORMAT(created_at, '%Y')";
+                }
+            } else if ($period === 'month') {
+                if ($driver === 'sqlite') {
+                    $dateFormat = "strftime('%Y-%m', created_at)";
+                } else {
+                    $dateFormat = "DATE_FORMAT(created_at, '%Y-%m')";
+                }
+            } else {
+                if ($driver === 'sqlite') {
+                    $dateFormat = "strftime('%Y-%m-%d', created_at)";
+                } else {
+                    $dateFormat = "DATE_FORMAT(created_at, '%Y-%m-%d')";
+                }
+            }
+
+            $rows = DB::table('pcb_orders')
+                ->whereNull('deleted_at')
+                ->select(
+                    DB::raw("{$dateFormat} as date_key"),
+                    DB::raw("COALESCE(SUM(order_value), 0) as total_revenue"),
+                    DB::raw("COUNT(id) as total_orders"),
+                    DB::raw("MIN(created_at) as sample_created_at")
+                )
+                ->groupBy('date_key')
+                ->orderBy('date_key', 'asc')
+                ->get();
+
+            $trend = $rows->map(function ($row) use ($period) {
+                $dateObj = new \DateTime($row->sample_created_at ?? $row->date_key);
+                if ($period === 'year') {
+                    $label = $dateObj->format('Y');
+                } else if ($period === 'month') {
+                    $label = $dateObj->format('M Y');
+                } else {
+                    $label = $dateObj->format('M j');
+                }
+
+                return [
+                    'date_key' => $row->date_key,
+                    'date'     => $label,
+                    'revenue'  => round((float)$row->total_revenue, 2),
+                    'orders'   => (int)$row->total_orders,
+                ];
+            });
+
+            return response()->json([
+                'status' => true,
+                'period' => $period,
+                'data'   => $trend
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
     // Users List with search & pagination
     public function users(Request $request)
     {
