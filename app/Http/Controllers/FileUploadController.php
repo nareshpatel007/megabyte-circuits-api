@@ -311,11 +311,7 @@ class FileUploadController extends Controller
                 }
 
                 // Fetch from Python service
-                $color = $request->query('color');
                 $targetUrl = rtrim($pythonUrl, '/') . '/' . ltrim($relPath, '/');
-                if ($color) {
-                    $targetUrl .= (str_contains($targetUrl, '?') ? '&' : '?') . 'color=' . urlencode($color);
-                }
                 $imgRes = Http::timeout(15)->get($targetUrl);
 
                 if ($imgRes->successful()) {
