@@ -427,30 +427,24 @@ class OrderController extends Controller
             $adminId = $request->input('admin_id') ?: $request->attributes->get('admin_id');
             $remark = $request->input('remark', null);
             
-            $changesLog = [];
+            $hasCustomerNameCol = \Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'customer_name');
 
             if ($request->has('user_id') && (string)$order->user_id !== (string)$request->user_id) {
                 $oldUserId = $order->user_id ?? 'N/A';
                 $order->user_id = $request->user_id ?: null;
                 $changesLog[] = "Customer ID: '{$oldUserId}' → '{$request->user_id}'";
-                if ($request->user_id) {
+                if ($request->user_id && $hasCustomerNameCol) {
                     $userObj = \App\Models\PcbUser::find($request->user_id) ?: (\Illuminate\Support\Facades\Schema::hasTable('users') ? \App\Models\User::find($request->user_id) : null);
                     if ($userObj) {
                         $newCustName = $userObj->company_name ?: ($userObj->name ?: (isset($userObj->first_name) ? trim("{$userObj->first_name} {$userObj->last_name}") : null));
                         if ($newCustName && !$request->has('customer_name')) {
                             $order->customer_name = $newCustName;
                         }
-                        if (!empty($userObj->email)) {
-                            $order->user_email = $userObj->email;
-                        }
-                        if (!empty($userObj->mobile)) {
-                            $order->user_mobile = $userObj->mobile;
-                        }
                     }
                 }
             }
 
-            if ($request->has('customer_name') && (string)$order->customer_name !== (string)$request->customer_name) {
+            if ($hasCustomerNameCol && $request->has('customer_name') && (string)$order->customer_name !== (string)$request->customer_name) {
                 $oldVal = $order->customer_name ?? 'N/A';
                 $order->customer_name = $request->customer_name;
                 $changesLog[] = "Customer: '{$oldVal}' → '{$request->customer_name}'";
