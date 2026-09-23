@@ -582,6 +582,15 @@ class CheckoutController extends Controller
 
             DB::commit();
 
+            // Dispatch order_placed email notifications safely AFTER transaction commit
+            foreach ($createdOrders as $cOrder) {
+                try {
+                    \App\Jobs\SendTemplateEmailJob::dispatch('order_placed', $cOrder['order_id']);
+                } catch (\Throwable $th) {
+                    \Illuminate\Support\Facades\Log::error("Failed to dispatch order_placed email job for Order #{$cOrder['order_id']}: " . $th->getMessage());
+                }
+            }
+
             return response()->json([
                 'status' => true,
                 'message' => 'Payment verified and orders created successfully!',

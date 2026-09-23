@@ -152,6 +152,13 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::get('settings/credentials', [\App\Http\Controllers\CredentialController::class, 'index']);
         Route::post('settings/credentials', [\App\Http\Controllers\CredentialController::class, 'update']);
         Route::put('settings/credentials', [\App\Http\Controllers\CredentialController::class, 'update']);
+
+        // Email Templates Management
+        Route::get('email-templates', [\App\Http\Controllers\Admin\EmailTemplateController::class, 'index']);
+        Route::get('email-templates/{id}', [\App\Http\Controllers\Admin\EmailTemplateController::class, 'show']);
+        Route::put('email-templates/{id}', [\App\Http\Controllers\Admin\EmailTemplateController::class, 'update']);
+        Route::post('email-templates/{id}/preview', [\App\Http\Controllers\Admin\EmailTemplateController::class, 'preview']);
+        Route::post('email-templates/{id}/test', [\App\Http\Controllers\Admin\EmailTemplateController::class, 'testEmail']);
     });
 });
 

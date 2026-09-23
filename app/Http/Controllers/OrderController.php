@@ -129,6 +129,13 @@ class OrderController extends Controller
                 }
             }
 
+            // Dispatch order_placed email notification
+            try {
+                \App\Jobs\SendTemplateEmailJob::dispatch('order_placed', $order->id);
+            } catch (\Throwable $th) {
+                \Illuminate\Support\Facades\Log::error("Failed to dispatch order_placed email job for Order #{$order->id}: " . $th->getMessage());
+            }
+
             return response()->json([
                 'success' => true,
                 'message' => 'Order submitted successfully',
@@ -450,7 +457,17 @@ class OrderController extends Controller
                 $changesLog[] = "Customer: '{$oldVal}' → '{$request->customer_name}'";
             }
 
-            if ($request->has('status') && $order->status !== $request->status) {
+            $statusChangedToCompleted = false;
+
+            if ($request->has('status') && (string)$order->status !== (string)$request->status) {
+                $oldValStr = strtolower(trim((string)($order->status ?? 'Pending')));
+                $newValStr = strtolower(trim((string)$request->status));
+                $completedStatuses = ['completed', 'delivered', 'order completed', 'production completed'];
+
+                if (!in_array($oldValStr, $completedStatuses) && in_array($newValStr, $completedStatuses)) {
+                    $statusChangedToCompleted = true;
+                }
+
                 $oldVal = $order->status ?? 'Pending';
                 $order->status = $request->status;
                 $changesLog[] = "Status: '{$oldVal}' → '{$request->status}'";
@@ -553,6 +570,15 @@ class OrderController extends Controller
             }
 
             $order->save();
+
+            // Dispatch order_completed email notification if status transitioned to completed/delivered
+            if ($statusChangedToCompleted) {
+                try {
+                    \App\Jobs\SendTemplateEmailJob::dispatch('order_completed', $order->id);
+                } catch (\Throwable $th) {
+                    \Illuminate\Support\Facades\Log::error("Failed to dispatch order_completed email job for Order #{$order->id}: " . $th->getMessage());
+                }
+            }
 
             // Handle updating order metas
             if ($request->has('metas') && is_array($request->input('metas'))) {
