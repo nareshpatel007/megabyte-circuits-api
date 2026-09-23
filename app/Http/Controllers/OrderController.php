@@ -480,7 +480,9 @@ class OrderController extends Controller
             }
 
             if ($request->has('delivery_date') && $order->delivery_date !== $request->delivery_date) {
+                $oldVal = $order->delivery_date ?? 'N/A';
                 $order->delivery_date = $request->delivery_date;
+                $changesLog[] = "Delivery Date: '{$oldVal}' → '{$request->delivery_date}'";
             }
 
             if ($request->has('bill_number') && (string)$order->bill_number !== (string)$request->bill_number) {
