@@ -39,17 +39,19 @@ class EmailTemplateService
     public static function buildVariables(?PcbOrder $order = null, array $overrideVars = []): array
     {
         $companyName    = CredentialService::get('company', 'COMPANY_NAME', 'COMPANY_NAME', CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('app.name', 'Megabyte Circuit')));
-        $companyLogoUrl = CredentialService::get('company', 'COMPANY_LOGO_URL', 'COMPANY_LOGO_URL', '');
-        $companyEmail   = CredentialService::get('company', 'COMPANY_EMAIL', 'COMPANY_EMAIL', CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', 'support@megabytecircuit.com'));
-        $companyPhone   = CredentialService::get('company', 'COMPANY_PHONE', 'COMPANY_PHONE', '+91 98765 43210');
+        $companyLogoUrl = CredentialService::get('company', 'COMPANY_LOGO_URL', 'COMPANY_LOGO_URL', 'https://megabytecircuit.com/images/logo.png');
+        $companyEmail   = CredentialService::get('company', 'COMPANY_EMAIL', 'COMPANY_EMAIL', CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', 'quote@megabytecircuit.com'));
+        $companyPhone   = CredentialService::get('company', 'COMPANY_PHONE', 'COMPANY_PHONE', '+91-9898842942');
         $companyAddress = CredentialService::get('company', 'COMPANY_ADDRESS', 'COMPANY_ADDRESS', 'Megabyte Circuit, Gujarat, India');
-        $companyWebsite = CredentialService::get('company', 'COMPANY_WEBSITE', 'COMPANY_WEBSITE', config('app.frontend_url', 'http://localhost:3000'));
+        $companyWebsite = CredentialService::get('company', 'COMPANY_WEBSITE', 'COMPANY_WEBSITE', config('app.main_url', 'https://megabytecircuit.com'));
         $supportEmail   = CredentialService::get('company', 'SUPPORT_EMAIL', 'SUPPORT_EMAIL', $companyEmail);
-        $supportPhone   = CredentialService::get('company', 'SUPPORT_PHONE', 'SUPPORT_PHONE', $companyPhone);
+        $supportPhone   = CredentialService::get('company', 'SUPPORT_PHONE', 'SUPPORT_PHONE', '+91-9898842942');
         $facebookUrl    = CredentialService::get('company', 'FACEBOOK_URL', 'FACEBOOK_URL', '');
         $instagramUrl   = CredentialService::get('company', 'INSTAGRAM_URL', 'INSTAGRAM_URL', '');
         $linkedinUrl    = CredentialService::get('company', 'LINKEDIN_URL', 'LINKEDIN_URL', '');
         $twitterUrl     = CredentialService::get('company', 'TWITTER_URL', 'TWITTER_URL', '');
+
+        $cartBaseUrl = config('app.cart_url', 'https://cart.megabytecircuit.com');
 
         $commonCompanyVars = [
             'company_name'     => $companyName,
@@ -76,7 +78,7 @@ class EmailTemplateService
                 'order_date'       => Carbon::now()->format('d M Y'),
                 'order_status'     => 'Pending',
                 'order_total'      => '₹5,000.00',
-                'order_url'        => config('app.frontend_url', 'http://localhost:3000') . '/dashboard/orders',
+                'order_url'        => rtrim($cartBaseUrl, '/') . '/orders',
                 'board_name'       => 'Main Control Board v1.2',
                 'gerber_file_name' => 'Main Control Board v1.2',
                 'delivery_date'    => Carbon::now()->addDays(5)->format('d M Y'),
@@ -108,7 +110,7 @@ class EmailTemplateService
                 'order_date'       => $orderDateStr,
                 'order_status'     => ucfirst($order->status ?? 'Pending'),
                 'order_total'      => $orderTotalStr,
-                'order_url'        => config('app.frontend_url', 'http://localhost:3000') . '/dashboard/orders',
+                'order_url'        => rtrim($cartBaseUrl, '/') . '/orders',
                 'board_name'       => $boardName,
                 'gerber_file_name' => $boardName,
                 'delivery_date'    => $deliveryDateStr,

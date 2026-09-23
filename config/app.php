@@ -57,6 +57,10 @@ return [
 
     'url' => env('APP_URL', 'http://localhost'),
 
+    'cart_url' => env('CART_URL', 'https://cart.megabytecircuit.com'),
+
+    'main_url' => env('MAIN_URL', 'https://megabytecircuit.com'),
+
     'asset_url' => env('ASSET_URL'),
 
     /*

@@ -90,17 +90,17 @@
     </style>
 </head>
 <body>
-    <table role="presentation" class="email-wrapper">
+    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" class="email-wrapper" style="width: 100%; background-color: #f3f4f6; padding: 30px 15px;">
         <tr>
-            <td align="center">
-                <table role="presentation" class="email-container">
+            <td align="center" style="text-align: center;">
+                <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" class="email-container" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; border: 1px solid #e5e7eb; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); text-align: left;">
                     <!-- HEADER -->
                     <tr>
-                        <td class="email-header">
+                        <td class="email-header" align="center" style="background-color: #ffffff; padding: 25px 30px 20px 30px; text-align: center; border-bottom: 2px solid #10b981;">
                             @if (!empty($company_logo_url))
-                                <img src="{{ $company_logo_url }}" alt="{{ $company_name ?? 'Megabyte Circuit' }}" class="logo-img" width="180" />
+                                <img src="{{ $company_logo_url }}" alt="{{ $company_name ?? 'Megabyte Circuit' }}" class="logo-img" style="max-width: 220px; max-height: 70px; height: auto; display: inline-block;" width="220" />
                             @else
-                                <h1 class="company-title">{{ $company_name ?? 'Megabyte Circuit' }}</h1>
+                                <h1 class="company-title" style="color: #10b981; font-size: 24px; font-weight: 700; margin: 0;">{{ $company_name ?? 'Megabyte Circuit' }}</h1>
                             @endif
                         </td>
                     </tr>
@@ -142,9 +142,9 @@
                                 @if(!empty($company_website))
                                     <a href="{{ $company_website }}" target="_blank">Website</a>
                                 @endif
-                                <a href="{{ config('app.frontend_url', 'http://localhost:3000') }}/contact" target="_blank">Contact Us</a>
-                                <a href="{{ config('app.frontend_url', 'http://localhost:3000') }}/privacy" target="_blank">Privacy Policy</a>
-                                <a href="{{ config('app.frontend_url', 'http://localhost:3000') }}/terms" target="_blank">Terms & Conditions</a>
+                                <a href="{{ rtrim(config('app.main_url', 'https://megabytecircuit.com'), '/') }}/contact" target="_blank">Contact Us</a>
+                                <a href="{{ rtrim(config('app.main_url', 'https://megabytecircuit.com'), '/') }}/privacy-policy" target="_blank">Privacy Policy</a>
+                                <a href="{{ rtrim(config('app.main_url', 'https://megabytecircuit.com'), '/') }}/terms-of-service" target="_blank">Terms & Conditions</a>
                             </div>
 
                             @if(!empty($facebook_url) || !empty($instagram_url) || !empty($linkedin_url) || !empty($twitter_url))
