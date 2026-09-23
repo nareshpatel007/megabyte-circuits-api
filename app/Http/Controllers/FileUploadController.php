@@ -183,82 +183,20 @@ class FileUploadController extends Controller
                 'updated_at' => date('Y-m-d H:i:s')
             ]);
 
-            // Call Python Gerber Analyzer Service
-            $pythonUrl = config('services.python_gerber.url', env('PYTHON_GERBER_API_URL', 'http://127.0.0.1:8000'));
-            $fileData = file_get_contents($fileToAnalyzePath);
-            
-            $pythonResponse = null;
-            try {
-                $response = Http::timeout(120)
-                    ->attach('file', $fileData, $fileToAnalyzeName)
-                    ->post(rtrim($pythonUrl, '/') . '/api/analyze');
+            // Launch background process for Gerber analysis asynchronously (non-blocking)
+            $artisanPath = base_path('artisan');
+            $command = "php " . escapeshellarg($artisanPath) . " gerber:process " . (int)$gerberFileId;
 
-                if ($response->successful()) {
-                    $pythonResponse = $response->json();
-                } else {
-                    logger()->error("Python Gerber analysis failed HTTP " . $response->status() . ": " . $response->body());
-                }
-            } catch (\Exception $ex) {
-                logger()->error("Python Gerber analysis exception: " . $ex->getMessage());
+            if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+                pclose(popen("start /B {$command} > NUL 2>&1", "r"));
+            } else {
+                exec("{$command} > /dev/null 2>&1 &");
             }
-
-            if (!$pythonResponse || empty($pythonResponse['project_id'])) {
-                DB::table('gerber_files')->where('id', $gerberFileId)->update([
-                    'status' => 'failed',
-                    'updated_at' => date('Y-m-d H:i:s')
-                ]);
-
-                return response()->json([
-                    'success' => false,
-                    'status' => 'failed',
-                    'error' => 'PCB analysis service failed to process the Gerber archive. Please verify your ZIP/RAR archive contains valid Gerber files.'
-                ], 422);
-            }
-
-            // Extract Python analysis results
-            $pythonProjectId = $pythonResponse['project_id'];
-            $boardWidth = $pythonResponse['board_width'] ?? ($pythonResponse['board_size']['width_mm'] ?? null);
-            $boardHeight = $pythonResponse['board_height'] ?? ($pythonResponse['board_size']['height_mm'] ?? null);
-            $layerCount = $pythonResponse['layer_count'] ?? 0;
-
-            $previewFrontRel = $pythonResponse['preview_front'] ?? ($pythonResponse['pcb_previews']['preview_top_2d'] ?? null);
-            $previewBackRel = $pythonResponse['preview_back'] ?? ($pythonResponse['pcb_previews']['preview_bottom_2d'] ?? null);
-
-            if (!$previewFrontRel && $pythonProjectId) {
-                $previewFrontRel = "/projects/{$pythonProjectId}/renders/pcb_top_2d.png";
-            }
-            if (!$previewBackRel && $pythonProjectId) {
-                $previewBackRel = "/projects/{$pythonProjectId}/renders/pcb_bottom_2d.png";
-            }
-
-            $frontPreviewUrl = "/api/gerber/{$gerberFileId}/preview/front";
-            $backPreviewUrl = "/api/gerber/{$gerberFileId}/preview/back";
-
-            DB::table('gerber_files')->where('id', $gerberFileId)->update([
-                'status' => 'completed',
-                'python_project_id' => $pythonProjectId,
-                'board_width' => $boardWidth,
-                'board_height' => $boardHeight,
-                'layer_count' => $layerCount,
-                'preview_data' => $frontPreviewUrl,
-                'front_preview_url' => $frontPreviewUrl,
-                'back_preview_url' => $backPreviewUrl,
-                'analysis_data' => json_encode($pythonResponse),
-                'updated_at' => date('Y-m-d H:i:s')
-            ]);
 
             return response()->json([
                 'success' => true,
-                'status' => 'completed',
+                'status' => 'processing',
                 'gerber_file_id' => $gerberFileId,
-                'python_project_id' => $pythonProjectId,
-                'board_width' => $boardWidth,
-                'board_height' => $boardHeight,
-                'layer_count' => $layerCount,
-                'preview_front' => $frontPreviewUrl,
-                'preview_back' => $backPreviewUrl,
-                'preview_front_rel' => $previewFrontRel,
-                'preview_back_rel' => $previewBackRel,
                 'folder' => $folder,
                 'fileName' => $fileName,
                 'originalName' => $originalName,
@@ -266,7 +204,7 @@ class FileUploadController extends Controller
                 'zip_url' => $zipFileUrl,
                 'path' => $filePath,
                 'size' => $formattedSize,
-                'analysis' => $pythonResponse
+                'message' => 'File uploaded successfully. Processing started.'
             ], 200);
 
         } catch (\Exception $e) {
@@ -291,17 +229,37 @@ class FileUploadController extends Controller
                 ], 404);
             }
 
+            // Auto timeout stuck processing status after 180 seconds
+            if ($file->status === 'processing') {
+                $createdAt = strtotime($file->created_at);
+                if ($createdAt > 0 && (time() - $createdAt) > 180) {
+                    DB::table('gerber_files')->where('id', $id)->update([
+                        'status' => 'failed',
+                        'updated_at' => date('Y-m-d H:i:s')
+                    ]);
+                    $file->status = 'failed';
+                }
+            }
+
             $analysisData = $file->analysis_data ? json_decode($file->analysis_data, true) : null;
+            $previewFrontRel = "/api/gerber/{$file->id}/preview/front";
+            $previewBackRel = "/api/gerber/{$file->id}/preview/back";
 
             return response()->json([
                 'success' => true,
                 'status' => $file->status,
                 'gerber_file_id' => $file->id,
+                'python_project_id' => $file->python_project_id,
                 'board_width' => $file->board_width,
                 'board_height' => $file->board_height,
                 'layer_count' => $file->layer_count,
-                'preview_front' => "/api/gerber/{$file->id}/preview/front",
-                'preview_back' => "/api/gerber/{$file->id}/preview/back",
+                'preview_front' => $previewFrontRel,
+                'preview_back' => $previewBackRel,
+                'fileName' => $file->file_name,
+                'originalName' => $file->original_name,
+                'url' => $file->file_url,
+                'path' => $file->file_path,
+                'size' => $file->file_size,
                 'analysis' => $analysisData
             ], 200);
         } catch (\Exception $e) {
