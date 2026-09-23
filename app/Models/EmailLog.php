@@ -20,11 +20,13 @@ class EmailLog extends Model
         'bcc',
         'subject',
         'status',
+        'is_test',
         'error_message',
         'sent_at',
     ];
 
     protected $casts = [
+        'is_test' => 'boolean',
         'sent_at' => 'datetime',
     ];
 

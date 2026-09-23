@@ -51,8 +51,9 @@ class EmailTemplateService
                 'order_total'    => '₹5,000.00',
                 'company_name'   => $companyName,
                 'order_url'      => config('app.frontend_url', 'http://localhost:3000') . '/dashboard/orders',
-                'board_name'     => 'Main Control Board v1.2',
-                'delivery_date'  => Carbon::now()->addDays(5)->format('d M Y'),
+                'board_name'       => 'Main Control Board v1.2',
+                'gerber_file_name' => 'Main Control Board v1.2',
+                'delivery_date'    => Carbon::now()->addDays(5)->format('d M Y'),
             ];
         } else {
             // Real order variables
@@ -72,19 +73,20 @@ class EmailTemplateService
             $orderDateStr = $order->created_at ? $order->created_at->format('d M Y') : Carbon::now()->format('d M Y');
             $deliveryDateStr = $order->delivery_date ? Carbon::parse($order->delivery_date)->format('d M Y') : 'N/A';
             $orderTotalStr = '₹' . number_format($order->order_value ?? 0, 2);
-            $boardName = $order->board_name ?? 'PCB Order';
+            $boardName = $order->board_name ?? $order->gerber_file_name ?? $order->gerber_filename ?? 'PCB Design';
 
             $vars = [
-                'customer_name'  => $customerName,
-                'customer_email' => $customerEmail ?? '',
-                'order_number'   => $order->order_number ?? 'M' . $order->id,
-                'order_date'     => $orderDateStr,
-                'order_status'   => ucfirst($order->status ?? 'Pending'),
-                'order_total'    => $orderTotalStr,
-                'company_name'   => $companyName,
-                'order_url'      => config('app.frontend_url', 'http://localhost:3000') . '/dashboard/orders',
-                'board_name'     => $boardName,
-                'delivery_date'  => $deliveryDateStr,
+                'customer_name'    => $customerName,
+                'customer_email'   => $customerEmail ?? '',
+                'order_number'     => $order->order_number ?? 'M' . $order->id,
+                'order_date'       => $orderDateStr,
+                'order_status'     => ucfirst($order->status ?? 'Pending'),
+                'order_total'      => $orderTotalStr,
+                'company_name'     => $companyName,
+                'order_url'        => config('app.frontend_url', 'http://localhost:3000') . '/dashboard/orders',
+                'board_name'       => $boardName,
+                'gerber_file_name' => $boardName,
+                'delivery_date'    => $deliveryDateStr,
             ];
         }
 

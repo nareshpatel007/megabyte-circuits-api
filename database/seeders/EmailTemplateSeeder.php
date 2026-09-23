@@ -35,16 +35,12 @@ class EmailTemplateSeeder extends Seeder
             <td style="padding: 10px;">{{order_date}}</td>
         </tr>
         <tr style="border-bottom: 1px solid #e5e7eb;">
-            <td style="padding: 10px; font-weight: bold;">Board Name:</td>
-            <td style="padding: 10px;">{{board_name}}</td>
+            <td style="padding: 10px; font-weight: bold;">Gerber File Name:</td>
+            <td style="padding: 10px;">{{gerber_file_name}}</td>
         </tr>
         <tr style="border-bottom: 1px solid #e5e7eb;">
-            <td style="padding: 10px; font-weight: bold;">Order Status:</td>
-            <td style="padding: 10px;"><span style="background-color: #d1fae5; color: #065f46; padding: 4px 8px; border-radius: 4px; font-weight: bold;">{{order_status}}</span></td>
-        </tr>
-        <tr>
-            <td style="padding: 10px; font-weight: bold;">Total Amount:</td>
-            <td style="padding: 10px; font-weight: bold; color: #10b981;">{{order_total}}</td>
+            <td style="padding: 10px; font-weight: bold;">Delivery Date:</td>
+            <td style="padding: 10px;">{{delivery_date}}</td>
         </tr>
     </table>
 
@@ -81,16 +77,12 @@ class EmailTemplateSeeder extends Seeder
             <td style="padding: 10px;">{{order_date}}</td>
         </tr>
         <tr style="border-bottom: 1px solid #e5e7eb;">
-            <td style="padding: 10px; font-weight: bold;">Board Name:</td>
-            <td style="padding: 10px;">{{board_name}}</td>
+            <td style="padding: 10px; font-weight: bold;">Gerber File Name:</td>
+            <td style="padding: 10px;">{{gerber_file_name}}</td>
         </tr>
         <tr style="border-bottom: 1px solid #e5e7eb;">
-            <td style="padding: 10px; font-weight: bold;">Status:</td>
-            <td style="padding: 10px;"><span style="background-color: #d1fae5; color: #065f46; padding: 4px 8px; border-radius: 4px; font-weight: bold;">{{order_status}}</span></td>
-        </tr>
-        <tr>
-            <td style="padding: 10px; font-weight: bold;">Order Total:</td>
-            <td style="padding: 10px; font-weight: bold; color: #10b981;">{{order_total}}</td>
+            <td style="padding: 10px; font-weight: bold;">Delivery Date:</td>
+            <td style="padding: 10px;">{{delivery_date}}</td>
         </tr>
     </table>
 

@@ -8,9 +8,11 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Config;
 use App\Models\EmailTemplate;
+use App\Models\EmailLog;
 use App\Models\PcbOrder;
 use App\Services\EmailTemplateService;
 use App\Services\CredentialService;
+use Carbon\Carbon;
 
 class EmailTemplateController extends Controller
 {
@@ -45,13 +47,14 @@ class EmailTemplateController extends Controller
             $availableVariables = [
                 ['var' => '{{customer_name}}', 'desc' => 'Customer Full Name or Company Name'],
                 ['var' => '{{customer_email}}', 'desc' => 'Customer Email Address'],
-                ['var' => '{{order_number}}', 'desc' => 'Unique Order Number (e.g. M00001)'],
+                ['var' => '{{order_number}}', 'desc' => 'Unique Order Number (e.g. ORD-TEST-10001)'],
                 ['var' => '{{order_date}}', 'desc' => 'Formatted Date Order Was Placed'],
                 ['var' => '{{order_status}}', 'desc' => 'Current Order Status'],
                 ['var' => '{{order_total}}', 'desc' => 'Total Amount Paid/Due (e.g. ₹5,000.00)'],
                 ['var' => '{{company_name}}', 'desc' => 'Company Name from Settings'],
                 ['var' => '{{order_url}}', 'desc' => 'Customer Dashboard Order URL'],
                 ['var' => '{{board_name}}', 'desc' => 'Board / Design Name'],
+                ['var' => '{{gerber_file_name}}', 'desc' => 'Gerber File / Board Name'],
                 ['var' => '{{delivery_date}}', 'desc' => 'Estimated Delivery Date'],
             ];
 
@@ -186,34 +189,58 @@ class EmailTemplateController extends Controller
      */
     public function testEmail(Request $request, $id)
     {
-        $validator = Validator::make($request->all(), [
-            'recipient_email' => 'required|email',
-        ]);
+        $recipientEmail = $request->input('recipient_email') ?: $request->input('email');
 
-        if ($validator->fails()) {
+        if (empty($recipientEmail) || !filter_var($recipientEmail, FILTER_VALIDATE_EMAIL)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Please provide a valid recipient email address for testing.'
+                'message' => 'Please enter a valid email address.'
             ], 422);
         }
 
         try {
             $template = EmailTemplate::where('id', $id)->orWhere('key', $id)->firstOrFail();
-            $recipientEmail = $request->recipient_email;
 
-            // Build rendered email using template or request overrides
+            // Support current unsaved/edited template parameters from request
             $subjectText = $request->input('subject', $template->subject);
             $bodyText    = $request->input('body', $template->body);
             $ccStr       = $request->input('cc', $template->cc);
             $bccStr      = $request->input('bcc', $template->bcc);
 
-            $vars = EmailTemplateService::buildVariables(null, ['customer_email' => $recipientEmail]);
+            if (empty($subjectText) || empty($bodyText)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Template must have a subject and body before sending a test email.'
+                ], 422);
+            }
 
-            $renderedSubject = '[TEST] ' . EmailTemplateService::replaceVariables($subjectText, $vars);
-            $renderedBody    = EmailTemplateService::replaceVariables($bodyText, $vars);
+            // CC/BCC controls (Off by default for test emails for safety)
+            $useConfiguredCcBcc = filter_var($request->input('use_configured_cc_bcc', false), FILTER_VALIDATE_BOOLEAN);
 
-            $ccEmails  = EmailTemplateService::parseEmails($ccStr);
-            $bccEmails = EmailTemplateService::parseEmails($bccStr);
+            $ccEmails  = $useConfiguredCcBcc ? EmailTemplateService::parseEmails($ccStr) : [];
+            $bccEmails = $useConfiguredCcBcc ? EmailTemplateService::parseEmails($bccStr) : [];
+
+            // Build dummy variables
+            $dummyVars = EmailTemplateService::buildVariables(null, [
+                'customer_name'  => 'John Doe',
+                'customer_email' => $recipientEmail,
+                'order_number'   => 'ORD-TEST-10001',
+                'order_date'     => Carbon::now()->format('d M Y'),
+                'order_status'   => 'Completed',
+                'order_total'    => '₹5,000.00',
+                'company_name'   => CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('app.name', 'Megabyte Circuits')),
+                'order_url'      => config('app.frontend_url', 'http://localhost:3000') . '/dashboard/orders',
+            ]);
+
+            $renderedSubject = EmailTemplateService::replaceVariables($subjectText, $dummyVars);
+            $renderedBody    = EmailTemplateService::replaceVariables($bodyText, $dummyVars);
+
+            // Append Test Notice Banner only to test emails
+            $testBannerHtml = '<div style="margin-top: 30px; padding: 12px; background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; text-align: center; font-size: 12px; color: #92400e; font-family: sans-serif;">
+                <strong>TEST EMAIL:</strong> This is a test email generated from the Admin Email Template settings using sample data.
+            </div>';
+
+            $finalTestBody = $renderedBody . $testBannerHtml;
 
             // Configure dynamic mailer
             $mailer = 'smtp_global';
@@ -224,10 +251,10 @@ class EmailTemplateController extends Controller
             Config::set('mail.from.address', CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', config('mail.from.address')));
             Config::set('mail.from.name', CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('mail.from.name')));
 
-            Mail::mailer($mailer)->send([], [], function ($message) use ($recipientEmail, $renderedSubject, $renderedBody, $ccEmails, $bccEmails) {
+            Mail::mailer($mailer)->send([], [], function ($message) use ($recipientEmail, $renderedSubject, $finalTestBody, $ccEmails, $bccEmails) {
                 $message->to($recipientEmail)
                     ->subject($renderedSubject)
-                    ->html($renderedBody);
+                    ->html($finalTestBody);
 
                 if (!empty($ccEmails)) {
                     $message->cc($ccEmails);
@@ -237,14 +264,45 @@ class EmailTemplateController extends Controller
                 }
             });
 
+            // Log test email in email_logs table with is_test = true
+            EmailLog::create([
+                'template_key'  => $template->key,
+                'order_id'      => null,
+                'customer_id'   => null,
+                'to'            => $recipientEmail,
+                'cc'            => implode(', ', $ccEmails),
+                'bcc'           => implode(', ', $bccEmails),
+                'subject'       => $renderedSubject,
+                'status'        => 'sent',
+                'is_test'       => true,
+                'sent_at'       => Carbon::now(),
+            ]);
+
             return response()->json([
                 'success' => true,
-                'message' => "Test email successfully sent to '{$recipientEmail}'!",
+                'message' => "Test email sent successfully to {$recipientEmail}.",
             ]);
         } catch (\Throwable $th) {
+            // Log failed test email entry
+            try {
+                EmailLog::create([
+                    'template_key'  => $id,
+                    'order_id'      => null,
+                    'customer_id'   => null,
+                    'to'            => $recipientEmail,
+                    'cc'            => '',
+                    'bcc'           => '',
+                    'subject'       => $subjectText ?? 'Test Email',
+                    'status'        => 'failed',
+                    'is_test'       => true,
+                    'error_message' => $th->getMessage(),
+                ]);
+            } catch (\Throwable $logEx) {}
+
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to send test email: ' . $th->getMessage()
+                'message' => 'Unable to send test email. Please check the email configuration and try again.',
+                'error'   => $th->getMessage()
             ], 500);
         }
     }
