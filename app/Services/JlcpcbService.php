@@ -123,6 +123,10 @@ class JlcpcbService
             $secretKey
         );
 
+        $clientIp = $this->getRequestClientIp();
+        $outboundIp = $this->getOutboundPublicIp();
+        $ipStr = $this->getLogIpString();
+
         try {
             $response = Http::withHeaders([
                 'Authorization' => $authData['authorization'],
@@ -138,7 +142,12 @@ class JlcpcbService
             ]);
 
             $result = $response->json();
-            Log::info("JLCPCB Upload Gerber Response", ['status' => $response->status(), 'result' => $result]);
+            Log::info("JLCPCB Upload Gerber Response [{$ipStr}]", [
+                'request_client_ip' => $clientIp,
+                'outbound_ip' => $outboundIp,
+                'status' => $response->status(),
+                'result' => $result
+            ]);
 
             if (is_array($result)) {
                 $code = $result['code'] ?? null;
@@ -149,6 +158,8 @@ class JlcpcbService
                         'message' => 'Gerber file uploaded successfully',
                         'fileKey' => $result['data'] ?? '',
                         'data' => $result['data'] ?? '',
+                        'request_client_ip' => $clientIp,
+                        'outbound_ip' => $outboundIp,
                         'auth_debug' => $authData
                     ];
                 }
@@ -159,6 +170,8 @@ class JlcpcbService
                     'code' => $code ?? $response->status(),
                     'message' => $errorMessage,
                     'data' => null,
+                    'request_client_ip' => $clientIp,
+                    'outbound_ip' => $outboundIp,
                     'auth_debug' => $authData
                 ];
             }
@@ -168,11 +181,16 @@ class JlcpcbService
                 'code' => $response->status(),
                 'message' => 'Unexpected API response format during Gerber upload.',
                 'raw_response' => $response->body(),
+                'request_client_ip' => $clientIp,
+                'outbound_ip' => $outboundIp,
                 'auth_debug' => $authData
             ];
 
         } catch (Exception $e) {
-            Log::error("JLCPCB Upload Gerber Exception: " . $e->getMessage());
+            Log::error("JLCPCB Upload Gerber Exception [{$ipStr}]: " . $e->getMessage(), [
+                'request_client_ip' => $clientIp,
+                'outbound_ip' => $outboundIp
+            ]);
             throw new Exception("Error uploading Gerber file to JLCPCB: " . $e->getMessage());
         }
     }
@@ -221,7 +239,16 @@ class JlcpcbService
         $payload = $this->buildPayload($input);
         $calcBody = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
-        Log::info("JLCPCB Calculate Request", ['url' => $endpoint, 'payload' => $payload]);
+        $clientIp = $this->getRequestClientIp();
+        $outboundIp = $this->getOutboundPublicIp();
+        $ipStr = $this->getLogIpString();
+
+        Log::info("JLCPCB Calculate Request [{$ipStr}]", [
+            'request_client_ip' => $clientIp,
+            'outbound_ip' => $outboundIp,
+            'url' => $endpoint,
+            'payload' => $payload
+        ]);
 
         // Generate JOP Authorization header if secretKey is available, else fallback to Bearer header
         if (!empty($this->secretKey)) {
@@ -249,7 +276,12 @@ class JlcpcbService
                 ->post($endpoint);
 
             $result = $response->json();
-            Log::info("JLCPCB Calculate Response", ['status' => $response->status(), 'result' => $result]);
+            Log::info("JLCPCB Calculate Response [{$ipStr}]", [
+                'request_client_ip' => $clientIp,
+                'outbound_ip' => $outboundIp,
+                'status' => $response->status(),
+                'result' => $result
+            ]);
 
             if (is_array($result)) {
                 $code = $result['code'] ?? null;
@@ -470,5 +502,49 @@ class JlcpcbService
             'recommended_whitelist_ip' => $ipv4 ?? $ipv6,
             'instructions' => 'Add the outbound_ipv4 address to the IP Whitelist inside your JLCPCB Open Platform Console (https://open.jlcpcb.com).'
         ];
+    }
+
+    /**
+     * Get client IP of current HTTP request or CLI context
+     */
+    public function getRequestClientIp(): string
+    {
+        try {
+            if (request()->hasHeader('X-Forwarded-For')) {
+                $ips = explode(',', request()->header('X-Forwarded-For'));
+                return trim($ips[0]);
+            }
+            return request()->ip() ?? (request()->server('REMOTE_ADDR') ?? '127.0.0.1');
+        } catch (\Throwable $e) {
+            return '127.0.0.1';
+        }
+    }
+
+    /**
+     * Get outbound public IP address of this server (cached 30 min)
+     */
+    public function getOutboundPublicIp(): ?string
+    {
+        try {
+            return \Illuminate\Support\Facades\Cache::remember('jlcpcb_outbound_ip', 1800, function () {
+                $res = Http::timeout(3)->withOptions(['ipresolve' => CURL_IPRESOLVE_V4])->get('https://api.ipify.org?format=json');
+                if ($res->successful()) {
+                    return $res->json('ip');
+                }
+                return null;
+            });
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Format IP info header for logs
+     */
+    public function getLogIpString(): string
+    {
+        $clientIp = $this->getRequestClientIp();
+        $outboundIp = $this->getOutboundPublicIp();
+        return "Request Client IP: {$clientIp}" . ($outboundIp ? " | Outbound Public IP: {$outboundIp}" : "");
     }
 }

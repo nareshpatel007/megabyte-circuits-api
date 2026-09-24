@@ -112,20 +112,29 @@ class ProcessGerberAnalysis extends Command
             $jlcService = app(\App\Services\JlcpcbService::class);
             $jlcResult = $jlcService->uploadGerber($filePath, $fileNameToUpload);
 
+            $clientIp = $jlcResult['request_client_ip'] ?? $jlcService->getRequestClientIp();
+            $outboundIp = $jlcResult['outbound_ip'] ?? $jlcService->getOutboundPublicIp();
+            $ipStr = "Request Client IP: {$clientIp}" . ($outboundIp ? " | Outbound Public IP: {$outboundIp}" : "");
+
             if (!empty($jlcResult['success']) && !empty($jlcResult['fileKey'])) {
                 $jlcpcbFileKey = $jlcResult['fileKey'];
                 $jlcpcbUploadStatus = 'completed';
                 $jlcpcbUploadedAt = date('Y-m-d H:i:s');
-                $this->info("JLCPCB upload successful for Gerber ID {$id}. FileKey: {$jlcpcbFileKey}");
+                $this->info("JLCPCB upload successful for Gerber ID {$id} [{$ipStr}]. FileKey: {$jlcpcbFileKey}");
+                logger()->info("JLCPCB upload successful for Gerber ID {$id} [{$ipStr}]. FileKey: {$jlcpcbFileKey}");
             } else {
                 $jlcpcbUploadStatus = 'failed';
                 $jlcpcbUploadError = $jlcResult['message'] ?? 'JLCPCB upload returned failure response';
-                logger()->warning("JLCPCB upload failed for Gerber ID {$id}: " . $jlcpcbUploadError);
+                logger()->warning("JLCPCB upload failed for Gerber ID {$id} [{$ipStr}]: " . $jlcpcbUploadError, [
+                    'request_client_ip' => $clientIp,
+                    'outbound_ip' => $outboundIp
+                ]);
             }
         } catch (\Exception $ex) {
             $jlcpcbUploadStatus = 'failed';
             $jlcpcbUploadError = $ex->getMessage();
-            logger()->error("JLCPCB upload exception for Gerber ID {$id}: " . $ex->getMessage());
+            $ipStr = isset($jlcService) ? $jlcService->getLogIpString() : 'Request Client IP: Unknown';
+            logger()->error("JLCPCB upload exception for Gerber ID {$id} [{$ipStr}]: " . $ex->getMessage());
         }
 
         DB::table('gerber_files')->where('id', $id)->update([
