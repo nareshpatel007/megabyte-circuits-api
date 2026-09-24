@@ -76,8 +76,15 @@ class JlcpcbController extends Controller
                     'code' => 200,
                     'message' => $result['message'],
                     'fileKey' => $result['fileKey'] ?? null,
+                    'currency' => $result['currency'] ?? 'INR',
+                    'exchange_rate' => $result['exchange_rate'] ?? null,
+                    'quantity' => $result['quantity'] ?? null,
+                    'layers' => $result['layers'] ?? null,
+                    'base_usd' => $result['base_usd'] ?? null,
+                    'base_inr' => $result['base_inr'] ?? null,
+                    'dates' => $result['dates'] ?? [],
                     'quotation' => $result['quotation'] ?? null,
-                    'data' => $result['data']
+                    'data' => $result['data'] ?? null
                 ], 200);
             }
 

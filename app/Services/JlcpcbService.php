@@ -354,14 +354,102 @@ class JlcpcbService
                 $code = $result['code'] ?? null;
                 if ($code === 200) {
                     $rawResultData = $result['data'] ?? [];
-                    
-                    // Normalize price options
-                    $totalPrice = 0;
-                    $currency = 'USD';
+
+                    // 1. Determine base USD PCB manufacturing cost (excluding shipping)
+                    $baseUsd = 0.0;
                     if (is_array($rawResultData)) {
-                        $totalPrice = floatval($rawResultData['totalCost'] ?? ($rawResultData['pcbPrice'] ?? ($rawResultData['cost'] ?? 0)));
-                        $currency = $rawResultData['currency'] ?? 'USD';
+                        if (isset($rawResultData['priceWithoutFreight']) && floatval($rawResultData['priceWithoutFreight']) > 0) {
+                            $baseUsd = floatval($rawResultData['priceWithoutFreight']);
+                        } elseif (isset($rawResultData['pcbCostInfo']['totalFee']) && floatval($rawResultData['pcbCostInfo']['totalFee']) > 0) {
+                            $baseUsd = floatval($rawResultData['pcbCostInfo']['totalFee']);
+                        } elseif (isset($rawResultData['totalCost']) && floatval($rawResultData['totalCost']) > 0) {
+                            $baseUsd = floatval($rawResultData['totalCost']);
+                        } elseif (isset($rawResultData['pcbPrice']) && floatval($rawResultData['pcbPrice']) > 0) {
+                            $baseUsd = floatval($rawResultData['pcbPrice']);
+                        }
                     }
+
+                    if ($baseUsd <= 0.0) {
+                        return [
+                            'success' => false,
+                            'source' => 'jlcpcb',
+                            'code' => 400,
+                            'message' => 'Unable to calculate JLCPCB quotation. Invalid PCB base price returned.',
+                            'data' => $rawResultData
+                        ];
+                    }
+
+                    // 2. Perform USD -> INR Currency Conversion via CurrencyConversionService
+                    $exchangeRate = CurrencyConversionService::getUsdToInrRate();
+                    $baseInr = round($baseUsd * $exchangeRate, 2);
+
+                    // 3. Process achieveDateList and map build times to working calendar dates
+                    $rawAchieveList = [];
+                    if (!empty($rawResultData['achieveDateList']) && is_array($rawResultData['achieveDateList'])) {
+                        $rawAchieveList = $rawResultData['achieveDateList'];
+                    } elseif (!empty($rawResultData['achieveDate'])) {
+                        $rawAchieveList = [
+                            [
+                                'achieveName' => 'Normal',
+                                'achieveDate' => (string)$rawResultData['achieveDate'],
+                                'achieveChecked' => 'checked',
+                                'achievePrice' => 0
+                            ]
+                        ];
+                    } else {
+                        $rawAchieveList = [
+                            [
+                                'achieveName' => 'Normal',
+                                'achieveDate' => (string)($payload['achieveDate'] ?? 48),
+                                'achieveChecked' => 'checked',
+                                'achievePrice' => 0
+                            ]
+                        ];
+                    }
+
+                    $dates = [];
+                    $today = \Carbon\Carbon::today();
+
+                    foreach ($rawAchieveList as $opt) {
+                        $achieveHours = intval($opt['achieveDate'] ?? 48);
+                        $buildDays = (int)ceil($achieveHours / 24.0);
+                        if ($buildDays < 1) $buildDays = 1;
+
+                        // Calculate exact delivery date skipping Sundays and active holidays
+                        $targetDate = DeliveryCalendarService::addDeliveryDays($today, $buildDays);
+                        $dateStr = $targetDate->format('Y-m-d');
+                        $labelStr = $targetDate->format('j M');
+
+                        $achievePriceUsd = floatval($opt['achievePrice'] ?? 0);
+                        $pcbPriceUsd = round($baseUsd + $achievePriceUsd, 2);
+                        $pcbPriceInr = round($pcbPriceUsd * $exchangeRate, 2);
+
+                        $dates[] = [
+                            'date' => $dateStr,
+                            'label' => $labelStr,
+                            'achieve_name' => $opt['achieveName'] ?? "{$buildDays} days",
+                            'achieve_hours' => $achieveHours,
+                            'achieve_build_days' => $buildDays,
+                            'achieve_price_usd' => $achievePriceUsd,
+                            'pcb_price_usd' => $pcbPriceUsd,
+                            'pcb_price_inr' => $pcbPriceInr,
+                            'checked' => ($opt['achieveChecked'] ?? '') === 'checked',
+                            'enabled' => true
+                        ];
+                    }
+
+                    // Audit log for backend debugging
+                    Log::info("JLCPCB Quotation Normalized Successfully [{$ipStr}]", [
+                        'fileKey' => $payload['fileKey'] ?? '',
+                        'quantity' => $payload['pcbParam']['qty'] ?? 5,
+                        'layers' => $payload['pcbParam']['layer'] ?? 4,
+                        'base_usd' => $baseUsd,
+                        'exchange_rate' => $exchangeRate,
+                        'base_inr' => $baseInr,
+                        'dates_count' => count($dates),
+                        'request_client_ip' => $clientIp,
+                        'outbound_ip' => $outboundIp,
+                    ]);
 
                     return [
                         'success' => true,
@@ -369,9 +457,16 @@ class JlcpcbService
                         'code' => 200,
                         'message' => 'Quotation calculated successfully',
                         'fileKey' => $payload['fileKey'] ?? '',
+                        'currency' => 'INR',
+                        'exchange_rate' => $exchangeRate,
+                        'quantity' => $payload['pcbParam']['qty'] ?? 5,
+                        'layers' => $payload['pcbParam']['layer'] ?? 4,
+                        'base_usd' => $baseUsd,
+                        'base_inr' => $baseInr,
+                        'dates' => $dates,
                         'quotation' => [
-                            'price' => $totalPrice,
-                            'currency' => $currency,
+                            'price' => $baseInr,
+                            'currency' => 'INR',
                             'quantity' => $payload['pcbParam']['qty'] ?? 5,
                             'layers' => $payload['pcbParam']['layer'] ?? 4,
                             'delivery_time' => $payload['achieveDate'] ?? 48
