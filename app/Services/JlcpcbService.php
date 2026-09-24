@@ -186,22 +186,54 @@ class JlcpcbService
      * @throws Exception
      */
     public function calculateQuotation(array $input): array
-
     {
-        if (empty($this->accessKey)) {
-            throw new Exception("JLCPCB Access Key is not configured in environment (.env).");
+        // 1. Resolve gerber_id / gerber_file_id to retrieve stored jlcpcb_file_key from DB if not passed directly
+        if (empty($input['fileKey']) && (!empty($input['gerber_id']) || !empty($input['gerber_file_id']))) {
+            $gerberId = $input['gerber_id'] ?? $input['gerber_file_id'];
+            $gerberRecord = \Illuminate\Support\Facades\DB::table('gerber_files')->where('id', $gerberId)->first();
+            if ($gerberRecord) {
+                if (!empty($gerberRecord->jlcpcb_file_key)) {
+                    $input['fileKey'] = $gerberRecord->jlcpcb_file_key;
+                } elseif ($gerberRecord->file_path && file_exists(storage_path('app/public/' . $gerberRecord->file_path))) {
+                    try {
+                        $fullPath = storage_path('app/public/' . $gerberRecord->file_path);
+                        $uploadRes = $this->uploadGerber($fullPath, $gerberRecord->original_name);
+                        if (!empty($uploadRes['success']) && !empty($uploadRes['fileKey'])) {
+                            $input['fileKey'] = $uploadRes['fileKey'];
+                            \Illuminate\Support\Facades\DB::table('gerber_files')->where('id', $gerberId)->update([
+                                'jlcpcb_file_key' => $uploadRes['fileKey'],
+                                'jlcpcb_upload_status' => 'completed',
+                                'jlcpcb_uploaded_at' => date('Y-m-d H:i:s'),
+                                'jlcpcb_upload_error' => null
+                            ]);
+                        }
+                    } catch (Exception $e) {
+                        Log::warning("On-demand JLCPCB upload failed for Gerber ID {$gerberId}: " . $e->getMessage());
+                    }
+                }
+            }
         }
 
-        $url = "{$this->baseUrl}/overseas/openapi/pcb/calculate";
+        $endpoint = "{$this->baseUrl}/overseas/openapi/pcb/calculate";
+        $urlPath = parse_url($endpoint, PHP_URL_PATH);
 
         // Merge input with default structured parameters
         $payload = $this->buildPayload($input);
+        $calcBody = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
-        Log::info("JLCPCB Calculate Request", ['url' => $url, 'payload' => $payload]);
+        Log::info("JLCPCB Calculate Request", ['url' => $endpoint, 'payload' => $payload]);
 
-        $authHeader = (str_starts_with(strtolower($this->accessKey), 'bearer ')) 
-            ? $this->accessKey 
-            : "Bearer {$this->accessKey}";
+        // Generate JOP Authorization header if secretKey is available, else fallback to Bearer header
+        if (!empty($this->secretKey)) {
+            $authData = $this->generateJopAuthorization('POST', $urlPath, $calcBody);
+            $authHeader = $authData['authorization'];
+        } elseif (!empty($this->accessKey)) {
+            $authHeader = (str_starts_with(strtolower($this->accessKey), 'bearer ')) 
+                ? $this->accessKey 
+                : "Bearer {$this->accessKey}";
+        } else {
+            throw new Exception("JLCPCB credentials are not configured in environment.");
+        }
 
         $headers = [
             'Authorization' => $authHeader,
@@ -211,8 +243,10 @@ class JlcpcbService
 
         try {
             $response = Http::withHeaders($headers)
+                ->withOptions(['ipresolve' => CURL_IPRESOLVE_V4])
                 ->timeout(30)
-                ->post($url, $payload);
+                ->withBody($calcBody, 'application/json')
+                ->post($endpoint);
 
             $result = $response->json();
             Log::info("JLCPCB Calculate Response", ['status' => $response->status(), 'result' => $result]);
@@ -220,17 +254,37 @@ class JlcpcbService
             if (is_array($result)) {
                 $code = $result['code'] ?? null;
                 if ($code === 200) {
+                    $rawResultData = $result['data'] ?? [];
+                    
+                    // Normalize price options
+                    $totalPrice = 0;
+                    $currency = 'USD';
+                    if (is_array($rawResultData)) {
+                        $totalPrice = floatval($rawResultData['totalCost'] ?? ($rawResultData['pcbPrice'] ?? ($rawResultData['cost'] ?? 0)));
+                        $currency = $rawResultData['currency'] ?? 'USD';
+                    }
+
                     return [
                         'success' => true,
+                        'source' => 'jlcpcb',
                         'code' => 200,
                         'message' => 'Quotation calculated successfully',
-                        'data' => $result['data'] ?? []
+                        'fileKey' => $payload['fileKey'] ?? '',
+                        'quotation' => [
+                            'price' => $totalPrice,
+                            'currency' => $currency,
+                            'quantity' => $payload['pcbParam']['qty'] ?? 5,
+                            'layers' => $payload['pcbParam']['layer'] ?? 4,
+                            'delivery_time' => $payload['achieveDate'] ?? 48
+                        ],
+                        'data' => $rawResultData
                     ];
                 }
 
                 $errorMessage = $result['message'] ?? $this->getErrorMessageByCode($code);
                 return [
                     'success' => false,
+                    'source' => 'jlcpcb',
                     'code' => $code ?? $response->status(),
                     'message' => $errorMessage,
                     'data' => $result['data'] ?? null
@@ -244,6 +298,7 @@ class JlcpcbService
                 ]);
                 return [
                     'success' => false,
+                    'source' => 'jlcpcb',
                     'code' => $response->status(),
                     'message' => 'JLCPCB API HTTP Error: ' . $response->status(),
                     'raw_response' => $response->body()
@@ -252,6 +307,7 @@ class JlcpcbService
 
             return [
                 'success' => false,
+                'source' => 'jlcpcb',
                 'code' => $response->status(),
                 'message' => 'Unexpected API response format',
                 'raw_response' => $response->body()

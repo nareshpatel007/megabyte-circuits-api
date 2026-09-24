@@ -202,7 +202,8 @@ class OrderController extends Controller
                 'surface_finish', 'finish', 'legend_color', 'silkscreen',
                 'silkscreen_side', 'legend_side', 'route', 'routing',
                 'v_cut', 'fpt_program', 'second_stage', 'copper_area',
-                'tool', 'quote_number', 'p_n', 'part_number', 'ups', 'panels'
+                'tool', 'quote_number', 'p_n', 'part_number', 'ups', 'panels',
+                'jlcpcb_file_key', 'quotation_source', 'jlcpcb_price', 'jlcpcb_quote_id'
             ];
 
             $withRelations = [

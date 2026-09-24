@@ -63,7 +63,6 @@ class JlcpcbController extends Controller
      * POST /api/jlcpcb/calculate
      */
     public function calculate(Request $request)
-
     {
         try {
             $input = $request->all();
@@ -73,14 +72,18 @@ class JlcpcbController extends Controller
             if ($result['success']) {
                 return response()->json([
                     'success' => true,
+                    'source' => $result['source'] ?? 'jlcpcb',
                     'code' => 200,
                     'message' => $result['message'],
+                    'fileKey' => $result['fileKey'] ?? null,
+                    'quotation' => $result['quotation'] ?? null,
                     'data' => $result['data']
                 ], 200);
             }
 
             return response()->json([
                 'success' => false,
+                'source' => 'jlcpcb',
                 'code' => $result['code'] ?? 400,
                 'message' => $result['message'] ?? 'Failed to calculate JLCPCB quotation',
                 'data' => $result['data'] ?? null
@@ -89,6 +92,7 @@ class JlcpcbController extends Controller
         } catch (Throwable $th) {
             return response()->json([
                 'success' => false,
+                'source' => 'jlcpcb',
                 'code' => 500,
                 'message' => 'Server Error: ' . $th->getMessage()
             ], 500);

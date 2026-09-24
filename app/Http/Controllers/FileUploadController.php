@@ -273,6 +273,9 @@ class FileUploadController extends Controller
                 'url' => $file->file_url,
                 'path' => $file->file_path,
                 'size' => $file->file_size,
+                'jlcpcb_file_key' => $file->jlcpcb_file_key ?? null,
+                'jlcpcb_upload_status' => $file->jlcpcb_upload_status ?? 'pending',
+                'jlcpcb_upload_error' => $file->jlcpcb_upload_error ?? null,
                 'analysis' => $analysisData
             ], 200);
         } catch (\Exception $e) {

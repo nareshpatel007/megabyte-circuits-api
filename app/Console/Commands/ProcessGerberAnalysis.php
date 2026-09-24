@@ -101,6 +101,33 @@ class ProcessGerberAnalysis extends Command
         $frontPreviewUrl = "/api/gerber/{$id}/preview/front";
         $backPreviewUrl = "/api/gerber/{$id}/preview/back";
 
+        // Upload Gerber archive to JLCPCB Open API
+        $jlcpcbFileKey = null;
+        $jlcpcbUploadStatus = 'pending';
+        $jlcpcbUploadError = null;
+        $jlcpcbUploadedAt = null;
+
+        try {
+            /** @var \App\Services\JlcpcbService $jlcService */
+            $jlcService = app(\App\Services\JlcpcbService::class);
+            $jlcResult = $jlcService->uploadGerber($filePath, $fileNameToUpload);
+
+            if (!empty($jlcResult['success']) && !empty($jlcResult['fileKey'])) {
+                $jlcpcbFileKey = $jlcResult['fileKey'];
+                $jlcpcbUploadStatus = 'completed';
+                $jlcpcbUploadedAt = date('Y-m-d H:i:s');
+                $this->info("JLCPCB upload successful for Gerber ID {$id}. FileKey: {$jlcpcbFileKey}");
+            } else {
+                $jlcpcbUploadStatus = 'failed';
+                $jlcpcbUploadError = $jlcResult['message'] ?? 'JLCPCB upload returned failure response';
+                logger()->warning("JLCPCB upload failed for Gerber ID {$id}: " . $jlcpcbUploadError);
+            }
+        } catch (\Exception $ex) {
+            $jlcpcbUploadStatus = 'failed';
+            $jlcpcbUploadError = $ex->getMessage();
+            logger()->error("JLCPCB upload exception for Gerber ID {$id}: " . $ex->getMessage());
+        }
+
         DB::table('gerber_files')->where('id', $id)->update([
             'status' => 'completed',
             'python_project_id' => $pythonProjectId,
@@ -111,6 +138,10 @@ class ProcessGerberAnalysis extends Command
             'front_preview_url' => $previewFrontRel,
             'back_preview_url' => $previewBackRel,
             'analysis_data' => json_encode($pythonResponse),
+            'jlcpcb_file_key' => $jlcpcbFileKey,
+            'jlcpcb_upload_status' => $jlcpcbUploadStatus,
+            'jlcpcb_uploaded_at' => $jlcpcbUploadedAt,
+            'jlcpcb_upload_error' => $jlcpcbUploadError,
             'updated_at' => date('Y-m-d H:i:s')
         ]);
 
