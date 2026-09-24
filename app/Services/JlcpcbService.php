@@ -491,19 +491,69 @@ class JlcpcbService
                         'message' => 'Quotation calculated successfully',
                         'fileKey' => $payload['fileKey'] ?? '',
                         'currency' => 'INR',
-                        'exchange_rate' => $exchangeRate,
                         'quantity' => $quantity,
                         'layers' => $payload['pcbParam']['layer'] ?? 4,
+
+                        // Exchange rate & dollar conversion
+                        'dollar_conversion_rate' => $exchangeRate,
+                        'usd_to_inr_rate' => $exchangeRate,
+                        'exchange_rate' => $exchangeRate,
+
+                        // Base PCB manufacturing cost in USD & INR
+                        'base_usd' => round($baseUsd, 2),
+                        'pcb_purchase_price_usd' => round($baseUsd, 2),
+                        'international_shipping_usd' => $calcBreakdown['international_shipping_usd'],
+                        'total_usd' => $calcBreakdown['total_usd'],
+
+                        'base_inr' => $calcBreakdown['import_purchase_value'],
+                        'goods_inr' => $calcBreakdown['import_purchase_value'],
+                        'import_purchase_value' => $calcBreakdown['import_purchase_value'],
+
+                        // Import & Customs breakdown
+                        'customs_duty_percent' => $calcBreakdown['customs_duty_percent'],
+                        'customs_duty' => $calcBreakdown['customs_duty'],
+                        'customs_other_charges' => $calcBreakdown['customs_other_charges'],
+                        'sws_charges' => $calcBreakdown['sws_charges'],
+                        'import_gst_percent' => $calcBreakdown['import_gst_percent'],
+                        'import_gst_base' => $calcBreakdown['import_gst_base'],
+                        'import_gst' => $calcBreakdown['import_gst'],
+                        'local_expenses' => $calcBreakdown['local_expenses'],
+                        'domestic_freight' => $calcBreakdown['domestic_freight'],
+
+                        // Buy cost breakdown
+                        'buy_total_ex_gst' => $calcBreakdown['buy_total_ex_gst'],
+                        'buy_total_inc_gst' => $calcBreakdown['total_buy_cost'],
+                        'total_buy_cost' => $calcBreakdown['total_buy_cost'],
+                        'buy_per_unit_ex_gst' => $calcBreakdown['buy_per_unit_ex_gst'],
+                        'buy_per_unit_inc_gst' => $calcBreakdown['buy_per_unit_inc_gst'],
+
+                        // Selling price, margin & sales GST breakdown
+                        'margin_percentage' => $calcBreakdown['margin_markup_percent'],
+                        'margin_markup_percent' => $calcBreakdown['margin_markup_percent'],
+                        'margin_amount' => $calcBreakdown['margin_amount'],
+
+                        'without_gst' => $calcBreakdown['selling_price_before_gst'],
+                        'without_gst_amount' => $calcBreakdown['selling_price_before_gst'],
+                        'selling_price_before_gst' => $calcBreakdown['selling_price_before_gst'],
                         'pcb_price' => $customerBasePrice,
                         'shipping_charge' => $customerShippingInr,
                         'subtotal' => $subtotalExcludingGst,
+
+                        'celling_gst' => $calcBreakdown['sales_gst_percent'],
+                        'sales_gst_percent' => $calcBreakdown['sales_gst_percent'],
                         'gst_percentage' => $gstPct,
+                        'sales_gst_amount' => $calcBreakdown['sales_gst_amount'],
                         'gst_amount' => $gstAmount,
+
+                        'with_gst' => $calcBreakdown['final_customer_price'],
+                        'with_gst_amount' => $calcBreakdown['final_customer_price'],
                         'final_total' => $finalTotal,
-                        'base_usd' => round($baseUsd, 2),
-                        'pcb_purchase_price_usd' => round($baseUsd, 2),
-                        'api_shipping_usd' => round($apiShippingUsd, 2),
-                        'base_inr' => $customerBasePrice,
+                        'final_customer_price' => $calcBreakdown['final_customer_price'],
+
+                        'sell_per_unit_ex_gst' => $calcBreakdown['sell_per_unit_ex_gst'],
+                        'sell_per_unit_inc_gst' => $calcBreakdown['sell_per_unit_inc_gst'],
+                        'profit_per_unit' => $calcBreakdown['profit_per_unit'],
+
                         'dates' => $dates,
                         'quotation' => [
                             'price' => $customerBasePrice,
@@ -516,10 +566,23 @@ class JlcpcbService
                             'currency' => 'INR',
                             'base_usd' => round($baseUsd, 2),
                             'pcb_purchase_price_usd' => round($baseUsd, 2),
+                            'base_inr' => $calcBreakdown['import_purchase_value'],
+                            'dollar_conversion_rate' => $exchangeRate,
+                            'usd_to_inr_rate' => $exchangeRate,
+                            'without_gst' => $calcBreakdown['selling_price_before_gst'],
+                            'without_gst_amount' => $calcBreakdown['selling_price_before_gst'],
+                            'with_gst' => $calcBreakdown['final_customer_price'],
+                            'with_gst_amount' => $calcBreakdown['final_customer_price'],
+                            'margin_percentage' => $calcBreakdown['margin_markup_percent'],
+                            'margin_markup_percent' => $calcBreakdown['margin_markup_percent'],
+                            'margin_amount' => $calcBreakdown['margin_amount'],
+                            'celling_gst' => $calcBreakdown['sales_gst_percent'],
+                            'sales_gst_percent' => $calcBreakdown['sales_gst_percent'],
                             'quantity' => $quantity,
                             'layers' => $payload['pcbParam']['layer'] ?? 4,
                             'delivery_time' => $payload['achieveDate'] ?? 48
                         ],
+                        'landed_cost_breakdown' => $calcBreakdown,
                         'internal_audit' => $calcBreakdown,
                         'data' => $rawResultData,
                         'raw_response' => $result,
