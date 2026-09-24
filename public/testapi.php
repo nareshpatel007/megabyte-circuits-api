@@ -86,9 +86,10 @@ function generateSignature(string $stringToSign, string $secretKey): string
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $appId = trim($_POST['app_id'] ?? '');
-    $accessKey = trim($_POST['access_key'] ?? '');
-    $secretKey = trim($_POST['secret_key'] ?? '');
+    $appId = trim($_POST['app_id'] ?? '', " \t\n\r\0\x0B\"'");
+    $accessKey = trim($_POST['access_key'] ?? '', " \t\n\r\0\x0B\"'");
+    $secretKey = trim($_POST['secret_key'] ?? '', " \t\n\r\0\x0B\"'");
+    $metaJsonOption = $_POST['meta_json_option'] ?? 'auto';
 
     if ($appId === '' || $accessKey === '' || $secretKey === '') {
         $result = ['ok' => false, 'error' => 'App ID, Access Key and Secret Key are required.'];
@@ -115,8 +116,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $timestamp = time();
                 $nonce = generateNonce(32);
 
-                // CRITICAL: JLCPCB support confirmed this exact value.
-                $metaJson = '{}';
+                // Build Meta JSON based on non-file parameters sent in request
+                if ($metaJsonOption === 'empty') {
+                    $metaJson = '{}';
+                    $postFields = [
+                        'file' => new CURLFile(
+                            $file['tmp_name'],
+                            $file['type'] ?: 'application/octet-stream',
+                            $originalName
+                        )
+                    ];
+                } else {
+                    // Default / 'auto' / 'filename'
+                    $metaJson = json_encode(['fileName' => $originalName], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                    $postFields = [
+                        'fileName' => $originalName,
+                        'file' => new CURLFile(
+                            $file['tmp_name'],
+                            $file['type'] ?: 'application/octet-stream',
+                            $originalName
+                        )
+                    ];
+                }
 
                 $stringToSign = buildStringToSign(
                     $method,
@@ -133,17 +154,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     . 'nonce="' . $nonce . '",'
                     . 'timestamp="' . $timestamp . '",'
                     . 'signature="' . $signature . '"';
-
-                $curlFile = new CURLFile(
-                    $file['tmp_name'],
-                    $file['type'] ?: 'application/octet-stream',
-                    $originalName
-                );
-
-                $postFields = [
-                    'fileName' => $originalName,
-                    'file' => $curlFile
-                ];
 
                 $ch = curl_init($endpoint);
                 curl_setopt_array($ch, [
@@ -189,6 +199,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'nonce' => $nonce,
                     'meta_json' => $metaJson,
                     'string_to_sign' => $stringToSign,
+                    'string_to_sign_escaped' => addcslashes($stringToSign, "\n\r\t"),
                     'string_to_sign_sha256' => hash('sha256', $stringToSign),
                     'signature' => $signature,
                     'authorization' => $authorization,
@@ -210,7 +221,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     $decoded = json_decode($responseBody, true);
                     $result = [
-                        'ok' => ($httpCode >= 200 && $httpCode < 300),
+                        'ok' => ($httpCode >= 200 && $httpCode < 300 && isset($decoded['code']) && $decoded['code'] === 200),
                         'http_code' => $httpCode,
                         'body' => $responseBody,
                         'json' => $decoded,
@@ -446,11 +457,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <input id="secret_key" name="secret_key" type="password" value="" placeholder="Your JLCPCB Secret Key" required>
                     </div>
                     <div>
-                        <label>Signature Meta JSON</label>
-                        <input type="text" value="{}" readonly style="width:100%;padding:11px 12px;border:1px solid #cbd3dc;border-radius:7px;background:#f5f5f5;">
+                        <label for="meta_json_option">Signature Meta JSON Mode</label>
+                        <select id="meta_json_option" name="meta_json_option" style="width:100%;padding:11px 12px;border:1px solid #cbd3dc;border-radius:7px;background:#fff;">
+                            <option value="auto" <?= ($_POST['meta_json_option'] ?? '') === 'auto' ? 'selected' : '' ?>>Auto ({"fileName":"filename.zip"}) - Recommended</option>
+                            <option value="empty" <?= ($_POST['meta_json_option'] ?? '') === 'empty' ? 'selected' : '' ?>>Empty JSON ({}) - No non-file form fields</option>
+                        </select>
                     </div>
                 </div>
-                <p class="hint">JLCPCB support confirmed the Upload Gerber signing/meta JSON is exactly <code>{}</code>.</p>
+                <p class="hint">For file uploads, JLCPCB requires the meta JSON to match all non-file form fields sent in the request (e.g. <code>{"fileName":"filename.zip"}</code>).</p>
 
                 <label for="gerber_file">Gerber File (.zip or .rar)</label>
                 <input id="gerber_file" name="gerber_file" type="file"
@@ -467,7 +481,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 <?php if ($result['ok']): ?>
                     <div class="success">
-                        Request completed. HTTP status:
+                        Request completed successfully. HTTP status:
                         <strong><?= h($result['http_code']) ?></strong>
                     </div>
                 <?php else: ?>
@@ -494,92 +508,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <?php if ($requestDebug !== null): ?>
             <div class="card">
-                <h2>Request Debug Information</h2>
+                <h2>Request Debug & Signature Verification</h2>
 
-                <p class="hint">
-                    This is useful when comparing the request with JLCPCB's
-                    authentication documentation.
-                </p>
-
-                <h3>Server IP Information</h3>
+                <h3>Signed Parameters vs Actual Request Body</h3>
                 <table class="ip-table">
                     <tr>
-                        <th>IP Type</th>
-                        <th>Value</th>
+                        <th>Parameter</th>
+                        <th>Signed Value</th>
+                        <th>Actual HTTP Request Value</th>
                     </tr>
                     <tr>
-                        <td>Public IP Address</td>
-                        <td><?= h($requestDebug['server_ips']['server_public_ip']) ?></td>
+                        <td>HTTP Method</td>
+                        <td><?= h($requestDebug['method']) ?></td>
+                        <td><?= h($requestDebug['method']) ?></td>
                     </tr>
                     <tr>
-                        <td>Server Address (SERVER_ADDR)</td>
-                        <td><?= h($requestDebug['server_ips']['server_addr']) ?></td>
+                        <td>Request Path</td>
+                        <td><?= h($requestDebug['path']) ?></td>
+                        <td><?= h($requestDebug['path']) ?></td>
                     </tr>
                     <tr>
-                        <td>Remote Address (REMOTE_ADDR)</td>
-                        <td><?= h($requestDebug['server_ips']['remote_addr']) ?></td>
+                        <td>Timestamp</td>
+                        <td><?= h($requestDebug['timestamp']) ?></td>
+                        <td>Header: <?= h($requestDebug['timestamp']) ?></td>
                     </tr>
                     <tr>
-                        <td>Server Name</td>
-                        <td><?= h($requestDebug['server_ips']['server_name']) ?></td>
+                        <td>Nonce</td>
+                        <td><?= h($requestDebug['nonce']) ?></td>
+                        <td>Header: <?= h($requestDebug['nonce']) ?></td>
                     </tr>
                     <tr>
-                        <td>HTTP Host</td>
-                        <td><?= h($requestDebug['server_ips']['http_host']) ?></td>
+                        <td>Meta / Request Body</td>
+                        <td><code><?= h($requestDebug['meta_json']) ?></code></td>
+                        <td>Form fields: <?= h($requestDebug['meta_json']) ?></td>
                     </tr>
                     <tr>
-                        <td>Forwarded For</td>
-                        <td><?= h($requestDebug['server_ips']['forwarded_for']) ?></td>
-                    </tr>
-                    <tr>
-                        <td>Real IP (X-Real-IP)</td>
-                        <td><?= h($requestDebug['server_ips']['real_ip']) ?></td>
+                        <td>Signature Header</td>
+                        <td>Base64: <?= h($requestDebug['signature']) ?></td>
+                        <td>Authorization: JOP appid=... signature=<?= h($requestDebug['signature']) ?></td>
                     </tr>
                 </table>
 
-                <h3>Connection Information</h3>
-                <table class="ip-table">
-                    <tr>
-                        <th>Connection Detail</th>
-                        <th>Value</th>
-                    </tr>
-                    <tr>
-                        <td>Local IP (Outgoing)</td>
-                        <td><?= h($requestDebug['connection_info']['local_ip'] ?? 'Not available') ?></td>
-                    </tr>
-                    <tr>
-                        <td>Local Port</td>
-                        <td><?= h($requestDebug['connection_info']['local_port'] ?? 'Not available') ?></td>
-                    </tr>
-                    <tr>
-                        <td>JLCPCB Server IP</td>
-                        <td><?= h($requestDebug['connection_info']['primary_ip'] ?? 'Not available') ?></td>
-                    </tr>
-                    <tr>
-                        <td>JLCPCB Server Port</td>
-                        <td><?= h($requestDebug['connection_info']['primary_port'] ?? 'Not available') ?></td>
-                    </tr>
-                </table>
-
-                <h3>Endpoint</h3>
-                <pre><?= h($requestDebug['endpoint']) ?></pre>
-
-                <h3>Timestamp</h3>
-                <pre><?= h($requestDebug['timestamp']) ?></pre>
-
-                <h3>Nonce</h3>
-                <pre><?= h($requestDebug['nonce']) ?></pre>
+                <h3>Endpoint Path</h3>
+                <pre><?= h($requestDebug['path']) ?></pre>
 
                 <h3>Exact Meta JSON used for signature</h3>
                 <pre><?= h($requestDebug['meta_json']) ?></pre>
 
-                <h3>String to Sign</h3>
+                <h3>Escaped String to Sign (\n view)</h3>
+                <pre><?= h($requestDebug['string_to_sign_escaped']) ?></pre>
+
+                <h3>Exact Raw String to Sign</h3>
                 <pre><?= h($requestDebug['string_to_sign']) ?></pre>
 
-                <h3>SHA-256 of Exact String to Sign</h3>
-                <pre><?= h($requestDebug['string_to_sign_sha256'] ?? '') ?></pre>
+                <h3>SHA-256 of String to Sign</h3>
+                <pre><?= h($requestDebug['string_to_sign_sha256']) ?></pre>
 
-                <h3>Generated Signature</h3>
+                <h3>Generated Base64 Signature</h3>
                 <pre><?= h($requestDebug['signature']) ?></pre>
 
                 <h3>Authorization Header</h3>

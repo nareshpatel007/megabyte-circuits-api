@@ -245,6 +245,15 @@ class FileUploadController extends Controller
             $previewFrontRel = "/api/gerber/{$file->id}/preview/front";
             $previewBackRel = "/api/gerber/{$file->id}/preview/back";
 
+            $colors = ['green', 'purple', 'red', 'yellow', 'blue', 'white', 'black'];
+            $previewsByColor = [];
+            foreach ($colors as $c) {
+                $previewsByColor[$c] = [
+                    'front' => "/api/gerber/{$file->id}/preview/front?color={$c}",
+                    'back' => "/api/gerber/{$file->id}/preview/back?color={$c}"
+                ];
+            }
+
             return response()->json([
                 'success' => true,
                 'status' => $file->status,
@@ -255,6 +264,10 @@ class FileUploadController extends Controller
                 'layer_count' => $file->layer_count,
                 'preview_front' => $previewFrontRel,
                 'preview_back' => $previewBackRel,
+                'default_color' => 'green',
+                'available_colors' => $colors,
+                'previews_by_color' => $previewsByColor,
+                'previews' => $previewsByColor,
                 'fileName' => $file->file_name,
                 'originalName' => $file->original_name,
                 'url' => $file->file_url,
@@ -279,9 +292,32 @@ class FileUploadController extends Controller
                 return $this->renderFallbackPng($side);
             }
 
+            $color = strtolower($request->query('color', 'green'));
+            $validColors = ['green', 'purple', 'red', 'yellow', 'blue', 'white', 'black'];
+            if (!in_array($color, $validColors)) {
+                $color = 'green';
+            }
+
             $analysisData = $file->analysis_data ? json_decode($file->analysis_data, true) : [];
             $pythonUrl = config('services.python_gerber.url', env('PYTHON_GERBER_API_URL', 'http://127.0.0.1:8000'));
             
+            // First try color-specific relative path if python_project_id exists
+            if (!empty($file->python_project_id)) {
+                $colorRelPath = ($side === 'back')
+                    ? "/projects/{$file->python_project_id}/renders/pcb_bottom_2d_{$color}.png"
+                    : "/projects/{$file->python_project_id}/renders/pcb_top_2d_{$color}.png";
+                
+                $targetUrl = rtrim($pythonUrl, '/') . '/' . ltrim($colorRelPath, '/');
+                $imgRes = Http::timeout(10)->get($targetUrl);
+
+                if ($imgRes->successful()) {
+                    return response($imgRes->body(), 200)
+                        ->header('Content-Type', 'image/png')
+                        ->header('Cache-Control', 'public, max-age=86400');
+                }
+            }
+
+            // Fallback to legacy/default preview paths
             $relPath = null;
             if ($side === 'front') {
                 $relPath = $file->front_preview_url ?? null;
@@ -289,7 +325,6 @@ class FileUploadController extends Controller
                 $relPath = $file->back_preview_url ?? null;
             }
 
-            // Fallback checks if relPath is empty or recursive api/gerber route
             if (!$relPath || str_contains($relPath, '/api/gerber/')) {
                 if ($side === 'front') {
                     $relPath = $analysisData['preview_front'] ?? ($analysisData['pcb_previews']['preview_top_2d'] ?? null);
@@ -305,12 +340,10 @@ class FileUploadController extends Controller
             }
 
             if ($relPath) {
-                // Normalize path: extract relative /projects/... if full system path was given
                 if (preg_match('#/projects/.*#', $relPath, $matches)) {
                     $relPath = $matches[0];
                 }
 
-                // Fetch from Python service
                 $targetUrl = rtrim($pythonUrl, '/') . '/' . ltrim($relPath, '/');
                 $imgRes = Http::timeout(15)->get($targetUrl);
 
@@ -320,7 +353,6 @@ class FileUploadController extends Controller
                         ->header('Cache-Control', 'public, max-age=86400');
                 }
 
-                // If back preview was requested and failed, try falling back to front preview
                 if ($side === 'back' && !empty($file->python_project_id)) {
                     $frontRel = "/projects/{$file->python_project_id}/renders/pcb_top_2d.png";
                     $frontUrl = rtrim($pythonUrl, '/') . '/' . ltrim($frontRel, '/');

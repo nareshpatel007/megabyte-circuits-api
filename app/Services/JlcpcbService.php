@@ -11,12 +11,14 @@ class JlcpcbService
     protected string $baseUrl;
     protected ?string $appId;
     protected ?string $accessKey;
+    protected ?string $secretKey;
 
     public function __construct()
     {
         $this->baseUrl = rtrim(CredentialService::get('jlcpcb', 'JLCPCB_BASE_URL', 'JLCPCB_BASE_URL', config('services.jlcpcb.base_url', 'https://open.jlcpcb.com')), '/');
         $this->appId = CredentialService::get('jlcpcb', 'JLCPCB_APP_ID', 'JLCPCB_APP_ID', config('services.jlcpcb.app_id'));
         $this->accessKey = CredentialService::get('jlcpcb', 'JLCPCB_ACCESS_KEY', 'JLCPCB_ACCESS_KEY', config('services.jlcpcb.access_key'));
+        $this->secretKey = CredentialService::get('jlcpcb', 'JLCPCB_SECRET_KEY', 'JLCPCB_SECRET_KEY', config('services.jlcpcb.secret_key'));
     }
 
     /**
@@ -30,9 +32,13 @@ class JlcpcbService
         ?string $accessKey = null,
         ?string $secretKey = null
     ): array {
-        $appId = $appId ?? config('services.jlcpcb.app_id');
-        $accessKey = $accessKey ?? config('services.jlcpcb.access_key');
-        $secretKey = $secretKey ?? config('services.jlcpcb.secret_key');
+        $appId = trim((string)($appId ?? $this->appId ?? config('services.jlcpcb.app_id')), " \t\n\r\0\x0B\"'");
+        $accessKey = trim((string)($accessKey ?? $this->accessKey ?? config('services.jlcpcb.access_key')), " \t\n\r\0\x0B\"'");
+        $secretKey = trim((string)($secretKey ?? $this->secretKey ?? config('services.jlcpcb.secret_key')), " \t\n\r\0\x0B\"'");
+
+        if (empty($secretKey)) {
+            throw new Exception("JLCPCB Secret Key is missing or empty.");
+        }
 
         $timestamp = time();
         
@@ -104,7 +110,12 @@ class JlcpcbService
             throw new Exception("Invalid file provided for Gerber upload.");
         }
 
-        $metaJson = $metaJsonOverride ?: json_encode(['fileName' => $originalName], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        // Meta JSON MUST represent all non-file fields sent in the request
+        $metaJson = $metaJsonOverride !== null
+            ? $metaJsonOverride
+            : (!empty($originalName)
+                ? json_encode(['fileName' => $originalName], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+                : '{}');
 
         $authData = $this->generateJopAuthorization(
             'POST',

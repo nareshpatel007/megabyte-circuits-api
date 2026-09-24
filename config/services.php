@@ -61,6 +61,7 @@ return [
     'jlcpcb' => [
         'app_id' => env('JLCPCB_APP_ID'),
         'access_key' => env('JLCPCB_ACCESS_KEY'),
+        'secret_key' => env('JLCPCB_SECRET_KEY'),
         'base_url' => env('JLCPCB_BASE_URL', 'https://open.jlcpcb.com'),
     ],
 ];
