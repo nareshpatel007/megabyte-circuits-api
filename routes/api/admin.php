@@ -169,6 +169,17 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::post('email-templates/{id}/preview', [\App\Http\Controllers\Admin\EmailTemplateController::class, 'preview']);
         Route::post('email-templates/{id}/test', [\App\Http\Controllers\Admin\EmailTemplateController::class, 'testEmail']);
         Route::post('email-templates/{id}/send-now', [\App\Http\Controllers\Admin\EmailTemplateController::class, 'sendNow']);
+
+        // Email Logs Management
+        Route::get('email-logs/statistics', [\App\Http\Controllers\Admin\EmailLogController::class, 'statistics']);
+        Route::get('email-logs/settings', [\App\Http\Controllers\Admin\EmailLogController::class, 'getSettings']);
+        Route::post('email-logs/settings', [\App\Http\Controllers\Admin\EmailLogController::class, 'updateSettings']);
+        Route::post('email-logs/cleanup', [\App\Http\Controllers\Admin\EmailLogController::class, 'cleanup']);
+        Route::post('email-logs/bulk-delete', [\App\Http\Controllers\Admin\EmailLogController::class, 'bulkDelete']);
+        Route::get('email-logs/export', [\App\Http\Controllers\Admin\EmailLogController::class, 'export']);
+        Route::get('email-logs', [\App\Http\Controllers\Admin\EmailLogController::class, 'index']);
+        Route::get('email-logs/{id}', [\App\Http\Controllers\Admin\EmailLogController::class, 'show']);
+        Route::delete('email-logs/{id}', [\App\Http\Controllers\Admin\EmailLogController::class, 'destroy']);
     });
 });
 

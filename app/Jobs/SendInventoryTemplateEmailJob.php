@@ -63,39 +63,52 @@ class SendInventoryTemplateEmailJob implements ShouldQueue
         $fromEmail = $rendered['from_email'] ?? CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', config('mail.from.address'));
         $fromName  = $rendered['from_name'] ?? CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('mail.from.name'));
 
+        // Check if email logging is enabled
+        $loggingEnabled = filter_var(CredentialService::get('email_logs', 'logging_enabled', 'EMAIL_LOGGING_ENABLED', '1'), FILTER_VALIDATE_BOOLEAN);
+
         // 1. Check if template exists & active
         if (!$rendered['success'] || !($rendered['is_active'] ?? false)) {
             $skippedMsg = $rendered['message'] ?? "Email skipped: template '{$this->templateKey}' is inactive.";
             Log::info("SendInventoryTemplateEmailJob: {$skippedMsg}");
-            EmailLog::create([
-                'template_key'      => $this->templateKey,
-                'inventory_item_id' => $this->inventoryItemId,
-                'from_email'        => $fromEmail,
-                'from_name'         => $fromName,
-                'to'                => $toEmail ?? 'N/A',
-                'cc'                => implode(', ', $rendered['cc'] ?? []),
-                'bcc'               => implode(', ', $rendered['bcc'] ?? []),
-                'subject'           => $rendered['subject'] ?? 'Inventory Alert',
-                'status'            => 'skipped',
-                'error_message'     => $skippedMsg,
-            ]);
+            if ($loggingEnabled) {
+                EmailLog::create([
+                    'template_key'      => $this->templateKey,
+                    'email_type'        => 'Inventory Alert',
+                    'inventory_item_id' => $this->inventoryItemId,
+                    'from_email'        => $fromEmail,
+                    'from_name'         => $fromName,
+                    'to'                => $toEmail ?? 'N/A',
+                    'cc'                => implode(', ', $rendered['cc'] ?? []),
+                    'bcc'               => implode(', ', $rendered['bcc'] ?? []),
+                    'subject'           => $rendered['subject'] ?? 'Inventory Alert',
+                    'body'              => $rendered['body'] ?? null,
+                    'status'            => 'skipped',
+                    'error_message'     => $skippedMsg,
+                    'provider'          => 'smtp_global',
+                ]);
+            }
             return;
         }
 
         // 2. Validate recipient email
         if (empty($toEmail) || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
-            EmailLog::create([
-                'template_key'      => $this->templateKey,
-                'inventory_item_id' => $this->inventoryItemId,
-                'from_email'        => $fromEmail,
-                'from_name'         => $fromName,
-                'to'                => $toEmail ?? 'N/A',
-                'cc'                => implode(', ', $rendered['cc'] ?? []),
-                'bcc'               => implode(', ', $rendered['bcc'] ?? []),
-                'subject'           => $rendered['subject'],
-                'status'            => 'skipped',
-                'error_message'     => 'No valid recipient email address configured for inventory notifications',
-            ]);
+            if ($loggingEnabled) {
+                EmailLog::create([
+                    'template_key'      => $this->templateKey,
+                    'email_type'        => 'Inventory Alert',
+                    'inventory_item_id' => $this->inventoryItemId,
+                    'from_email'        => $fromEmail,
+                    'from_name'         => $fromName,
+                    'to'                => $toEmail ?? 'N/A',
+                    'cc'                => implode(', ', $rendered['cc'] ?? []),
+                    'bcc'               => implode(', ', $rendered['bcc'] ?? []),
+                    'subject'           => $rendered['subject'],
+                    'body'              => $rendered['body'] ?? null,
+                    'status'            => 'skipped',
+                    'error_message'     => 'No valid recipient email address configured for inventory notifications',
+                    'provider'          => 'smtp_global',
+                ]);
+            }
             return;
         }
 
@@ -124,33 +137,44 @@ class SendInventoryTemplateEmailJob implements ShouldQueue
                 }
             });
 
-            EmailLog::create([
-                'template_key'      => $this->templateKey,
-                'inventory_item_id' => $this->inventoryItemId,
-                'from_email'        => $fromEmail,
-                'from_name'         => $fromName,
-                'to'                => $toEmail,
-                'cc'                => implode(', ', $rendered['cc']),
-                'bcc'               => implode(', ', $rendered['bcc']),
-                'subject'           => $rendered['subject'],
-                'status'            => 'sent',
-                'sent_at'           => Carbon::now(),
-            ]);
+            if ($loggingEnabled) {
+                EmailLog::create([
+                    'template_key'      => $this->templateKey,
+                    'email_type'        => 'Inventory Alert',
+                    'inventory_item_id' => $this->inventoryItemId,
+                    'from_email'        => $fromEmail,
+                    'from_name'         => $fromName,
+                    'to'                => $toEmail,
+                    'cc'                => implode(', ', $rendered['cc']),
+                    'bcc'               => implode(', ', $rendered['bcc']),
+                    'subject'           => $rendered['subject'],
+                    'body'              => $rendered['body'] ?? null,
+                    'status'            => 'sent',
+                    'provider'          => 'smtp_global',
+                    'sent_at'           => Carbon::now(),
+                ]);
+            }
 
             Log::info("SendInventoryTemplateEmailJob: Email '{$this->templateKey}' successfully sent to '{$toEmail}' from '{$fromName} <{$fromEmail}>' for Inventory Item #{$this->inventoryItemId}.");
         } catch (\Throwable $th) {
-            EmailLog::create([
-                'template_key'      => $this->templateKey,
-                'inventory_item_id' => $this->inventoryItemId,
-                'from_email'        => $fromEmail,
-                'from_name'         => $fromName,
-                'to'                => $toEmail,
-                'cc'                => implode(', ', $rendered['cc']),
-                'bcc'               => implode(', ', $rendered['bcc']),
-                'subject'           => $rendered['subject'],
-                'status'            => 'failed',
-                'error_message'     => $th->getMessage(),
-            ]);
+            if ($loggingEnabled) {
+                EmailLog::create([
+                    'template_key'      => $this->templateKey,
+                    'email_type'        => 'Inventory Alert',
+                    'inventory_item_id' => $this->inventoryItemId,
+                    'from_email'        => $fromEmail,
+                    'from_name'         => $fromName,
+                    'to'                => $toEmail,
+                    'cc'                => implode(', ', $rendered['cc']),
+                    'bcc'               => implode(', ', $rendered['bcc']),
+                    'subject'           => $rendered['subject'],
+                    'body'              => $rendered['body'] ?? null,
+                    'status'            => 'failed',
+                    'provider'          => 'smtp_global',
+                    'error_message'     => $th->getMessage(),
+                    'failed_at'         => Carbon::now(),
+                ]);
+            }
 
             Log::error("SendInventoryTemplateEmailJob: Email '{$this->templateKey}' failed to send to '{$toEmail}': " . $th->getMessage());
 
