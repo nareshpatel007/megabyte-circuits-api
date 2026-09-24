@@ -23,6 +23,10 @@ class VerifyAdminToken
             }
         }
 
+        if (!$token) {
+            $token = $request->query('token') ?: $request->query('admin_token') ?: $request->query('api_token');
+        }
+
         // If no token at all, reject
         if (!$token) {
             return response()->json([
