@@ -36,8 +36,14 @@ class JlcpcbService
         $accessKey = trim((string)($accessKey ?? $this->accessKey ?? config('services.jlcpcb.access_key')), " \t\n\r\0\x0B\"'");
         $secretKey = trim((string)($secretKey ?? $this->secretKey ?? config('services.jlcpcb.secret_key')), " \t\n\r\0\x0B\"'");
 
+        if (empty($appId)) {
+            throw new Exception("JLCPCB App ID (JLCPCB_APP_ID) is missing or empty in environment configuration.");
+        }
+        if (empty($accessKey)) {
+            throw new Exception("JLCPCB Access Key (JLCPCB_ACCESS_KEY) is missing or empty in environment configuration.");
+        }
         if (empty($secretKey)) {
-            throw new Exception("JLCPCB Secret Key is missing or empty.");
+            throw new Exception("JLCPCB Secret Key (JLCPCB_SECRET_KEY) is missing or empty in environment configuration.");
         }
 
         $timestamp = time();
@@ -128,24 +134,60 @@ class JlcpcbService
         $ipStr = $this->getLogIpString();
 
         try {
-            $response = Http::withHeaders([
-                'Authorization' => $authData['authorization'],
-                'Accept' => 'application/json',
-            ])
-            ->withOptions([
-                'ipresolve' => CURL_IPRESOLVE_V4
-            ])
-            ->timeout(180)
-            ->attach('file', fopen($filePath, 'r'), $originalName)
-            ->post($endpoint, [
-                'fileName' => $originalName
+            $curlFile = new \CURLFile(
+                $filePath,
+                mime_content_type($filePath) ?: 'application/octet-stream',
+                $originalName
+            );
+
+            $postFields = [
+                'fileName' => $originalName,
+                'file' => $curlFile
+            ];
+
+            $ch = curl_init($endpoint);
+            curl_setopt_array($ch, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => $postFields,
+                CURLOPT_HTTPHEADER => [
+                    'Authorization: ' . $authData['authorization'],
+                    'Accept: application/json'
+                ],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HEADER => true,
+                CURLOPT_CONNECTTIMEOUT => 30,
+                CURLOPT_TIMEOUT => 180,
+                CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
+                CURLOPT_SSL_VERIFYPEER => true
             ]);
 
-            $result = $response->json();
+            $rawUploadResponse = curl_exec($ch);
+            $uploadError = curl_error($ch);
+            $uploadErrno = curl_errno($ch);
+            $uploadHttpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $uploadHeaderSize = (int)curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+            curl_close($ch);
+
+            if ($rawUploadResponse === false) {
+                Log::error("JLCPCB Upload Gerber cURL Error [{$ipStr}]: ({$uploadErrno}) {$uploadError}");
+                return [
+                    'success' => false,
+                    'code' => 500,
+                    'message' => "cURL upload error ({$uploadErrno}): {$uploadError}",
+                    'data' => null,
+                    'request_client_ip' => $clientIp,
+                    'outbound_ip' => $outboundIp,
+                    'auth_debug' => $authData
+                ];
+            }
+
+            $uploadResponseBody = substr($rawUploadResponse, $uploadHeaderSize);
+            $result = json_decode($uploadResponseBody, true);
+
             Log::info("JLCPCB Upload Gerber Response [{$ipStr}]", [
                 'request_client_ip' => $clientIp,
                 'outbound_ip' => $outboundIp,
-                'status' => $response->status(),
+                'status' => $uploadHttpCode,
                 'result' => $result
             ]);
 
@@ -167,7 +209,7 @@ class JlcpcbService
                 $errorMessage = $result['message'] ?? $this->getErrorMessageByCode($code);
                 return [
                     'success' => false,
-                    'code' => $code ?? $response->status(),
+                    'code' => $code ?? $uploadHttpCode,
                     'message' => $errorMessage,
                     'data' => null,
                     'request_client_ip' => $clientIp,
@@ -178,9 +220,9 @@ class JlcpcbService
 
             return [
                 'success' => false,
-                'code' => $response->status(),
+                'code' => $uploadHttpCode,
                 'message' => 'Unexpected API response format during Gerber upload.',
-                'raw_response' => $response->body(),
+                'raw_response' => $uploadResponseBody,
                 'request_client_ip' => $clientIp,
                 'outbound_ip' => $outboundIp,
                 'auth_debug' => $authData
@@ -262,24 +304,49 @@ class JlcpcbService
             throw new Exception("JLCPCB credentials are not configured in environment.");
         }
 
-        $headers = [
-            'Authorization' => $authHeader,
-            'Content-Type' => 'application/json',
-            'Accept' => 'application/json',
-        ];
-
         try {
-            $response = Http::withHeaders($headers)
-                ->withOptions(['ipresolve' => CURL_IPRESOLVE_V4])
-                ->timeout(30)
-                ->withBody($calcBody, 'application/json')
-                ->post($endpoint);
+            $ch = curl_init($endpoint);
+            curl_setopt_array($ch, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => $calcBody,
+                CURLOPT_HTTPHEADER => [
+                    'Authorization: ' . $authHeader,
+                    'Content-Type: application/json',
+                    'Accept: application/json'
+                ],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HEADER => true,
+                CURLOPT_CONNECTTIMEOUT => 30,
+                CURLOPT_TIMEOUT => 60,
+                CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
+                CURLOPT_SSL_VERIFYPEER => true
+            ]);
 
-            $result = $response->json();
+            $rawCalcResponse = curl_exec($ch);
+            $calcError = curl_error($ch);
+            $calcErrno = curl_errno($ch);
+            $calcHttpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $calcHeaderSize = (int)curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+            curl_close($ch);
+
+            if ($rawCalcResponse === false) {
+                Log::error("JLCPCB Calculate cURL Error [{$ipStr}]: ({$calcErrno}) {$calcError}");
+                return [
+                    'success' => false,
+                    'source' => 'jlcpcb',
+                    'code' => 500,
+                    'message' => "cURL calculate error ({$calcErrno}): {$calcError}",
+                    'raw_response' => null
+                ];
+            }
+
+            $calcResponseBody = substr($rawCalcResponse, $calcHeaderSize);
+            $result = json_decode($calcResponseBody, true);
+
             Log::info("JLCPCB Calculate Response [{$ipStr}]", [
                 'request_client_ip' => $clientIp,
                 'outbound_ip' => $outboundIp,
-                'status' => $response->status(),
+                'status' => $calcHttpCode,
                 'result' => $result
             ]);
 
@@ -317,32 +384,32 @@ class JlcpcbService
                 return [
                     'success' => false,
                     'source' => 'jlcpcb',
-                    'code' => $code ?? $response->status(),
+                    'code' => $code ?? $calcHttpCode,
                     'message' => $errorMessage,
                     'data' => $result['data'] ?? null
                 ];
             }
 
-            if ($response->failed()) {
+            if ($calcHttpCode < 200 || $calcHttpCode >= 300) {
                 Log::error("JLCPCB API HTTP Failure", [
-                    'status' => $response->status(),
-                    'body' => $response->body()
+                    'status' => $calcHttpCode,
+                    'body' => $calcResponseBody
                 ]);
                 return [
                     'success' => false,
                     'source' => 'jlcpcb',
-                    'code' => $response->status(),
-                    'message' => 'JLCPCB API HTTP Error: ' . $response->status(),
-                    'raw_response' => $response->body()
+                    'code' => $calcHttpCode,
+                    'message' => 'JLCPCB API HTTP Error: ' . $calcHttpCode,
+                    'raw_response' => $calcResponseBody
                 ];
             }
 
             return [
                 'success' => false,
                 'source' => 'jlcpcb',
-                'code' => $response->status(),
+                'code' => $calcHttpCode,
                 'message' => 'Unexpected API response format',
-                'raw_response' => $response->body()
+                'raw_response' => $calcResponseBody
             ];
 
         } catch (Exception $e) {
@@ -521,12 +588,15 @@ class JlcpcbService
     }
 
     /**
-     * Get outbound public IP address of this server (cached 30 min)
+     * Get outbound public IP address of this server (cached 60 seconds)
      */
-    public function getOutboundPublicIp(): ?string
+    public function getOutboundPublicIp(bool $forceRefresh = false): ?string
     {
         try {
-            return \Illuminate\Support\Facades\Cache::remember('jlcpcb_outbound_ip', 1800, function () {
+            if ($forceRefresh) {
+                \Illuminate\Support\Facades\Cache::forget('jlcpcb_outbound_ip');
+            }
+            return \Illuminate\Support\Facades\Cache::remember('jlcpcb_outbound_ip', 60, function () {
                 $res = Http::timeout(3)->withOptions(['ipresolve' => CURL_IPRESOLVE_V4])->get('https://api.ipify.org?format=json');
                 if ($res->successful()) {
                     return $res->json('ip');
