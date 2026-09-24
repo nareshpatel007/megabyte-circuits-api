@@ -84,7 +84,8 @@ class JlcpcbController extends Controller
                     'base_inr' => $result['base_inr'] ?? null,
                     'dates' => $result['dates'] ?? [],
                     'quotation' => $result['quotation'] ?? null,
-                    'data' => $result['data'] ?? null
+                    'data' => $result['data'] ?? null,
+                    'raw_response' => $result['raw_response'] ?? null
                 ], 200);
             }
 
@@ -93,7 +94,8 @@ class JlcpcbController extends Controller
                 'source' => 'jlcpcb',
                 'code' => $result['code'] ?? 400,
                 'message' => $result['message'] ?? 'Failed to calculate JLCPCB quotation',
-                'data' => $result['data'] ?? null
+                'data' => $result['data'] ?? null,
+                'raw_response' => $result['raw_response'] ?? null
             ], 400);
 
         } catch (Throwable $th) {

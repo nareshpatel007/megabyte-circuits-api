@@ -375,7 +375,8 @@ class JlcpcbService
                             'source' => 'jlcpcb',
                             'code' => 400,
                             'message' => 'Unable to calculate JLCPCB quotation. Invalid PCB base price returned.',
-                            'data' => $rawResultData
+                            'data' => $rawResultData,
+                            'raw_response' => $result
                         ];
                     }
 
@@ -471,7 +472,8 @@ class JlcpcbService
                             'layers' => $payload['pcbParam']['layer'] ?? 4,
                             'delivery_time' => $payload['achieveDate'] ?? 48
                         ],
-                        'data' => $rawResultData
+                        'data' => $rawResultData,
+                        'raw_response' => $result
                     ];
                 }
 
@@ -481,7 +483,8 @@ class JlcpcbService
                     'source' => 'jlcpcb',
                     'code' => $code ?? $calcHttpCode,
                     'message' => $errorMessage,
-                    'data' => $result['data'] ?? null
+                    'data' => $result['data'] ?? null,
+                    'raw_response' => $result
                 ];
             }
 

@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PCB Buy & Sell Calculator — Megabyte Circuit Systems</title>
+<style>
+:root{
+  --bg:#f3f6fa;--card:#fff;--text:#172033;--muted:#667085;--line:#d9e1ea;
+  --blue:#2563eb;--blue-dark:#1d4ed8;--green:#15803d;--green-bg:#ecfdf3;
+  --orange:#c2410c;--orange-bg:#fff7ed;--red:#dc2626;--slate:#475569;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Segoe UI,Arial,sans-serif}
+.app{max-width:1320px;margin:auto;padding:22px}
+header{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-bottom:18px}
+h1{margin:0;font-size:28px;letter-spacing:-.3px}
+.subtitle{color:var(--muted);font-size:13px;margin-top:5px}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+button{height:40px;border-radius:9px;padding:0 15px;font-weight:800;cursor:pointer}
+.primary{border:0;background:var(--blue);color:white}.primary:hover{background:var(--blue-dark)}
+.secondary{background:white;color:var(--text);border:1px solid var(--line)}
+.layout{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:19px;box-shadow:0 5px 20px rgba(16,24,40,.045)}
+.card h2{font-size:18px;margin:0 0 15px}
+.section-title{font-size:14px;font-weight:900;color:#344054;margin:19px 0 9px;padding-top:15px;border-top:1px solid var(--line)}
+.field{display:grid;grid-template-columns:1fr 190px;gap:12px;align-items:center;margin:8px 0}
+label{font-size:13px;font-weight:750;color:var(--slate)}
+input,select{width:100%;height:38px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--text);padding:0 10px;font:600 14px Segoe UI,Arial}
+input{text-align:right}select{cursor:pointer}
+.results{margin-top:3px}
+.row{display:flex;justify-content:space-between;gap:12px;align-items:center;min-height:42px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;background:#fafbfc;margin:6px 0}
+.row .label{font-size:13px;color:var(--slate);font-weight:750}
+.row .value{font-size:14px;font-weight:850;text-align:right}
+.total{background:var(--green-bg);border-color:#86efac}.total .value{color:var(--green);font-size:17px}
+.orange{background:var(--orange-bg);border-color:#fed7aa}.orange .value{color:var(--orange)}
+.blue{background:#eff6ff;border-color:#bfdbfe}.blue .value{color:var(--blue)}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:18px 0}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:12px;padding:13px}
+.kpi small{display:block;color:var(--muted);font-size:11px;font-weight:800;text-transform:uppercase}
+.kpi strong{display:block;font-size:19px;margin-top:5px}
+.quote{margin-top:18px}
+.quote table{width:100%;border-collapse:collapse;font-size:13px}
+.quote th,.quote td{padding:10px;border-bottom:1px solid var(--line);text-align:right}
+.quote th:first-child,.quote td:first-child{text-align:left}
+.quote th{font-size:12px;color:var(--muted)}
+.note{font-size:11px;line-height:1.5;color:var(--muted);margin-top:11px}
+.status{font-size:12px;color:var(--muted);margin-top:8px;min-height:17px}
+.error{color:var(--red);font-weight:700}
+.print-only{display:none}
+@media print{
+  body{background:white}.app{max-width:none;padding:0}.actions,.status{display:none}
+  .card{box-shadow:none}.layout{grid-template-columns:1fr 1fr}.kpis{grid-template-columns:repeat(5,1fr)}
+  .print-only{display:block}
+}
+@media(max-width:950px){.layout{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:600px){.app{padding:12px}.field{grid-template-columns:1fr 145px}.kpis{grid-template-columns:1fr 1fr}h1{font-size:23px}}
+</style>
+</head>
+<body>
+<div class="app">
+
+<header>
+  <div>
+    <h1>PCB Buy & Sell Calculator</h1>
+    <div class="subtitle">Megabyte Circuit Systems • Purchase → Landed Cost → Margin → Selling Price → GST → Invoice</div>
+  </div>
+  <div class="actions">
+    <button class="secondary" onclick="window.print()">Print</button>
+    <button class="secondary" onclick="copyCustomerQuote()">Copy Customer Quote</button>
+    <button class="secondary" onclick="resetCalc()">Reset</button>
+  </div>
+</header>
+
+<div class="layout">
+
+<section class="card">
+  <h2>1. BUY / PROCUREMENT</h2>
+
+  <div class="field"><label>PCB Purchase Price (USD)</label><input id="pcb" value="75" inputmode="decimal"></div>
+  <div class="field"><label>International Shipping (USD)</label><input id="ship" value="25" inputmode="decimal"></div>
+  <div class="field"><label>USD → INR Exchange Rate</label><input id="fx" value="100" inputmode="decimal"></div>
+
+  <div class="section-title">Import & Local Charges</div>
+  <div class="field"><label>Customs Duty (%)</label><input id="dutyPct" value="30" inputmode="decimal"></div>
+  <div class="field"><label>Customs / Duty Other Charges (₹)</label><input id="otherDuty" value="0" inputmode="decimal"></div>
+  <div class="field"><label>Social Welfare Surcharge / SWS (₹)</label><input id="sws" value="0" inputmode="decimal"></div>
+  <div class="field"><label>Import GST / IGST (%)</label><select id="buyGst"><option value="0">0%</option><option value="5">5%</option><option value="12">12%</option><option value="18" selected>18%</option><option value="28">28%</option></select></div>
+  <div class="field"><label>Customs Clearing (₹)</label><input id="clearing" value="0" inputmode="decimal"></div>
+  <div class="field"><label>Bank / Forex / Payment Charges (₹)</label><input id="bank" value="0" inputmode="decimal"></div>
+  <div class="field"><label>Domestic Freight / UPS (₹)</label><input id="freight" value="1000" inputmode="decimal"></div>
+  <div class="field"><label>Other Buy Expenses (₹)</label><input id="otherBuy" value="0" inputmode="decimal"></div>
+
+  <div class="section-title">Order</div>
+  <div class="field"><label>Customer P/N</label><input id="customerPN" value="" placeholder="Enter Customer Part Number"></div>
+  <div class="field"><label>Quantity (PCB)</label><input id="qty" value="200" inputmode="decimal"></div>
+
+  <div class="note">
+    This version intentionally treats purchase GST/IGST as part of BUY cost, as requested. No ITC/credit calculation is included.
+  </div>
+</section>
+
+<section class="card">
+  <h2>2. BUY COST / SELLING PRICE</h2>
+
+  <div class="section-title">BUY Calculation</div>
+  <div class="row"><span class="label">Goods + International Shipping (INR)</span><span class="value" id="goods">₹0.00</span></div>
+  <div class="row"><span class="label">Customs Duty</span><span class="value" id="duty">₹0.00</span></div>
+  <div class="row"><span class="label">Other Duty Charges</span><span class="value" id="otherDutyV">₹0.00</span></div>
+  <div class="row"><span class="label">SWS</span><span class="value" id="swsV">₹0.00</span></div>
+  <div class="row"><span class="label">Import GST / IGST</span><span class="value" id="buyGstV">₹0.00</span></div>
+  <div class="row"><span class="label">Clearing + Bank + Freight + Other</span><span class="value" id="local">₹0.00</span></div>
+  <div class="row blue"><span class="label">BUY COST — BEFORE GST</span><span class="value" id="buyTotalEx">₹0.00</span></div>
+  <div class="row total"><span class="label">BUY COST — INCLUDING GST</span><span class="value" id="buyTotal">₹0.00</span></div>
+  <div class="row"><span class="label">BUY COST / PCB — GST EXCLUDED</span><span class="value" id="buyPerEx">₹0.000</span></div>
+  <div class="row"><span class="label">BUY COST / PCB — GST INCLUDED</span><span class="value" id="buyPer">₹0.000</span></div>
+
+  <div class="section-title">SELLING</div>
+  <div class="field"><label>Margin / Markup on Buy Cost (%)</label><input id="margin" value="25" inputmode="decimal"></div>
+  <div class="field"><label>Sales GST (%)</label><select id="sellGst"><option value="0">0%</option><option value="5">5%</option><option value="12">12%</option><option value="18" selected>18%</option><option value="28">28%</option></select></div>
+
+  <div class="row orange"><span class="label">PROFIT / MARGIN AMOUNT</span><span class="value" id="profit">₹0.00</span></div>
+  <div class="row total"><span class="label">SELLING PRICE — WITHOUT GST</span><span class="value" id="sellEx">₹0.00</span></div>
+  <div class="row"><span class="label">Output GST on Sale</span><span class="value" id="outGst">₹0.00</span></div>
+  <div class="row total"><span class="label">CUSTOMER INVOICE — WITH GST</span><span class="value" id="sellInc">₹0.00</span></div>
+  <div class="row"><span class="label">SELL / PCB — WITHOUT GST</span><span class="value" id="sellPerEx">₹0.000</span></div>
+  <div class="row"><span class="label">SELL / PCB — WITH GST</span><span class="value" id="sellPerInc">₹0.000</span></div>
+
+  <div class="status" id="status">Ready</div>
+</section>
+
+</div>
+
+<div class="kpis">
+  <div class="kpi"><small>Buy / PCB Ex GST</small><strong id="kBuyEx">₹0</strong></div>
+  <div class="kpi"><small>Buy / PCB Inc GST</small><strong id="kBuy">₹0</strong></div>
+  <div class="kpi"><small>Sell / PCB Ex GST</small><strong id="kSell">₹0</strong></div>
+  <div class="kpi"><small>Profit / PCB</small><strong id="kProfit">₹0</strong></div>
+  <div class="kpi"><small>Total Profit</small><strong id="kTotalProfit">₹0</strong></div>
+  <div class="kpi"><small>Customer Invoice</small><strong id="kInvoice">₹0</strong></div>
+</div>
+
+<section class="card quote">
+  <h2>3. QUOTATION SUMMARY</h2>
+  <table>
+    <thead>
+      <tr><th>Description</th><th>Per PCB</th><th>Total</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>BUY Cost — GST Excluded</td><td id="qBuyPerEx">₹0.000</td><td id="qBuyEx">₹0.00</td></tr>
+      <tr><td>BUY GST / IGST</td><td id="qBuyGstPer">₹0.000</td><td id="qBuyGst">₹0.00</td></tr>
+      <tr><td>BUY Cost — GST Included</td><td id="qBuyPer">₹0.000</td><td id="qBuy">₹0.00</td></tr>
+      <tr><td>Profit / Margin</td><td id="qProfitPer">₹0.000</td><td id="qProfit">₹0.00</td></tr>
+      <tr><td><b>SELL Price — Without GST</b></td><td id="qSellPer">₹0.000</td><td id="qSell">₹0.00</td></tr>
+      <tr><td>Sales GST</td><td id="qGstPer">₹0.000</td><td id="qGst">₹0.00</td></tr>
+      <tr><td><b>FINAL CUSTOMER INVOICE — WITH GST</b></td><td id="qInvoicePer">₹0.000</td><td id="qInvoice">₹0.00</td></tr>
+    </tbody>
+  </table>
+  <div class="note">
+    Commercial logic: BUY cost includes all entered purchase/import expenses and purchase GST. Margin is calculated on that total BUY cost. Sales GST is added only after the selling price is determined.
+  </div>
+</section>
+
+</div>
+
+<script>
+const fields=[
+  "pcb","ship","fx","dutyPct","otherDuty","sws","clearing","bank",
+  "freight","otherBuy","qty","margin"
+];
+
+function num(id){
+  const v=parseFloat(document.getElementById(id).value);
+  return Number.isFinite(v) ? v : 0;
+}
+
+function money(v,d=2){
+  return "₹"+Number(v||0).toLocaleString("en-IN",{
+    minimumFractionDigits:d,
+    maximumFractionDigits:d
+  });
+}
+
+function put(id,v,d=2){
+  document.getElementById(id).textContent=money(v,d);
+}
+
+function calculate(){
+  const pcb=num("pcb");
+  const ship=num("ship");
+  const fx=num("fx");
+  const dutyPct=num("dutyPct");
+  const otherDuty=num("otherDuty");
+  const sws=num("sws");
+  const clearing=num("clearing");
+  const bank=num("bank");
+  const freight=num("freight");
+  const otherBuy=num("otherBuy");
+  const qty=num("qty");
+  const marginPct=num("margin");
+
+  const buyGstPct=parseFloat(document.getElementById("buyGst").value)||0;
+  const sellGstPct=parseFloat(document.getElementById("sellGst").value)||0;
+
+  const goods=(pcb+ship)*fx;
+  const duty=goods*dutyPct/100;
+
+  /*
+    Purchase GST/IGST base follows the calculator's import-cost model:
+    goods + customs duty + SWS + other duty charges.
+  */
+  const gstBase=goods+duty+sws+otherDuty;
+  const buyGst=gstBase*buyGstPct/100;
+
+  const local=clearing+bank+freight+otherBuy;
+
+  const buyTotalEx=
+    goods+
+    duty+
+    otherDuty+
+    sws+
+    local;
+
+  const buyTotal=
+    buyTotalEx+
+    buyGst;
+
+  const q=qty>0?qty:1;
+
+  const buyPer=buyTotal/q;
+
+  const profit=buyTotal*marginPct/100;
+
+  const sellEx=buyTotal+profit;
+
+  const outputGst=sellEx*sellGstPct/100;
+
+  const sellInc=sellEx+outputGst;
+
+  const sellPerEx=sellEx/q;
+  const sellPerInc=sellInc/q;
+  const profitPer=profit/q;
+
+  put("goods",goods);
+  put("duty",duty);
+  put("otherDutyV",otherDuty);
+  put("swsV",sws);
+  put("buyGstV",buyGst);
+  put("local",local);
+  put("buyTotalEx",buyTotalEx);
+  put("buyTotal",buyTotal);
+  put("buyPerEx",buyTotalEx/q,3);
+  put("buyPer",buyPer,3);
+
+  put("profit",profit);
+  put("sellEx",sellEx);
+  put("outGst",outputGst);
+  put("sellInc",sellInc);
+  put("sellPerEx",sellPerEx,3);
+  put("sellPerInc",sellPerInc,3);
+
+  put("kBuyEx",buyTotalEx/q,3);
+  put("kBuy",buyPer,3);
+  put("kSell",sellPerEx,3);
+  put("kProfit",profitPer,3);
+  put("kTotalProfit",profit);
+  put("kInvoice",sellInc);
+
+  put("qBuyPerEx",buyTotalEx/q,3);
+  put("qBuyEx",buyTotalEx);
+  put("qBuyGstPer",buyGst/q,3);
+  put("qBuyGst",buyGst);
+  put("qBuyPer",buyPer,3);
+  put("qBuy",buyTotal);
+  put("qProfitPer",profitPer,3);
+  put("qProfit",profit);
+  put("qSellPer",sellPerEx,3);
+  put("qSell",sellEx);
+  put("qGstPer",outputGst/q,3);
+  put("qGst",outputGst);
+  put("qInvoicePer",sellPerInc,3);
+  put("qInvoice",sellInc);
+
+  const status=document.getElementById("status");
+
+  if(qty<=0){
+    status.textContent="Enter quantity greater than zero.";
+    status.className="status error";
+  }else if(marginPct<0){
+    status.textContent="Margin cannot be negative.";
+    status.className="status error";
+  }else{
+    status.textContent="Ready • All amounts are recalculated automatically.";
+    status.className="status";
+  }
+}
+
+
+function copyCustomerQuote(){
+
+  calculate();
+
+  const customerPN =
+    document.getElementById("customerPN").value.trim() || "N/A";
+
+  const qty = num("qty");
+
+  const sellPerEx = parseFloat(
+    document.getElementById("sellPerEx").textContent.replace(/[₹,]/g,"")
+  ) || 0;
+
+  const sellPerInc = parseFloat(
+    document.getElementById("sellPerInc").textContent.replace(/[₹,]/g,"")
+  ) || 0;
+
+  const sellEx = parseFloat(
+    document.getElementById("sellEx").textContent.replace(/[₹,]/g,"")
+  ) || 0;
+
+  const outGst = parseFloat(
+    document.getElementById("outGst").textContent.replace(/[₹,]/g,"")
+  ) || 0;
+
+  const sellGstPct =
+    document.getElementById("sellGst").value;
+
+  const text = [
+    "PCB QUOTATION",
+    "",
+    "Customer P/N: " + customerPN,
+    "Quantity: " + qty.toLocaleString("en-IN") + " PCB",
+    "",
+    "Selling Price / PCB: " + money(sellPerEx),
+    "GST @ " + sellGstPct + "% / PCB: " + money(outGst / (qty || 1)),
+    "Final Price / PCB: " + money(sellPerInc),
+    "",
+    "Total Value: " + money(sellEx),
+    "GST @ " + sellGstPct + "%: " + money(outGst),
+    "Total Amount Including GST: " + money(sellEx + outGst),
+    "",
+    "Validity: 7 Days"
+  ].join("\n");
+
+  navigator.clipboard.writeText(text)
+    .then(()=>alert("Customer quotation copied."))
+    .catch(()=>{
+      const ta=document.createElement("textarea");
+      ta.value=text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+      alert("Customer quotation copied.");
+    });
+}
+
+
+function resetCalc(){
+  document.getElementById("customerPN").value="";
+  document.getElementById("pcb").value="75";
+  document.getElementById("ship").value="25";
+  document.getElementById("fx").value="100";
+  document.getElementById("dutyPct").value="30";
+  document.getElementById("otherDuty").value="0";
+  document.getElementById("sws").value="0";
+  document.getElementById("buyGst").value="18";
+  document.getElementById("clearing").value="0";
+  document.getElementById("bank").value="0";
+  document.getElementById("freight").value="1000";
+  document.getElementById("otherBuy").value="0";
+  document.getElementById("qty").value="200";
+  document.getElementById("margin").value="25";
+  document.getElementById("sellGst").value="18";
+  calculate();
+}
+
+function copySummary(){
+  calculate();
+
+  const text=[
+    "PCB BUY & SELL QUOTATION",
+    "Quantity: "+num("qty")+" PCB",
+    "",
+    "BUY / PCB (GST Included): "+document.getElementById("buyPer").textContent,
+    "SELL / PCB (Without GST): "+document.getElementById("sellPerEx").textContent,
+    "Profit / PCB: "+document.getElementById("kProfit").textContent,
+    "Sales GST / PCB: "+document.getElementById("qGstPer").textContent,
+    "FINAL INVOICE / PCB (With GST): "+document.getElementById("sellPerInc").textContent,
+    "",
+    "TOTAL BUY COST: "+document.getElementById("buyTotal").textContent,
+    "TOTAL SELL VALUE WITHOUT GST: "+document.getElementById("sellEx").textContent,
+    "TOTAL PROFIT: "+document.getElementById("profit").textContent,
+    "TOTAL SALES GST: "+document.getElementById("outGst").textContent,
+    "FINAL CUSTOMER INVOICE: "+document.getElementById("sellInc").textContent
+  ].join("\n");
+
+  navigator.clipboard.writeText(text)
+    .then(()=>alert("Quotation summary copied."));
+}
+
+fields.forEach(id=>{
+  document.getElementById(id).addEventListener("input",calculate);
+  document.getElementById(id).addEventListener("keydown",e=>{
+    if(e.key==="Enter"){
+      e.preventDefault();
+      calculate();
+    }
+  });
+});
+
+document.getElementById("buyGst").addEventListener("change",calculate);
+document.getElementById("sellGst").addEventListener("change",calculate);
+
+calculate();
+</script>
+</body>
+</html>
