@@ -31,7 +31,7 @@ Route::prefix('mobile/v1')->group(function () {
 
         // Orders
         Route::get('orders', [MobileOrderController::class, 'index']);
-        Route::get('orders/{id}', [MobileOrderController::class, '  ']);
+        Route::get('orders/{id}', [MobileOrderController::class, 'show']);
         Route::get('orders/{id}/history', [MobileOrderController::class, 'getHistory']);
         Route::get('orders/{id}/notes', [MobileOrderController::class, 'getNotes']);
         Route::post('orders/{id}/notes', [MobileOrderController::class, 'addNote']);
