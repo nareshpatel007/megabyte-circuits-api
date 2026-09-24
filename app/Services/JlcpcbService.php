@@ -551,6 +551,11 @@ class JlcpcbService
 
         $pcbParam = array_merge($defaultPcbParam, $input['pcbParam'] ?? []);
 
+        // HASL (surfaceFinish = 0) is not available for 6-layer or higher PCBs on JLCPCB
+        if (isset($pcbParam['layer']) && (int)$pcbParam['layer'] >= 6 && isset($pcbParam['surfaceFinish']) && (int)$pcbParam['surfaceFinish'] === 0) {
+            $pcbParam['surfaceFinish'] = 2; // ENIG
+        }
+
         return [
             'orderType' => $input['orderType'] ?? 1, // 1 (PCB), 2 (PCB + Stencil), 3 (Stencil)
             'pcbParam' => $pcbParam,

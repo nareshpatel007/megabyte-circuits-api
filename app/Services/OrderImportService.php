@@ -1026,11 +1026,24 @@ class OrderImportService
         $layers = !empty($data['layer']) ? (string)$data['layer'] : null;
         $mask = !empty($data['mask']) ? (string)$data['mask'] : null;
 
+        $cgValue = !empty($data['c_g']) ? (string)$data['c_g'] : null;
+        if (empty($cgValue)) {
+            if ($userId) {
+                $userRecord = DB::table('users')->where('id', $userId)->first();
+                if ($userRecord && !empty($userRecord->gst_number)) {
+                    $cgValue = 'GST';
+                }
+            }
+            if (empty($cgValue)) {
+                $cgValue = 'Cash';
+            }
+        }
+
         $orderPayload = [
             'user_id'        => $userId,
             'order_number'   => $orderNumber,
             'q_no'           => !empty($data['quote_number']) ? (string)$data['quote_number'] : (!empty($data['q_no']) ? (string)$data['q_no'] : null),
-            'c_g'            => !empty($data['c_g']) ? (string)$data['c_g'] : null,
+            'c_g'            => $cgValue,
             'combo'          => !empty($data['combo']) ? (string)$data['combo'] : null,
             'layers'         => $layers,
             'mask'           => $mask,

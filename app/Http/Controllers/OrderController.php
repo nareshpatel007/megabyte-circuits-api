@@ -90,6 +90,23 @@ class OrderController extends Controller
                 $gerberFileSize = $this->formatFileSize($file->getSize());
             }
 
+            // Determine C/G status based on customer GST number
+            $customerGst = null;
+            if ($userId) {
+                $userRecord = \App\Models\PcbUser::find($userId);
+                if ($userRecord && !empty($userRecord->gst_number)) {
+                    $customerGst = trim($userRecord->gst_number);
+                }
+            }
+            if (empty($customerGst) && !empty($request->gst_number)) {
+                $customerGst = trim($request->gst_number);
+            }
+            if (empty($customerGst) && !empty($request->gstin)) {
+                $customerGst = trim($request->gstin);
+            }
+
+            $cgStatus = (!empty($customerGst) && strtolower($customerGst) !== 'null' && strtolower($customerGst) !== 'undefined') ? 'GST' : 'Cash';
+
             // Create the main compact order record
             $order = PcbOrder::create([
                 'user_id' => $userId,
@@ -98,6 +115,7 @@ class OrderController extends Controller
                 'customer_name' => $request->customer_name,
                 'user_email' => $request->user_email,
                 'user_mobile' => $request->user_mobile,
+                'c_g' => $request->c_g ?? $cgStatus,
                 'status' => 'pending',
                 'unit_price' => $request->unit_price ?? 0,
                 'order_value' => $request->order_value ?? 0,
@@ -1044,20 +1062,97 @@ class OrderController extends Controller
             $newOrder->order_number = $newOrderNumber;
             $newOrder->status = 'Pending';
             $newOrder->completed_qty = 0;
+            $newOrder->failed_qty = 0;
+            $newOrder->launch_qty = 0;
+            $newOrder->panel_qty = 0;
+            $newOrder->ups_qty = 0;
+            $newOrder->final_qty = 0;
+            $newOrder->bill_number = null;
+            $newOrder->launch_date = null;
+
+            // Resolve C/G status based on customer GST number
+            $reorderGst = null;
+            if ($originalOrder->user_id) {
+                $uRec = \App\Models\PcbUser::find($originalOrder->user_id);
+                if ($uRec && !empty($uRec->gst_number)) {
+                    $reorderGst = trim($uRec->gst_number);
+                }
+            }
+            if (!empty($reorderGst)) {
+                $newOrder->c_g = 'GST';
+            } else if (empty($originalOrder->c_g)) {
+                $newOrder->c_g = 'Cash';
+            }
+
+            // Handle custom order quantity if specified
+            $reqQty = $request->input('order_qty', $request->input('quantity'));
+            if ($reqQty !== null && is_numeric($reqQty) && (int)$reqQty > 0) {
+                $newOrder->order_qty = (int)$reqQty;
+            }
+
+            // Handle custom delivery date if specified
+            $reqDeliveryDate = $request->input('delivery_date', $request->input('deliveryDate'));
+            if (!empty($reqDeliveryDate)) {
+                $newOrder->delivery_date = $reqDeliveryDate;
+            }
+
+            // Recalculate order_value based on new order_qty if applicable
+            if ($newOrder->unit_price && (float)$newOrder->unit_price > 0) {
+                $newOrder->order_value = round((float)$newOrder->unit_price * $newOrder->order_qty, 2);
+            } elseif ($originalOrder->order_qty > 0 && (float)$originalOrder->order_value > 0) {
+                $unitCalc = (float)$originalOrder->order_value / (float)$originalOrder->order_qty;
+                $newOrder->order_value = round($unitCalc * $newOrder->order_qty, 2);
+            }
+
             $newOrder->created_at = now();
             $newOrder->updated_at = now();
             $newOrder->save();
 
-            // Replicate metadata
+            // Replicate metadata with updated quantity, delivery_date and order_value
+            $hasQtyMeta = false;
+            $hasDeliveryDateMeta = false;
+
             foreach ($originalOrder->metas as $meta) {
                 // Skip film datetime if any, or retain original specifications
                 if (in_array($meta->meta_key, ['film_datetime', 'film_date'])) {
                     continue;
                 }
+
+                $metaValue = $meta->meta_value;
+                if ($meta->meta_key === 'quantity') {
+                    $hasQtyMeta = true;
+                    $metaValue = (string) $newOrder->order_qty;
+                } elseif ($meta->meta_key === 'delivery_date') {
+                    $hasDeliveryDateMeta = true;
+                    if ($newOrder->delivery_date) {
+                        $metaValue = (string) $newOrder->delivery_date;
+                    }
+                } elseif (in_array($meta->meta_key, ['order_value', 'total_price', 'total'])) {
+                    if ($newOrder->order_value) {
+                        $metaValue = (string) $newOrder->order_value;
+                    }
+                }
+
                 PcbOrderMeta::create([
                     'pcb_order_id' => $newOrder->id,
                     'meta_key' => $meta->meta_key,
-                    'meta_value' => $meta->meta_value,
+                    'meta_value' => $metaValue,
+                ]);
+            }
+
+            if (!$hasQtyMeta && $newOrder->order_qty) {
+                PcbOrderMeta::create([
+                    'pcb_order_id' => $newOrder->id,
+                    'meta_key' => 'quantity',
+                    'meta_value' => (string) $newOrder->order_qty,
+                ]);
+            }
+
+            if (!$hasDeliveryDateMeta && $newOrder->delivery_date) {
+                PcbOrderMeta::create([
+                    'pcb_order_id' => $newOrder->id,
+                    'meta_key' => 'delivery_date',
+                    'meta_value' => (string) $newOrder->delivery_date,
                 ]);
             }
 

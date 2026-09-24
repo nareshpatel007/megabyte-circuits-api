@@ -338,6 +338,26 @@ class CheckoutController extends Controller
                 'updated_at' => date('Y-m-d H:i:s')
             ]);
 
+            // Determine C/G status based on customer GST number
+            $customerGst = null;
+            if ($userId) {
+                $userRecord = DB::table('users')->where('id', $userId)->first();
+                if ($userRecord && !empty($userRecord->gst_number)) {
+                    $customerGst = trim($userRecord->gst_number);
+                }
+            }
+            if (empty($customerGst) && !empty($input['gst_number'])) {
+                $customerGst = trim($input['gst_number']);
+            }
+            if (empty($customerGst) && !empty($input['gstin'])) {
+                $customerGst = trim($input['gstin']);
+            }
+            if (empty($customerGst) && !empty($input['gst'])) {
+                $customerGst = trim($input['gst']);
+            }
+
+            $cgStatus = (!empty($customerGst) && strtolower($customerGst) !== 'null' && strtolower($customerGst) !== 'undefined') ? 'GST' : 'Cash';
+
             // 2. Create SEPARATE Orders in pcb_orders linked STRICTLY via IDs (status_id = Pending, gerber_file_id)
             $createdOrders = [];
 
@@ -425,6 +445,7 @@ class CheckoutController extends Controller
                     'billing_address_id' => $billingAddressId,
                     'status_id' => $statusId, // Links to Pending in pcb_order_statuses
                     'gerber_file_id' => $gerberFileId, // Links to gerber_files record
+                    'c_g' => $cgStatus,
                     'unit_price' => $unitPrice,
                     'order_value' => $itemPrice,
                     'delivery_date' => $resolvedDeliveryDate,
@@ -526,6 +547,7 @@ class CheckoutController extends Controller
                         'silkscreen_tech' => $item['silkscreenTech'] ?? 'Ink-jet Printing Silkscreen',
                         'inspection_report' => $item['inspectionReport'] ?? 'No',
                         'pcb_remark' => $item['pcbRemark'] ?? '',
+                        'c_g' => $cgStatus,
                         'transaction_number' => $transactionNumber,
                         'parent_order_number' => $parentOrderNumber,
                         'preview_data' => $previewData
