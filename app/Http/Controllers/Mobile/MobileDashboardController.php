@@ -98,8 +98,8 @@ class MobileDashboardController extends Controller
                     'orderDate' => $order->created_at ? date('d M Y', strtotime($order->created_at)) : date('d M Y'),
                     'dueDate' => $dueDateStr,
                     'assignedTo' => $metaMap['assigned_to'] ?? 'Jignesh',
-                    'maskColor' => $metaMap['mask_color'] ?? 'Green',
-                    'layers' => isset($metaMap['layers']) ? (int)$metaMap['layers'] : 4,
+                    'maskColor' => $this->resolveMaskColor($order, $metaMap),
+                    'layers' => $this->resolveLayers($order, $metaMap),
                     'quantity' => $orderQty,
                     'launchQty' => $launchQty,
                     'finalQty' => $finalQty,
@@ -184,5 +184,25 @@ class MobileDashboardController extends Controller
                 'message' => $th->getMessage()
             ], 500);
         }
+    }
+
+    private function resolveLayers($order, array $metaMap): int
+    {
+        $raw = $order->layers ?? $metaMap['layers'] ?? $metaMap['layer'] ?? null;
+        if ($raw !== null && $raw !== '') {
+            if (is_numeric($raw)) {
+                return max(1, (int)$raw);
+            }
+            if (preg_match('/(\d+)/', (string)$raw, $matches)) {
+                return max(1, (int)$matches[1]);
+            }
+        }
+        return 2;
+    }
+
+    private function resolveMaskColor($order, array $metaMap): string
+    {
+        $raw = $order->mask ?? $metaMap['mask_color'] ?? $metaMap['pcb_color'] ?? $metaMap['solder_mask'] ?? $metaMap['mask'] ?? $metaMap['coverlay_color'] ?? null;
+        return ($raw !== null && trim((string)$raw) !== '') ? (string)$raw : 'Green';
     }
 }
