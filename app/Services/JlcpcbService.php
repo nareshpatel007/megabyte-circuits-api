@@ -371,18 +371,41 @@ class JlcpcbService
                         }
 
                         // Determine actual shipping fee returned by JLCPCB API
-                        if (isset($rawResultData['freightFee']) && floatval($rawResultData['freightFee']) > 0) {
-                            $apiShippingUsd = floatval($rawResultData['freightFee']);
-                        } elseif (isset($rawResultData['freight']) && floatval($rawResultData['freight']) > 0) {
-                            $apiShippingUsd = floatval($rawResultData['freight']);
-                        } elseif (isset($rawResultData['freightCost']) && floatval($rawResultData['freightCost']) > 0) {
-                            $apiShippingUsd = floatval($rawResultData['freightCost']);
-                        } elseif (isset($rawResultData['shippingFee']) && floatval($rawResultData['shippingFee']) > 0) {
-                            $apiShippingUsd = floatval($rawResultData['shippingFee']);
-                        } elseif (isset($rawResultData['totalCost'], $rawResultData['priceWithoutFreight'])) {
-                            $diff = floatval($rawResultData['totalCost']) - floatval($rawResultData['priceWithoutFreight']);
-                            if ($diff > 0) {
-                                $apiShippingUsd = $diff;
+                        if (!empty($rawResultData['shipList']) && is_array($rawResultData['shipList'])) {
+                            // 1. Look specifically for UPS option ("UPS EXPRESS" or "UPS Worldwide Express Saver")
+                            foreach ($rawResultData['shipList'] as $shipItem) {
+                                $opt = strtoupper((string)($shipItem['options'] ?? ''));
+                                $showOpt = strtoupper((string)($shipItem['showOptions'] ?? ''));
+                                if ((str_contains($opt, 'UPS') || str_contains($showOpt, 'UPS')) && isset($shipItem['cost']) && floatval($shipItem['cost']) > 0) {
+                                    $apiShippingUsd = floatval($shipItem['cost']);
+                                    break;
+                                }
+                            }
+                            // 2. If no UPS option found, fallback to the first available shipping option with a valid cost
+                            if ($apiShippingUsd <= 0) {
+                                foreach ($rawResultData['shipList'] as $shipItem) {
+                                    if (isset($shipItem['cost']) && floatval($shipItem['cost']) > 0) {
+                                        $apiShippingUsd = floatval($shipItem['cost']);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if ($apiShippingUsd <= 0) {
+                            if (isset($rawResultData['freightFee']) && floatval($rawResultData['freightFee']) > 0) {
+                                $apiShippingUsd = floatval($rawResultData['freightFee']);
+                            } elseif (isset($rawResultData['freight']) && floatval($rawResultData['freight']) > 0) {
+                                $apiShippingUsd = floatval($rawResultData['freight']);
+                            } elseif (isset($rawResultData['freightCost']) && floatval($rawResultData['freightCost']) > 0) {
+                                $apiShippingUsd = floatval($rawResultData['freightCost']);
+                            } elseif (isset($rawResultData['shippingFee']) && floatval($rawResultData['shippingFee']) > 0) {
+                                $apiShippingUsd = floatval($rawResultData['shippingFee']);
+                            } elseif (isset($rawResultData['totalCost'], $rawResultData['priceWithoutFreight'])) {
+                                $diff = floatval($rawResultData['totalCost']) - floatval($rawResultData['priceWithoutFreight']);
+                                if ($diff > 0) {
+                                    $apiShippingUsd = $diff;
+                                }
                             }
                         }
                     }
@@ -403,9 +426,17 @@ class JlcpcbService
                     $quantity = (int)($payload['pcbParam']['qty'] ?? 5);
                     $calcBreakdown = $priceCalculator->calculate($baseUsd, null, $quantity, $apiShippingUsd);
 
-                    $customerBasePrice = $calcBreakdown['selling_price_before_gst'];
-                    $customerShippingInr = $calcBreakdown['domestic_freight'];
                     $subtotalExcludingGst = $calcBreakdown['selling_price_before_gst'];
+                    $rawShippingUsd = (float)($calcBreakdown['international_shipping_usd'] ?? 0);
+                    $fxRate = (float)($calcBreakdown['usd_to_inr_rate'] ?? 100);
+                    $domesticFreight = (float)($calcBreakdown['domestic_freight'] ?? 0);
+
+                    $customerShippingInr = round(($rawShippingUsd * $fxRate) + $domesticFreight, 2);
+                    if ($customerShippingInr > $subtotalExcludingGst) {
+                        $customerShippingInr = $subtotalExcludingGst;
+                    }
+                    $customerBasePrice = round($subtotalExcludingGst - $customerShippingInr, 2);
+
                     $gstPct = $calcBreakdown['sales_gst_percent'];
                     $gstAmount = $calcBreakdown['sales_gst_amount'];
                     $finalTotal = $calcBreakdown['final_customer_price'];
@@ -452,8 +483,17 @@ class JlcpcbService
                         $optionBaseUsd = round($baseUsd + $achievePriceUsd, 4);
                         $optionBreakdown = $priceCalculator->calculate($optionBaseUsd, null, $quantity, $apiShippingUsd);
 
-                        $customerDateBasePrice = $optionBreakdown['selling_price_before_gst'];
                         $dateSubtotal = $optionBreakdown['selling_price_before_gst'];
+                        $optRawShippingUsd = (float)($optionBreakdown['international_shipping_usd'] ?? 0);
+                        $optFxRate = (float)($optionBreakdown['usd_to_inr_rate'] ?? 100);
+                        $optFreight = (float)($optionBreakdown['domestic_freight'] ?? 0);
+
+                        $dateShippingInr = round(($optRawShippingUsd * $optFxRate) + $optFreight, 2);
+                        if ($dateShippingInr > $dateSubtotal) {
+                            $dateShippingInr = $dateSubtotal;
+                        }
+                        $customerDateBasePrice = round($dateSubtotal - $dateShippingInr, 2);
+
                         $dateGst = $optionBreakdown['sales_gst_amount'];
                         $dateFinalTotal = $optionBreakdown['final_customer_price'];
 
@@ -466,6 +506,7 @@ class JlcpcbService
                             'achieve_price_usd' => $achievePriceUsd,
                             'pcb_price' => $customerDateBasePrice,
                             'pcb_price_inr' => $customerDateBasePrice,
+                            'shipping_charge' => $dateShippingInr,
                             'subtotal' => $dateSubtotal,
                             'gst_amount' => $dateGst,
                             'final_total' => $dateFinalTotal,

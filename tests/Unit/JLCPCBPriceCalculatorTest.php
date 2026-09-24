@@ -43,4 +43,30 @@ class JLCPCBPriceCalculatorTest extends TestCase
         $this->assertEquals(3529.44, $res['sales_gst_amount']);
         $this->assertEquals(23137.44, $res['final_customer_price']);
     }
+
+    public function test_zero_shipping_fallback_uses_api_shipping()
+    {
+        $calculator = new JLCPCBPriceCalculator();
+
+        $pcbPriceUsd = 8.00;
+        $apiShippingUsd = 9.86;
+
+        $overrideSettings = [
+            'international_shipping_usd' => 0.00,
+            'usd_to_inr_rate' => 100.00,
+            'customs_duty_percent' => 30.00,
+            'import_gst_percent' => 18.00,
+            'domestic_freight' => 1000.00,
+            'margin_markup_percent' => 25.00,
+            'sales_gst_percent' => 18.00
+        ];
+
+        $res = $calculator->calculate($pcbPriceUsd, $overrideSettings, 5, $apiShippingUsd);
+
+        $this->assertEquals(8.00, $res['pcb_purchase_price_usd']);
+        $this->assertEquals(9.86, $res['international_shipping_usd']);
+        $this->assertEquals(17.86, $res['total_usd']);
+        $this->assertEquals(1786.00, $res['import_purchase_value']);
+        $this->assertEquals('jlcpcb_api', $res['shipping_source']);
+    }
 }
