@@ -100,5 +100,12 @@ class CredentialController extends Controller
                 ['value' => ['percentage' => (float)$value], 'description' => 'GST Percentage for PCB calculations']
             );
         }
+
+        if ($key === 'JLCPCB_MARGIN' && \Illuminate\Support\Facades\Schema::hasTable('pcb_pricing_settings')) {
+            \App\Models\PcbPricingSetting::updateOrCreate(
+                ['key' => 'jlcpcb_margin'],
+                ['value' => ['margin' => (float)$value], 'description' => 'JLCPCB Admin Margin Percentage']
+            );
+        }
     }
 }

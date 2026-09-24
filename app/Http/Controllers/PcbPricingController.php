@@ -305,6 +305,20 @@ class PcbPricingController extends Controller
                 }
             }
 
+            $jlcpcbMargin = 20;
+            if (Schema::hasTable('pcb_pricing_settings')) {
+                $marginRow = PcbPricingSetting::where('key', 'jlcpcb_margin')->first();
+                if ($marginRow && isset($marginRow->value['margin'])) {
+                    $jlcpcbMargin = (float)$marginRow->value['margin'];
+                }
+            }
+            if ($jlcpcbMargin === (float)20 && Schema::hasTable('credentials')) {
+                $cred = \App\Models\Credential::where('key', 'JLCPCB_MARGIN')->first();
+                if ($cred && !empty($cred->decrypted_value)) {
+                    $jlcpcbMargin = (float)$cred->decrypted_value;
+                }
+            }
+
             return response()->json([
                 'success' => true,
                 'data' => [
@@ -312,7 +326,8 @@ class PcbPricingController extends Controller
                     'priceTiers' => $priceTiers,
                     'shippingOptions' => $shippingOptions,
                     'minPartsOrderAmount' => $minPartsOrderAmount,
-                    'gstPercentage' => $gstPercentage
+                    'gstPercentage' => $gstPercentage,
+                    'jlcpcbMargin' => $jlcpcbMargin
                 ]
             ]);
         } catch (\Throwable $th) {
@@ -323,7 +338,8 @@ class PcbPricingController extends Controller
                     'fixedCosts' => self::getDefaultFixedCosts(),
                     'priceTiers' => self::getDefaultPriceTiers(),
                     'shippingOptions' => self::getDefaultShippingOptions(),
-                    'gstPercentage' => 18
+                    'gstPercentage' => 18,
+                    'jlcpcbMargin' => 20
                 ]
             ]);
         }
@@ -335,7 +351,9 @@ class PcbPricingController extends Controller
             $request->validate([
                 'fixedCosts' => 'nullable|array',
                 'priceTiers' => 'nullable|array',
-                'shippingOptions' => 'nullable|array'
+                'shippingOptions' => 'nullable|array',
+                'jlcpcbMargin' => 'nullable|numeric|min:0',
+                'gstPercentage' => 'nullable|numeric|min:0'
             ]);
 
             if ($request->has('fixedCosts')) {
@@ -370,6 +388,13 @@ class PcbPricingController extends Controller
                 PcbPricingSetting::updateOrCreate(
                     ['key' => 'gst_percentage'],
                     ['value' => ['percentage' => (float)$request->input('gstPercentage')], 'description' => 'GST Percentage for PCB calculations']
+                );
+            }
+
+            if ($request->has('jlcpcbMargin')) {
+                PcbPricingSetting::updateOrCreate(
+                    ['key' => 'jlcpcb_margin'],
+                    ['value' => ['margin' => (float)$request->input('jlcpcbMargin')], 'description' => 'JLCPCB Admin Margin Percentage']
                 );
             }
 

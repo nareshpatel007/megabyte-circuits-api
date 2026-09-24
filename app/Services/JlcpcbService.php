@@ -380,9 +380,18 @@ class JlcpcbService
                         ];
                     }
 
-                    // 2. Perform USD -> INR Currency Conversion via CurrencyConversionService
-                    $exchangeRate = CurrencyConversionService::getUsdToInrRate();
-                    $baseInr = round($baseUsd * $exchangeRate, 2);
+                    // 2. Perform JLCPCB Procurement & Customer Price Calculation via JLCPCBPriceCalculator
+                    $priceCalculator = new JLCPCBPriceCalculator();
+                    $quantity = (int)($payload['pcbParam']['qty'] ?? 5);
+                    $calcBreakdown = $priceCalculator->calculate($baseUsd, null, $quantity);
+
+                    $customerBasePrice = $calcBreakdown['selling_price_before_gst'];
+                    $customerShippingInr = $calcBreakdown['domestic_freight'];
+                    $subtotalExcludingGst = $calcBreakdown['selling_price_before_gst'];
+                    $gstPct = $calcBreakdown['sales_gst_percent'];
+                    $gstAmount = $calcBreakdown['sales_gst_amount'];
+                    $finalTotal = $calcBreakdown['final_customer_price'];
+                    $exchangeRate = $calcBreakdown['usd_to_inr_rate'];
 
                     // 3. Process achieveDateList and map build times to working calendar dates
                     $rawAchieveList = [];
@@ -422,8 +431,13 @@ class JlcpcbService
                         $labelStr = $targetDate->format('j M');
 
                         $achievePriceUsd = floatval($opt['achievePrice'] ?? 0);
-                        $pcbPriceUsd = round($baseUsd + $achievePriceUsd, 2);
-                        $pcbPriceInr = round($pcbPriceUsd * $exchangeRate, 2);
+                        $optionBaseUsd = round($baseUsd + $achievePriceUsd, 4);
+                        $optionBreakdown = $priceCalculator->calculate($optionBaseUsd, null, $quantity);
+
+                        $customerDateBasePrice = $optionBreakdown['selling_price_before_gst'];
+                        $dateSubtotal = $optionBreakdown['selling_price_before_gst'];
+                        $dateGst = $optionBreakdown['sales_gst_amount'];
+                        $dateFinalTotal = $optionBreakdown['final_customer_price'];
 
                         $dates[] = [
                             'date' => $dateStr,
@@ -432,22 +446,22 @@ class JlcpcbService
                             'achieve_hours' => $achieveHours,
                             'achieve_build_days' => $buildDays,
                             'achieve_price_usd' => $achievePriceUsd,
-                            'pcb_price_usd' => $pcbPriceUsd,
-                            'pcb_price_inr' => $pcbPriceInr,
+                            'pcb_price' => $customerDateBasePrice,
+                            'pcb_price_inr' => $customerDateBasePrice,
+                            'subtotal' => $dateSubtotal,
+                            'gst_amount' => $dateGst,
+                            'final_total' => $dateFinalTotal,
                             'checked' => ($opt['achieveChecked'] ?? '') === 'checked',
                             'enabled' => true
                         ];
                     }
 
                     // Audit log for backend debugging
-                    Log::info("JLCPCB Quotation Normalized Successfully [{$ipStr}]", [
+                    Log::info("JLCPCB Quotation Calculated Successfully [{$ipStr}]", [
                         'fileKey' => $payload['fileKey'] ?? '',
-                        'quantity' => $payload['pcbParam']['qty'] ?? 5,
+                        'quantity' => $quantity,
                         'layers' => $payload['pcbParam']['layer'] ?? 4,
-                        'base_usd' => $baseUsd,
-                        'exchange_rate' => $exchangeRate,
-                        'base_inr' => $baseInr,
-                        'dates_count' => count($dates),
+                        'breakdown' => $calcBreakdown,
                         'request_client_ip' => $clientIp,
                         'outbound_ip' => $outboundIp,
                     ]);
@@ -460,18 +474,30 @@ class JlcpcbService
                         'fileKey' => $payload['fileKey'] ?? '',
                         'currency' => 'INR',
                         'exchange_rate' => $exchangeRate,
-                        'quantity' => $payload['pcbParam']['qty'] ?? 5,
+                        'quantity' => $quantity,
                         'layers' => $payload['pcbParam']['layer'] ?? 4,
-                        'base_usd' => $baseUsd,
-                        'base_inr' => $baseInr,
+                        'pcb_price' => $customerBasePrice,
+                        'shipping_charge' => $customerShippingInr,
+                        'subtotal' => $subtotalExcludingGst,
+                        'gst_percentage' => $gstPct,
+                        'gst_amount' => $gstAmount,
+                        'final_total' => $finalTotal,
+                        'base_inr' => $customerBasePrice,
                         'dates' => $dates,
                         'quotation' => [
-                            'price' => $baseInr,
+                            'price' => $customerBasePrice,
+                            'pcb_price' => $customerBasePrice,
+                            'shipping_charge' => $customerShippingInr,
+                            'subtotal' => $subtotalExcludingGst,
+                            'gst_percentage' => $gstPct,
+                            'gst_amount' => $gstAmount,
+                            'final_total' => $finalTotal,
                             'currency' => 'INR',
-                            'quantity' => $payload['pcbParam']['qty'] ?? 5,
+                            'quantity' => $quantity,
                             'layers' => $payload['pcbParam']['layer'] ?? 4,
                             'delivery_time' => $payload['achieveDate'] ?? 48
                         ],
+                        'internal_audit' => $calcBreakdown,
                         'data' => $rawResultData,
                         'raw_response' => $result
                     ];

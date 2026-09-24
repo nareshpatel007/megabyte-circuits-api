@@ -122,6 +122,14 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::post('pcb-pricing', [\App\Http\Controllers\PcbPricingController::class, 'updatePricingConfig']);
         Route::post('pcb-pricing/reset', [\App\Http\Controllers\PcbPricingController::class, 'resetPricingConfig']);
 
+        // JLCPCB Procurement & Pricing Settings Management
+        Route::get('jlcpcb-settings', [\App\Http\Controllers\Admin\JlcpcbSettingsController::class, 'index']);
+        Route::post('jlcpcb-settings', [\App\Http\Controllers\Admin\JlcpcbSettingsController::class, 'update']);
+        Route::post('jlcpcb-settings/gst-options', [\App\Http\Controllers\Admin\JlcpcbSettingsController::class, 'addGstOption']);
+        Route::post('jlcpcb-settings/preview', [\App\Http\Controllers\Admin\JlcpcbSettingsController::class, 'calculatePreview']);
+        Route::get('settings/jlcpcb-settings', [\App\Http\Controllers\Admin\JlcpcbSettingsController::class, 'index']);
+        Route::post('settings/jlcpcb-settings', [\App\Http\Controllers\Admin\JlcpcbSettingsController::class, 'update']);
+
         // Holiday Management
         Route::get('holidays', [\App\Http\Controllers\HolidayController::class, 'index']);
         Route::post('holidays', [\App\Http\Controllers\HolidayController::class, 'store']);

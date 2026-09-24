@@ -77,15 +77,17 @@ class JlcpcbController extends Controller
                     'message' => $result['message'],
                     'fileKey' => $result['fileKey'] ?? null,
                     'currency' => $result['currency'] ?? 'INR',
-                    'exchange_rate' => $result['exchange_rate'] ?? null,
                     'quantity' => $result['quantity'] ?? null,
                     'layers' => $result['layers'] ?? null,
-                    'base_usd' => $result['base_usd'] ?? null,
+                    'pcb_price' => $result['pcb_price'] ?? null,
+                    'shipping_charge' => $result['shipping_charge'] ?? null,
+                    'subtotal' => $result['subtotal'] ?? null,
+                    'gst_percentage' => $result['gst_percentage'] ?? null,
+                    'gst_amount' => $result['gst_amount'] ?? null,
+                    'final_total' => $result['final_total'] ?? null,
                     'base_inr' => $result['base_inr'] ?? null,
                     'dates' => $result['dates'] ?? [],
-                    'quotation' => $result['quotation'] ?? null,
-                    'data' => $result['data'] ?? null,
-                    'raw_response' => $result['raw_response'] ?? null
+                    'quotation' => $result['quotation'] ?? null
                 ], 200);
             }
 
