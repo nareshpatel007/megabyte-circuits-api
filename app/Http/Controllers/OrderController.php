@@ -70,10 +70,14 @@ class OrderController extends Controller
                 $userId = $user->id;
             }
 
-            // Generate unique sequential order number starting from M0001
-            $lastOrder = PcbOrder::withTrashed()->orderBy('id', 'desc')->first();
-            $nextId = $lastOrder ? ($lastOrder->id + 1) : 1;
-            $orderNumber = 'M' . str_pad($nextId, 4, '0', STR_PAD_LEFT);
+            $reqSource = strtolower(trim((string)($request->input('quotation_source') ?? $request->input('order_type') ?? '')));
+            if (empty($reqSource)) {
+                $layersNum = (int) preg_replace('/[^0-9]/', '', (string)($request->input('layers') ?? '2'));
+                $reqSource = ($layersNum > 2 || $request->filled('jlcpcb_file_key')) ? 'jlcpcb' : 'internal';
+            }
+            $reqOrderType = ($reqSource === 'jlcpcb') ? 'jlcpcb' : 'normal';
+            $series = ($reqOrderType === 'jlcpcb') ? 'J' : 'M';
+            $orderNumber = \App\Services\OrderNumberService::generateOrderNumber($series);
 
             // Handle file upload
             $gerberFileUrl = null;
@@ -221,7 +225,7 @@ class OrderController extends Controller
                 'silkscreen_side', 'legend_side', 'route', 'routing',
                 'v_cut', 'fpt_program', 'second_stage', 'copper_area',
                 'tool', 'quote_number', 'p_n', 'part_number', 'ups', 'panels',
-                'jlcpcb_file_key', 'quotation_source', 'jlcpcb_price', 'jlcpcb_quote_id'
+                'jlcpcb_file_key', 'quotation_source', 'order_type', 'jlcpcb_price', 'jlcpcb_quote_id', 'jlcpcb_quotation_snapshot', 'jlcpcb_quote'
             ];
 
             $withRelations = [
@@ -853,29 +857,14 @@ class OrderController extends Controller
                 $userId = null;
             }
 
-            // Generate unique sequential order number (+1 of last generated order number, e.g. M00001 -> M00002)
-            $lastOrder = \Illuminate\Support\Facades\DB::table('pcb_orders')
-                ->where('order_number', 'LIKE', 'M%')
-                ->where('order_number', 'NOT LIKE', '%-%')
-                ->orderBy('id', 'desc')
-                ->first();
-
-            $nextNumber = 1;
-            if ($lastOrder && !empty($lastOrder->order_number)) {
-                $numericPart = (int) preg_replace('/[^0-9]/', '', $lastOrder->order_number);
-                if ($numericPart > 0) {
-                    $nextNumber = $numericPart + 1;
-                } else {
-                    $maxPcbId = \Illuminate\Support\Facades\DB::table('pcb_orders')->max('id') ?? 0;
-                    $maxOrdersId = \Illuminate\Support\Facades\Schema::hasTable('orders') ? (\Illuminate\Support\Facades\DB::table('orders')->max('id') ?? 0) : 0;
-                    $nextNumber = max($maxPcbId, $maxOrdersId) + 1;
-                }
-            } else {
-                $maxPcbId = \Illuminate\Support\Facades\DB::table('pcb_orders')->max('id') ?? 0;
-                $maxOrdersId = \Illuminate\Support\Facades\Schema::hasTable('orders') ? (\Illuminate\Support\Facades\DB::table('orders')->max('id') ?? 0) : 0;
-                $nextNumber = max($maxPcbId, $maxOrdersId) + 1;
+            $reqSource = strtolower(trim((string)($request->input('quotation_source') ?? $request->input('order_type') ?? '')));
+            if (empty($reqSource)) {
+                $layersNum = (int) preg_replace('/[^0-9]/', '', (string)($request->input('layers') ?? '2'));
+                $reqSource = ($layersNum > 2 || $request->filled('jlcpcb_file_key')) ? 'jlcpcb' : 'internal';
             }
-            $orderNumber = 'M' . str_pad($nextNumber, 5, '0', STR_PAD_LEFT);
+            $reqOrderType = ($reqSource === 'jlcpcb') ? 'jlcpcb' : 'normal';
+            $series = ($reqOrderType === 'jlcpcb') ? 'J' : 'M';
+            $orderNumber = \App\Services\OrderNumberService::generateOrderNumber($series);
 
             // Handle Gerber file upload
             $gerberFileId = null;

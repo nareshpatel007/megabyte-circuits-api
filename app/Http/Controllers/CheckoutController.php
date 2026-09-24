@@ -364,29 +364,28 @@ class CheckoutController extends Controller
             foreach ($items as $index => $item) {
                 $parentOrderNumber = $item['parent_order_number'] ?? $item['repeat_parent'] ?? null;
 
+                $quotationSource = strtolower(trim((string)($item['quotation_source'] ?? $item['order_type'] ?? $item['source'] ?? '')));
+                if (empty($quotationSource)) {
+                    $layersNum = (int) preg_replace('/[^0-9]/', '', (string)($item['layers'] ?? '2'));
+                    if ($layersNum > 2 || !empty($item['jlcpcb_file_key']) || !empty($item['jlcpcbFileKey']) || !empty($item['fileKey'])) {
+                        $quotationSource = 'jlcpcb';
+                    } else {
+                        $quotationSource = 'internal';
+                    }
+                }
+                $orderType = ($quotationSource === 'jlcpcb') ? 'jlcpcb' : 'normal';
+                $series = ($orderType === 'jlcpcb') ? 'J' : 'M';
+
                 if (!empty($parentOrderNumber)) {
-                    // Repeat Order: Find count of existing repeats for this parent (e.g. M00001-1, M00001-2...)
+                    // Repeat Order: Find count of existing repeats for this parent (e.g. M00001-1, M00001-2... or J00001-1)
                     $repeatCount = DB::table('pcb_orders')
                         ->where('order_number', 'LIKE', $parentOrderNumber . '-%')
                         ->count();
                     $nextSuffix = $repeatCount + 1;
                     $orderNumber = $parentOrderNumber . '-' . $nextSuffix;
                 } else {
-                    // Standard Order: Generate M00001, M00002... (+1 of last generated order number)
-                    $lastOrder = DB::table('pcb_orders')
-                        ->where('order_number', 'LIKE', 'M%')
-                        ->where('order_number', 'NOT LIKE', '%-%')
-                        ->orderBy('id', 'desc')
-                        ->first();
-
-                    $nextNum = 1;
-                    if ($lastOrder && !empty($lastOrder->order_number)) {
-                        $num = (int) preg_replace('/[^0-9]/', '', $lastOrder->order_number);
-                        $nextNum = $num > 0 ? ($num + 1) : ((DB::table('pcb_orders')->max('id') ?? 0) + 1);
-                    } else {
-                        $nextNum = (DB::table('pcb_orders')->max('id') ?? 0) + 1;
-                    }
-                    $orderNumber = 'M' . str_pad($nextNum, 5, '0', STR_PAD_LEFT);
+                    // Standard Order: Generate M00001 or J00001 via atomic OrderNumberService
+                    $orderNumber = \App\Services\OrderNumberService::generateOrderNumber($series);
                 }
 
                 $boardName = $item['gerberFileName'] ?? $item['boardName'] ?? ($item['productType'] === 'stencil' ? 'SMT Stencil' : 'Standard PCB');
@@ -437,8 +436,16 @@ class CheckoutController extends Controller
                     ? \Carbon\Carbon::parse($itemDeliveryDate)->format('Y-m-d')
                     : \App\Services\DeliveryCalendarService::addDeliveryDays(now(), 5)->format('Y-m-d');
 
+                $jlcFileKey = $item['jlcpcb_file_key'] ?? $item['jlcpcbFileKey'] ?? $item['fileKey'] ?? null;
+                $rawSnapshot = $item['jlcpcb_quote'] ?? $item['jlcpcb_quotation_snapshot'] ?? $item['jlcpcbQuote'] ?? null;
+                $jlcSnapshotJson = $rawSnapshot ? (is_array($rawSnapshot) || is_object($rawSnapshot) ? json_encode($rawSnapshot) : (string)$rawSnapshot) : null;
+
                 $orderId = DB::table('pcb_orders')->insertGetId([
                     'order_number' => $orderNumber,
+                    'order_type' => $orderType,
+                    'quotation_source' => $quotationSource,
+                    'jlcpcb_file_key' => $jlcFileKey,
+                    'jlcpcb_quotation_snapshot' => $jlcSnapshotJson,
                     'user_id' => $userId,
                     'transaction_id' => $transactionId,
                     'shipping_address_id' => $shippingAddressId,
@@ -484,6 +491,8 @@ class CheckoutController extends Controller
 
                     $metaFields = [
                         'product_type' => 'part',
+                        'order_type' => $orderType,
+                        'quotation_source' => $quotationSource,
                         'part_number' => $partNumber ?? $boardName,
                         'description' => $item['description'] ?? '',
                         'quantity' => $itemQty,
@@ -498,6 +507,11 @@ class CheckoutController extends Controller
                 } else {
                     $metaFields = [
                         'board_name' => $boardName,
+                        'order_type' => $orderType,
+                        'quotation_source' => $quotationSource,
+                        'jlcpcb_file_key' => $jlcFileKey,
+                        'jlcpcb_price' => $item['jlcpcb_price'] ?? null,
+                        'jlcpcb_quotation_snapshot' => $jlcSnapshotJson,
                         'product_type' => $productType,
                         'base_material' => $item['baseMaterial'] ?? ($item['material'] ?? 'FR-4'),
                         'material_type' => $item['materialType'] ?? ($item['baseMaterial'] === "Flex" ? "Polyimide (PI)" : ($item['baseMaterial'] === "Rogers" ? "RO4350B(Dk=3.48,Df=0.0037)" : ($item['baseMaterial'] === "PTFE Teflon" ? "ZYF300CA-P(Dk=3.0,Df=0.0016)" : "FR4-TG135"))),

@@ -17,6 +17,10 @@ class PcbOrder extends Model
         'status_id',
         'gerber_file_id',
         'order_number',
+        'order_type',
+        'quotation_source',
+        'jlcpcb_file_key',
+        'jlcpcb_quotation_snapshot',
         'q_no',
         'c_g',
         'combo',
@@ -72,7 +76,24 @@ class PcbOrder extends Model
         'launch_date' => 'date',
         'delivery_date' => 'date',
         'film_applied' => 'boolean',
+        'jlcpcb_quotation_snapshot' => 'array',
     ];
+
+    public function scopeJlcpcb($query)
+    {
+        return $query->where('order_type', 'jlcpcb')
+            ->orWhere('quotation_source', 'jlcpcb')
+            ->orWhere('order_number', 'LIKE', 'J%');
+    }
+
+    public function scopeNormal($query)
+    {
+        return $query->where(function ($q) {
+            $q->whereNull('order_type')
+              ->orWhere('order_type', 'normal')
+              ->orWhere('order_number', 'LIKE', 'M%');
+        });
+    }
 
     protected static function boot()
     {
