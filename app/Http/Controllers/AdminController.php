@@ -206,6 +206,9 @@ class AdminController extends Controller
                 return response()->json(['status' => true, 'data' => [], 'period' => $period]);
             }
 
+            $startDate = $request->input('start_date');
+            $endDate = $request->input('end_date');
+
             $driver = DB::connection()->getDriverName();
 
             if ($period === 'year') {
@@ -228,9 +231,44 @@ class AdminController extends Controller
                 }
             }
 
-            $rows = DB::table('pcb_orders')
-                ->whereNull('deleted_at')
-                ->select(
+            $query = DB::table('pcb_orders')
+                ->whereNull('deleted_at');
+
+            if (!empty($startDate)) {
+                if ($period === 'year') {
+                    $s = strlen($startDate) === 4 ? $startDate . '-01-01' : $startDate;
+                    $query->where('created_at', '>=', $s . ' 00:00:00');
+                } else if ($period === 'month') {
+                    $s = strlen($startDate) === 7 ? $startDate . '-01' : $startDate;
+                    $query->where('created_at', '>=', $s . ' 00:00:00');
+                } else {
+                    $query->where('created_at', '>=', $startDate . ' 00:00:00');
+                }
+            }
+
+            if (!empty($endDate)) {
+                if ($period === 'year') {
+                    $e = strlen($endDate) === 4 ? $endDate . '-12-31' : $endDate;
+                    $query->where('created_at', '<=', $e . ' 23:59:59');
+                } else if ($period === 'month') {
+                    if (strlen($endDate) === 7) {
+                        try {
+                            $dateObj = new \DateTime($endDate . '-01');
+                            $dateObj->modify('last day of this month');
+                            $e = $dateObj->format('Y-m-d');
+                        } catch (\Exception $ex) {
+                            $e = $endDate . '-28';
+                        }
+                    } else {
+                        $e = $endDate;
+                    }
+                    $query->where('created_at', '<=', $e . ' 23:59:59');
+                } else {
+                    $query->where('created_at', '<=', $endDate . ' 23:59:59');
+                }
+            }
+
+            $rows = $query->select(
                     DB::raw("{$dateFormat} as date_key"),
                     DB::raw("COALESCE(SUM(order_value), 0) as total_revenue"),
                     DB::raw("COUNT(id) as total_orders"),
