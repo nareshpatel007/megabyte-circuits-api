@@ -110,12 +110,9 @@ class JlcpcbService
             throw new Exception("Invalid file provided for Gerber upload.");
         }
 
-        // Meta JSON MUST represent all non-file fields sent in the request
-        $metaJson = $metaJsonOverride !== null
-            ? $metaJsonOverride
-            : (!empty($originalName)
-                ? json_encode(['fileName' => $originalName], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
-                : '{}');
+        // JLCPCB signature rule for /overseas/openapi/pcb/uploadGerber:
+        // The body line in string to sign for file uploads is empty string ("")
+        $metaJson = $metaJsonOverride !== null ? $metaJsonOverride : '';
 
         $authData = $this->generateJopAuthorization(
             'POST',
