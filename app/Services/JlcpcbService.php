@@ -358,8 +358,19 @@ class JlcpcbService
                     // 1. Determine base USD PCB manufacturing cost & actual API freight/shipping cost
                     $baseUsd = 0.0;
                     $apiShippingUsd = 0.0;
+                    $jlcWeightKg = null;
 
                     if (is_array($rawResultData)) {
+                        if (isset($rawResultData['pcbCostInfo']['weight']) && floatval($rawResultData['pcbCostInfo']['weight']) > 0) {
+                            $jlcWeightKg = floatval($rawResultData['pcbCostInfo']['weight']);
+                        } elseif (isset($rawResultData['weight']) && floatval($rawResultData['weight']) > 0) {
+                            $w = floatval($rawResultData['weight']);
+                            $jlcWeightKg = $w > 10 ? round($w / 1000.0, 4) : round($w, 4);
+                        } elseif (isset($rawResultData['orderTotalWeight']) && floatval($rawResultData['orderTotalWeight']) > 0) {
+                            $w = floatval($rawResultData['orderTotalWeight']);
+                            $jlcWeightKg = $w > 10 ? round($w / 1000.0, 4) : round($w, 4);
+                        }
+
                         if (isset($rawResultData['priceWithoutFreight']) && floatval($rawResultData['priceWithoutFreight']) > 0) {
                             $baseUsd = floatval($rawResultData['priceWithoutFreight']);
                         } elseif (isset($rawResultData['pcbCostInfo']['totalFee']) && floatval($rawResultData['pcbCostInfo']['totalFee']) > 0) {
@@ -567,6 +578,11 @@ class JlcpcbService
                         'total_buy_cost' => $calcBreakdown['total_buy_cost'],
                         'buy_per_unit_ex_gst' => $calcBreakdown['buy_per_unit_ex_gst'],
                         'buy_per_unit_inc_gst' => $calcBreakdown['buy_per_unit_inc_gst'],
+
+                        // Weight from JLCPCB API
+                        'weight_kg' => $jlcWeightKg,
+                        'orderTotalWeight' => $rawResultData['orderTotalWeight'] ?? null,
+                        'pcbCostInfo' => $rawResultData['pcbCostInfo'] ?? null,
 
                         // Selling price, margin & sales GST breakdown
                         'margin_percentage' => $calcBreakdown['margin_markup_percent'],
