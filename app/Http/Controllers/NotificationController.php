@@ -173,7 +173,15 @@ class NotificationController extends Controller
         $userId = $this->getUserId($request);
 
         return response()->stream(function () use ($userId) {
-            $lastId = 0;
+            $initialMax = Notification::where('recipient_type', 'user')
+                ->where(function ($q) use ($userId) {
+                    if ($userId) {
+                        $q->where('recipient_id', $userId)->orWhereNull('recipient_id');
+                    } else {
+                        $q->whereNull('recipient_id');
+                    }
+                })->max('id');
+            $lastId = $initialMax ? (int) $initialMax : 0;
             $start = time();
 
             // Loop for 25 seconds max (standard SSE polling connection duration)

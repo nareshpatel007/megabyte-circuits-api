@@ -257,7 +257,15 @@ class AdminNotificationController extends Controller
         $adminId = $this->getAdminId($request);
 
         return response()->stream(function () use ($adminId) {
-            $lastId = 0;
+            $initialMax = Notification::where('recipient_type', 'admin')
+                ->where(function ($q) use ($adminId) {
+                    if ($adminId) {
+                        $q->where('recipient_id', $adminId)->orWhereNull('recipient_id');
+                    } else {
+                        $q->whereNull('recipient_id');
+                    }
+                })->max('id');
+            $lastId = $initialMax ? (int) $initialMax : 0;
             $start = time();
 
             while (time() - $start < 25) {
