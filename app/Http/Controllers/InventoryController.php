@@ -197,6 +197,19 @@ class InventoryController extends Controller
         if ($prevQty > 0 && $newQty <= 0) {
             \App\Services\EmailTemplateService::sendInventoryEmail('inventory_out_of_stock', $item->id, $log ? $log->id : null);
         }
+
+        // 5. In-App Low Stock Alert
+        if ($newQty <= $threshold) {
+            \App\Services\NotificationService::notifyAdmins('inventory.low_stock', [
+                'title' => 'Low Stock Warning',
+                'message' => "Component {$item->name} (SKU: {$item->sku}) is low on stock ({$newQty} Pcs remaining).",
+                'action_url' => '/inventory',
+                'entity_type' => 'inventory',
+                'entity_id' => $item->id,
+                'theme' => 'warning',
+                'icon' => 'PackageCheck',
+            ]);
+        }
     }
 
     public function adjustStock(Request $request, $id)

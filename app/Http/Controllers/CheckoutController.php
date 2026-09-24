@@ -376,17 +376,11 @@ class CheckoutController extends Controller
                 $orderType = ($quotationSource === 'jlcpcb') ? 'jlcpcb' : 'normal';
                 $series = ($orderType === 'jlcpcb') ? 'J' : 'M';
 
-                if (!empty($parentOrderNumber)) {
-                    // Repeat Order: Find count of existing repeats for this parent (e.g. M00001-1, M00001-2... or J00001-1)
-                    $repeatCount = DB::table('pcb_orders')
-                        ->where('order_number', 'LIKE', $parentOrderNumber . '-%')
-                        ->count();
-                    $nextSuffix = $repeatCount + 1;
-                    $orderNumber = $parentOrderNumber . '-' . $nextSuffix;
-                } else {
-                    // Standard Order: Generate M00001 or J00001 via atomic OrderNumberService
-                    $orderNumber = \App\Services\OrderNumberService::generateOrderNumber($series);
-                }
+                // Always generate next clean sequential Order Number (e.g. J00016 or M00002) via atomic OrderNumberService
+                $orderNumber = \App\Services\OrderNumberService::generateOrderNumber($series);
+
+                $sourceOrderId = $item['source_order_id'] ?? null;
+                $isReorder = !empty($item['is_reorder']) || !empty($parentOrderNumber);
 
                 $boardName = $item['gerberFileName'] ?? $item['boardName'] ?? ($item['productType'] === 'stencil' ? 'SMT Stencil' : 'Standard PCB');
                 $itemPrice = $item['price'] ?? 0;
@@ -446,6 +440,9 @@ class CheckoutController extends Controller
                     'quotation_source' => $quotationSource,
                     'jlcpcb_file_key' => $jlcFileKey,
                     'jlcpcb_quotation_snapshot' => $jlcSnapshotJson,
+                    'source_order_id' => $sourceOrderId,
+                    'source_order_number' => $parentOrderNumber,
+                    'is_reorder' => $isReorder,
                     'user_id' => $userId,
                     'transaction_id' => $transactionId,
                     'shipping_address_id' => $shippingAddressId,
@@ -564,6 +561,8 @@ class CheckoutController extends Controller
                         'c_g' => $cgStatus,
                         'transaction_number' => $transactionNumber,
                         'parent_order_number' => $parentOrderNumber,
+                        'source_order_id' => $sourceOrderId,
+                        'is_reorder' => $isReorder ? '1' : '0',
                         'preview_data' => $previewData
                     ];
                 }
@@ -621,6 +620,39 @@ class CheckoutController extends Controller
             // Dispatch order_placed email notifications safely AFTER transaction commit
             foreach ($createdOrders as $cOrder) {
                 \App\Services\EmailTemplateService::sendOrderEmail('order_placed', $cOrder['order_id']);
+
+                // Real-time notifications for Client & Admin
+                if ($userId) {
+                    \App\Services\NotificationService::notifyUser($userId, 'order.created', [
+                        'title' => 'New Order Placed',
+                        'message' => "Your order #{$cOrder['order_number']} ({$cOrder['board_name']}) has been successfully placed!",
+                        'action_url' => "/orders/{$cOrder['order_id']}",
+                        'entity_type' => 'order',
+                        'entity_id' => $cOrder['order_id'],
+                        'theme' => 'success',
+                        'icon' => 'Package',
+                    ]);
+                }
+
+                \App\Services\NotificationService::notifyAdmins('order.created', [
+                    'title' => 'New PCB Order Received',
+                    'message' => "Order #{$cOrder['order_number']} ({$cOrder['board_name']}) placed for ₹{$cOrder['price']}.",
+                    'action_url' => "/orders",
+                    'entity_type' => 'order',
+                    'entity_id' => $cOrder['order_id'],
+                    'theme' => 'success',
+                    'icon' => 'ShoppingCart',
+                ]);
+
+                \App\Services\NotificationService::notifyAdmins('payment.successful', [
+                    'title' => 'Payment Received',
+                    'message' => "Payment verified for Order #{$cOrder['order_number']} (Ref: {$transactionNumber}).",
+                    'action_url' => "/payments",
+                    'entity_type' => 'payment',
+                    'entity_id' => $cOrder['order_id'],
+                    'theme' => 'success',
+                    'icon' => 'CreditCard',
+                ]);
             }
 
             return response()->json([

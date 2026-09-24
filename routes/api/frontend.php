@@ -36,6 +36,8 @@ Route::get('delivery/holidays', [\App\Http\Controllers\HolidayController::class,
 // PCB Orders
 Route::prefix('orders/')->group(function () {
     Route::post('submit', [OrderController::class, 'store']);
+    Route::post('repeat', [OrderController::class, 'repeat']);
+    Route::post('{id}/repeat', [OrderController::class, 'repeat']);
 });
 
 // Contact Form Submission
@@ -103,6 +105,17 @@ Route::post('blogs/{id}/view', [BlogController::class, 'incrementView']);
 Route::post('blogs/{id}/like', [BlogController::class, 'toggleLike']);
 Route::post('blogs/{id}/comments', [BlogController::class, 'submitComment']);
 
+
+use App\Http\Controllers\NotificationController;
+
+// Client Notification Routes
+Route::prefix('notifications')->group(function () {
+    Route::get('/', [NotificationController::class, 'index']);
+    Route::get('unread-count', [NotificationController::class, 'unreadCount']);
+    Route::post('{id}/read', [NotificationController::class, 'markAsRead']);
+    Route::post('read-all', [NotificationController::class, 'markAllAsRead']);
+    Route::get('stream', [NotificationController::class, 'stream']);
+});
 
 // Frontend API Routes (Protected by API token)
 Route::middleware('verify.api.token')->group(function () {});

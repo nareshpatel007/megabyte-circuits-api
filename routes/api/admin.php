@@ -180,6 +180,16 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::get('email-logs', [\App\Http\Controllers\Admin\EmailLogController::class, 'index']);
         Route::get('email-logs/{id}', [\App\Http\Controllers\Admin\EmailLogController::class, 'show']);
         Route::delete('email-logs/{id}', [\App\Http\Controllers\Admin\EmailLogController::class, 'destroy']);
+
+        // Notification Management & Settings
+        Route::get('notifications/unread-count', [\App\Http\Controllers\Admin\AdminNotificationController::class, 'unreadCount']);
+        Route::get('notifications/settings', [\App\Http\Controllers\Admin\AdminNotificationController::class, 'getSettings']);
+        Route::post('notifications/settings', [\App\Http\Controllers\Admin\AdminNotificationController::class, 'updateSettings']);
+        Route::post('notifications/cleanup', [\App\Http\Controllers\Admin\AdminNotificationController::class, 'cleanup']);
+        Route::post('notifications/read-all', [\App\Http\Controllers\Admin\AdminNotificationController::class, 'markAllAsRead']);
+        Route::get('notifications/stream', [\App\Http\Controllers\Admin\AdminNotificationController::class, 'stream']);
+        Route::get('notifications', [\App\Http\Controllers\Admin\AdminNotificationController::class, 'index']);
+        Route::post('notifications/{id}/read', [\App\Http\Controllers\Admin\AdminNotificationController::class, 'markAsRead']);
     });
 });
 

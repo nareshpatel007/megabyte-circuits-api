@@ -601,16 +601,41 @@ class OrderController extends Controller
 
             $order->save();
 
-            // Dispatch order_status_updated email notification when status changes (previous != new)
+            // Dispatch order_status_updated email & in-app notification when status changes (previous != new)
             if ($statusChanged) {
                 \App\Services\EmailTemplateService::sendOrderEmail('order_status_updated', $order->id, null, [
                     'previous_order_status' => $previousStatusName,
                 ]);
+
+                if ($order->user_id) {
+                    $newStatusName = $order->status ?: 'Updated';
+                    \App\Services\NotificationService::notifyUser($order->user_id, 'order.status_updated', [
+                        'title' => "Order #{$order->order_number} Status Updated",
+                        'message' => "Order #{$order->order_number} status changed to {$newStatusName}.",
+                        'action_url' => "/orders/{$order->id}",
+                        'entity_type' => 'order',
+                        'entity_id' => $order->id,
+                        'theme' => 'info',
+                        'icon' => 'Clock',
+                    ]);
+                }
             }
 
-            // Dispatch order_completed email notification if status transitioned to completed/delivered
+            // Dispatch order_completed email & in-app notification if status transitioned to completed/delivered
             if ($statusChangedToCompleted) {
                 \App\Services\EmailTemplateService::sendOrderEmail('order_completed', $order->id);
+
+                if ($order->user_id) {
+                    \App\Services\NotificationService::notifyUser($order->user_id, 'order.completed', [
+                        'title' => "Order #{$order->order_number} Completed",
+                        'message' => "Great news! Your order #{$order->order_number} has been completed and is ready.",
+                        'action_url' => "/orders/{$order->id}",
+                        'entity_type' => 'order',
+                        'entity_id' => $order->id,
+                        'theme' => 'success',
+                        'icon' => 'CheckCircle2',
+                    ]);
+                }
             }
 
             // Dispatch order_production_film_not_applied email if transition was Pending -> Non-Pending and film_applied != 1
@@ -1655,6 +1680,231 @@ class OrderController extends Controller
             return response()->json([
                 'status' => false,
                 'message' => 'Failed to export orders: ' . $th->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Repeat / Reorder an existing order safely.
+     * Validates user ownership, restores complete original order configuration,
+     * verifies Gerber file availability, and recalculates current price using latest pricing rules.
+     */
+    public function repeat(Request $request, $orderId = null)
+    {
+        try {
+            $id = $orderId ?? $request->input('order_id') ?? $request->input('id');
+            $userId = $request->input('user_id');
+
+            if (!$id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Order ID is required'
+                ], 400);
+            }
+
+            // 1. Fetch Order
+            $order = PcbOrder::with(['gerberFile'])->find($id);
+
+            if (!$order) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Order not found'
+                ], 404);
+            }
+
+            // 2. Validate Ownership (Authorization)
+            if ($userId && (int)$order->user_id !== (int)$userId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized access: You do not have permission to reorder this order.'
+                ], 403);
+            }
+
+            // 3. Verify Gerber File Availability
+            $gerberFile = null;
+            if ($order->gerber_file_id) {
+                $gerberFile = \Illuminate\Support\Facades\DB::table('gerber_files')
+                    ->where('id', $order->gerber_file_id)
+                    ->whereNull('deleted_at')
+                    ->first();
+            }
+
+            if (!$gerberFile && $order->gerber_file_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'The Gerber file for this order is no longer available. Please upload the Gerber file again.'
+                ], 400);
+            }
+
+            // 4. Fetch Order Specifications Meta
+            $metas = \Illuminate\Support\Facades\DB::table('pcb_order_meta')
+                ->where('pcb_order_id', $order->id)
+                ->pluck('meta_value', 'meta_key')
+                ->toArray();
+
+            $boardName = $gerberFile->original_name ?? ($metas['board_name'] ?? ($metas['gerber_file_name'] ?? 'Standard PCB Order'));
+            $gerberFileName = $gerberFile->original_name ?? ($metas['gerber_file_name'] ?? $boardName);
+            $gerberFileId = $gerberFile ? $gerberFile->id : ($order->gerber_file_id ?? null);
+            $gerberPreview = $gerberFile->preview_data ?? ($metas['preview_data'] ?? null);
+            $gerberUrl = $gerberFile->file_url ?? ($metas['gerber_file_url'] ?? null);
+
+            $layers = (int)($metas['layers'] ?? 2);
+            $qty = (int)($metas['quantity'] ?? 5);
+            $width = (float)($metas['dimensions_width'] ?? 100);
+            $height = (float)($metas['dimensions_length'] ?? 100);
+            $unit = $metas['dimension_unit'] ?? 'mm';
+            $dimensions = $width . 'x' . $height . $unit;
+            $thickness = $metas['thickness'] ?? '1.6mm';
+            $pcbColor = $metas['pcb_color'] ?? 'Green';
+            $surfaceFinish = $metas['surface_finish'] ?? 'HASL(Leaded)';
+            $copperWeight = $metas['copper_weight'] ?? '1 oz';
+            $baseMaterial = $metas['base_material'] ?? 'FR-4';
+            $silkscreen = $metas['silkscreen'] ?? 'White';
+            $orderType = $order->order_type ?? ($metas['order_type'] ?? 'normal');
+            $quotationSource = $order->quotation_source ?? ($metas['quotation_source'] ?? ($orderType === 'jlcpcb' ? 'jlcpcb' : 'internal'));
+            $productType = $metas['product_type'] ?? 'pcb';
+
+            // 5. Recalculate CURRENT Pricing
+            $currentPrice = 0;
+            $jlcSnapshot = null;
+
+            if ($quotationSource === 'jlcpcb' || $orderType === 'jlcpcb') {
+                // JLCPCB Order: Recalculate using JLCPCB pricing engine
+                $jlcFileKey = $order->jlcpcb_file_key ?? ($metas['jlcpcb_file_key'] ?? null);
+
+                if (!empty($jlcFileKey) && class_exists(\App\Services\JlcpcbService::class)) {
+                    try {
+                        $jlcService = app(\App\Services\JlcpcbService::class);
+                        $calcPayload = [
+                            'fileKey' => $jlcFileKey,
+                            'layer' => $layers,
+                            'pcbLength' => $height,
+                            'pcbWidth' => $width,
+                            'quantity' => $qty,
+                            'thickness' => $thickness,
+                            'pcbColor' => $pcbColor,
+                            'surfaceFinish' => $surfaceFinish,
+                            'copperWeight' => $copperWeight,
+                        ];
+                        $calcResult = $jlcService->calculateQuotation($calcPayload);
+                        if ($calcResult && !empty($calcResult['success']) && isset($calcResult['price'])) {
+                            $currentPrice = (float)$calcResult['price'];
+                            $jlcSnapshot = $calcResult['data'] ?? null;
+                        }
+                    } catch (\Throwable $e) {
+                        \Illuminate\Support\Facades\Log::warning("JLCPCB reorder recalculation API failed, falling back to pricing calculator: " . $e->getMessage());
+                    }
+                }
+
+                if ($currentPrice <= 0 && class_exists(\App\Services\JLCPCBPriceCalculator::class)) {
+                    $oldUsd = 10.0;
+                    if (!empty($order->jlcpcb_quotation_snapshot)) {
+                        $snap = is_array($order->jlcpcb_quotation_snapshot) ? $order->jlcpcb_quotation_snapshot : json_decode($order->jlcpcb_quotation_snapshot, true);
+                        if (isset($snap['pcb_purchase_price_usd'])) {
+                            $oldUsd = (float)$snap['pcb_purchase_price_usd'];
+                        }
+                    }
+                    $calc = (new \App\Services\JLCPCBPriceCalculator())->calculate($oldUsd, null, $qty);
+                    $currentPrice = (float)($calc['final_customer_price'] ?? 0);
+                    $jlcSnapshot = $calc;
+                }
+            }
+
+            if ($currentPrice <= 0) {
+                // Regular PCB Order: Recalculate using current pricing formula
+                $areaPerBoard = ($width * $height) / 1000000;
+                $totalAreaSqM = $areaPerBoard * $qty;
+                $areaInSqCm = $totalAreaSqM * 10000;
+
+                $fixedCosts = [
+                    '1' => 1400,
+                    '2' => 1900,
+                    '4' => 6000,
+                    '6' => 7000,
+                    '8' => 8000,
+                    '10' => 9000
+                ];
+
+                $baseFixed = $fixedCosts[(string)$layers] ?? 1900;
+                $variableCost = $areaInSqCm * ($layers > 2 ? 0.35 : 0.22);
+                $colorMultiplier = strtolower(trim($pcbColor)) === 'green' ? 1.0 : 1.1;
+
+                $currentPrice = round(($baseFixed + $variableCost) * $colorMultiplier);
+            }
+
+            if ($currentPrice <= 0) {
+                $currentPrice = (float)($order->order_value ?? 1500);
+            }
+
+            $unitPrice = $qty > 0 ? round($currentPrice / $qty, 2) : $currentPrice;
+
+            // 6. Build Clean Reorder Cart Item Payload
+            $cartItem = [
+                'id' => time() . rand(100, 999),
+                'source_order_id' => $order->id,
+                'source_order_number' => $order->order_number,
+                'parent_order_number' => $order->order_number,
+                'is_reorder' => true,
+                'productType' => $productType,
+                'order_type' => $orderType,
+                'quotation_source' => $quotationSource,
+                'boardName' => $boardName,
+                'gerberFileName' => $gerberFileName,
+                'gerber_file_id' => $gerberFileId,
+                'gerberPreview' => $gerberPreview,
+                'gerberUrl' => $gerberUrl,
+                'layers' => $layers,
+                'dimensions' => $dimensions,
+                'width' => (string)$width,
+                'height' => (string)$height,
+                'unit' => $unit,
+                'qty' => $qty,
+                'thickness' => $thickness,
+                'pcbColor' => $pcbColor,
+                'surfaceFinish' => $surfaceFinish,
+                'copperWeight' => $copperWeight,
+                'baseMaterial' => $baseMaterial,
+                'silkscreen' => $silkscreen,
+                'buildTime' => $metas['build_time'] ?? '3-4 days',
+                'differentDesign' => $metas['different_design'] ?? '1',
+                'deliveryFormat' => $metas['delivery_format'] ?? 'Single PCB',
+                'panelColumn' => $metas['panel_column'] ?? '',
+                'panelRow' => $metas['panel_row'] ?? '',
+                'viaCovering' => $metas['via_covering'] ?? 'Not Specified',
+                'viaPlating' => $metas['via_plating'] ?? 'Not Specified',
+                'minHole' => $metas['min_hole'] ?? '0.3mm/(0.4/0.45mm)',
+                'confirmFile' => $metas['confirm_file'] ?? 'No',
+                'markOnPcb' => $metas['mark_on_pcb'] ?? 'Remove Mark',
+                'elecTest' => $metas['elec_test'] ?? 'Flying Probe Fully Test',
+                'goldFingers' => $metas['gold_fingers'] ?? 'No',
+                'castellated' => $metas['castellated'] ?? 'No',
+                'edgePlating' => $metas['edge_plating'] ?? 'No',
+                'blindSlots' => $metas['blind_slots'] ?? 'No',
+                'ulMarking' => $metas['ul_marking'] ?? 'No',
+                'humidity' => $metas['humidity'] ?? 'No',
+                'kelvinTest' => $metas['kelvin_test'] ?? 'No',
+                'paperBetween' => $metas['paper_between'] ?? 'No',
+                'appearanceQuality' => $metas['appearance_quality'] ?? 'IPC Class 2 Standard',
+                'silkscreenTech' => $metas['silkscreen_tech'] ?? 'Ink-jet Printing Silkscreen',
+                'inspectionReport' => $metas['inspection_report'] ?? 'No',
+                'pcbRemark' => $metas['pcb_remark'] ?? '',
+                'price' => $currentPrice,
+                'unitPrice' => $unitPrice,
+                'jlcpcb_file_key' => $order->jlcpcb_file_key ?? ($metas['jlcpcb_file_key'] ?? null),
+                'jlcpcb_quotation_snapshot' => $jlcSnapshot ?? $order->jlcpcb_quotation_snapshot ?? null,
+            ];
+
+            return response()->json([
+                'success'   => true,
+                'message'   => 'Order configuration loaded into cart with current pricing.',
+                'cart_item' => $cartItem,
+                'redirect'  => '/cart'
+            ]);
+
+        } catch (\Throwable $th) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to repeat order: ' . $th->getMessage()
             ], 500);
         }
     }

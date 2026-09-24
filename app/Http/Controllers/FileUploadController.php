@@ -193,6 +193,17 @@ class FileUploadController extends Controller
                 exec("{$command} > /dev/null 2>&1 &");
             }
 
+            // Dispatch notification to admins
+            \App\Services\NotificationService::notifyAdmins('gerber.uploaded', [
+                'title' => 'New Gerber Archive Uploaded',
+                'message' => "Gerber file '{$originalName}' uploaded and queued for automated PCB analysis.",
+                'action_url' => "/gerber-files",
+                'entity_type' => 'gerber',
+                'entity_id' => $gerberFileId,
+                'theme' => 'info',
+                'icon' => 'Cpu',
+            ]);
+
             return response()->json([
                 'success' => true,
                 'status' => 'processing',
