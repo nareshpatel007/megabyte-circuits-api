@@ -24,6 +24,7 @@ Route::prefix('jlcpcb')->group(function () {
     Route::post('calculate', [JlcpcbController::class, 'calculate']);
     Route::get('defaults', [JlcpcbController::class, 'defaults']);
     Route::get('countries', [JlcpcbController::class, 'countries']);
+    Route::get('check-ip', [JlcpcbController::class, 'checkIp']);
 });
 
 

@@ -437,4 +437,38 @@ class JlcpcbService
             ['code' => 'CN', 'name' => 'CHINA']
         ];
     }
+
+    /**
+     * Determine server public outbound IP address for JLCPCB IP Whitelisting
+     */
+    public function checkServerPublicIp(): array
+    {
+        $ipv4 = null;
+        $ipv6 = null;
+
+        try {
+            $res4 = Http::timeout(5)->withOptions(['ipresolve' => CURL_IPRESOLVE_V4])->get('https://api.ipify.org?format=json');
+            if ($res4->successful()) {
+                $ipv4 = $res4->json('ip');
+            }
+        } catch (\Exception $e) {
+            Log::warning("Failed to fetch outbound IPv4: " . $e->getMessage());
+        }
+
+        try {
+            $res6 = Http::timeout(5)->withOptions(['ipresolve' => CURL_IPRESOLVE_V6])->get('https://api64.ipify.org?format=json');
+            if ($res6->successful()) {
+                $ipv6 = $res6->json('ip');
+            }
+        } catch (\Exception $e) {
+            // IPv6 might not be available
+        }
+
+        return [
+            'outbound_ipv4' => $ipv4,
+            'outbound_ipv6' => $ipv6,
+            'recommended_whitelist_ip' => $ipv4 ?? $ipv6,
+            'instructions' => 'Add the outbound_ipv4 address to the IP Whitelist inside your JLCPCB Open Platform Console (https://open.jlcpcb.com).'
+        ];
+    }
 }

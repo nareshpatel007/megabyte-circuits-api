@@ -122,4 +122,16 @@ class JlcpcbController extends Controller
             'data' => $this->jlcpcbService->getCountryCodes()
         ]);
     }
+
+    /**
+     * Check server outbound public IP for JLCPCB whitelist configuration
+     * GET /api/jlcpcb/check-ip
+     */
+    public function checkIp()
+    {
+        return response()->json([
+            'success' => true,
+            'data' => $this->jlcpcbService->checkServerPublicIp()
+        ]);
+    }
 }
