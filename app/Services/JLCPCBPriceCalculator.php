@@ -115,11 +115,27 @@ class JLCPCBPriceCalculator
     /**
      * Calculate full procurement & pricing breakdown based on JLCPCB API PCB purchase price
      */
-    public function calculate(float $pcbPurchasePriceUsd, ?array $overrideSettings = null, int $quantity = 1): array
-    {
+    public function calculate(
+        float $pcbPurchasePriceUsd,
+        ?array $overrideSettings = null,
+        int $quantity = 1,
+        ?float $apiShippingUsd = null
+    ): array {
         $settings = array_merge(static::getStoredSettings(), $overrideSettings ?? []);
 
-        $shipUsd = (float)($settings['international_shipping_usd'] ?? 25.0);
+        // Determine International Shipping (USD):
+        // If international_shipping_usd is set and > 0, use it as fixed delivery charges.
+        // If not set or <= 0, calculate price from actual JLCPCB API shipping cost ($apiShippingUsd).
+        $configuredShipUsd = isset($settings['international_shipping_usd']) ? (float)$settings['international_shipping_usd'] : 0.0;
+
+        if ($configuredShipUsd > 0) {
+            $shipUsd = $configuredShipUsd;
+            $shippingSource = 'configured_setting';
+        } else {
+            $shipUsd = ($apiShippingUsd !== null && $apiShippingUsd >= 0) ? (float)$apiShippingUsd : 0.0;
+            $shippingSource = 'jlcpcb_api';
+        }
+
         $exchangeRate = (float)($settings['usd_to_inr_rate'] ?? 100.0);
         $dutyPct = (float)($settings['customs_duty_percent'] ?? 30.0);
         $otherDuty = (float)($settings['customs_other_charges'] ?? 0.0);
@@ -179,6 +195,7 @@ class JLCPCBPriceCalculator
         return [
             'pcb_purchase_price_usd' => round($pcbPurchasePriceUsd, 2),
             'international_shipping_usd' => round($shipUsd, 2),
+            'shipping_source' => $shippingSource,
             'total_usd' => round($totalUsd, 2),
 
             'usd_to_inr_rate' => round($exchangeRate, 2),

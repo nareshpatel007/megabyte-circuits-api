@@ -355,8 +355,10 @@ class JlcpcbService
                 if ($code === 200) {
                     $rawResultData = $result['data'] ?? [];
 
-                    // 1. Determine base USD PCB manufacturing cost (excluding shipping)
+                    // 1. Determine base USD PCB manufacturing cost & actual API freight/shipping cost
                     $baseUsd = 0.0;
+                    $apiShippingUsd = 0.0;
+
                     if (is_array($rawResultData)) {
                         if (isset($rawResultData['priceWithoutFreight']) && floatval($rawResultData['priceWithoutFreight']) > 0) {
                             $baseUsd = floatval($rawResultData['priceWithoutFreight']);
@@ -366,6 +368,22 @@ class JlcpcbService
                             $baseUsd = floatval($rawResultData['totalCost']);
                         } elseif (isset($rawResultData['pcbPrice']) && floatval($rawResultData['pcbPrice']) > 0) {
                             $baseUsd = floatval($rawResultData['pcbPrice']);
+                        }
+
+                        // Determine actual shipping fee returned by JLCPCB API
+                        if (isset($rawResultData['freightFee']) && floatval($rawResultData['freightFee']) > 0) {
+                            $apiShippingUsd = floatval($rawResultData['freightFee']);
+                        } elseif (isset($rawResultData['freight']) && floatval($rawResultData['freight']) > 0) {
+                            $apiShippingUsd = floatval($rawResultData['freight']);
+                        } elseif (isset($rawResultData['freightCost']) && floatval($rawResultData['freightCost']) > 0) {
+                            $apiShippingUsd = floatval($rawResultData['freightCost']);
+                        } elseif (isset($rawResultData['shippingFee']) && floatval($rawResultData['shippingFee']) > 0) {
+                            $apiShippingUsd = floatval($rawResultData['shippingFee']);
+                        } elseif (isset($rawResultData['totalCost'], $rawResultData['priceWithoutFreight'])) {
+                            $diff = floatval($rawResultData['totalCost']) - floatval($rawResultData['priceWithoutFreight']);
+                            if ($diff > 0) {
+                                $apiShippingUsd = $diff;
+                            }
                         }
                     }
 
@@ -383,7 +401,7 @@ class JlcpcbService
                     // 2. Perform JLCPCB Procurement & Customer Price Calculation via JLCPCBPriceCalculator
                     $priceCalculator = new JLCPCBPriceCalculator();
                     $quantity = (int)($payload['pcbParam']['qty'] ?? 5);
-                    $calcBreakdown = $priceCalculator->calculate($baseUsd, null, $quantity);
+                    $calcBreakdown = $priceCalculator->calculate($baseUsd, null, $quantity, $apiShippingUsd);
 
                     $customerBasePrice = $calcBreakdown['selling_price_before_gst'];
                     $customerShippingInr = $calcBreakdown['domestic_freight'];
@@ -432,7 +450,7 @@ class JlcpcbService
 
                         $achievePriceUsd = floatval($opt['achievePrice'] ?? 0);
                         $optionBaseUsd = round($baseUsd + $achievePriceUsd, 4);
-                        $optionBreakdown = $priceCalculator->calculate($optionBaseUsd, null, $quantity);
+                        $optionBreakdown = $priceCalculator->calculate($optionBaseUsd, null, $quantity, $apiShippingUsd);
 
                         $customerDateBasePrice = $optionBreakdown['selling_price_before_gst'];
                         $dateSubtotal = $optionBreakdown['selling_price_before_gst'];
@@ -482,6 +500,9 @@ class JlcpcbService
                         'gst_percentage' => $gstPct,
                         'gst_amount' => $gstAmount,
                         'final_total' => $finalTotal,
+                        'base_usd' => round($baseUsd, 2),
+                        'pcb_purchase_price_usd' => round($baseUsd, 2),
+                        'api_shipping_usd' => round($apiShippingUsd, 2),
                         'base_inr' => $customerBasePrice,
                         'dates' => $dates,
                         'quotation' => [
@@ -493,13 +514,16 @@ class JlcpcbService
                             'gst_amount' => $gstAmount,
                             'final_total' => $finalTotal,
                             'currency' => 'INR',
+                            'base_usd' => round($baseUsd, 2),
+                            'pcb_purchase_price_usd' => round($baseUsd, 2),
                             'quantity' => $quantity,
                             'layers' => $payload['pcbParam']['layer'] ?? 4,
                             'delivery_time' => $payload['achieveDate'] ?? 48
                         ],
                         'internal_audit' => $calcBreakdown,
                         'data' => $rawResultData,
-                        'raw_response' => $result
+                        'raw_response' => $result,
+                        'jlcpcb_raw_response' => $result
                     ];
                 }
 

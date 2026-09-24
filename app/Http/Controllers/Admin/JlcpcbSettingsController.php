@@ -130,4 +130,27 @@ class JlcpcbSettingsController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Fetch latest USD to INR exchange rate from live FX API
+     * GET /api/admin/jlcpcb-settings/exchange-rate
+     */
+    public function fetchExchangeRate(Request $request)
+    {
+        try {
+            $forceRefresh = $request->boolean('refresh', true);
+            $rate = \App\Services\CurrencyConversionService::getUsdToInrRate($forceRefresh);
+
+            return response()->json([
+                'success' => true,
+                'rate' => $rate,
+                'message' => 'Latest USD to INR exchange rate fetched successfully'
+            ]);
+        } catch (Throwable $th) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch exchange rate: ' . $th->getMessage()
+            ], 500);
+        }
+    }
 }

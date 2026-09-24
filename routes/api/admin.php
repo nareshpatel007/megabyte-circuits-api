@@ -125,6 +125,7 @@ Route::middleware('verify.admin.token')->group(function () {
         // JLCPCB Procurement & Pricing Settings Management
         Route::get('jlcpcb-settings', [\App\Http\Controllers\Admin\JlcpcbSettingsController::class, 'index']);
         Route::post('jlcpcb-settings', [\App\Http\Controllers\Admin\JlcpcbSettingsController::class, 'update']);
+        Route::get('jlcpcb-settings/exchange-rate', [\App\Http\Controllers\Admin\JlcpcbSettingsController::class, 'fetchExchangeRate']);
         Route::post('jlcpcb-settings/gst-options', [\App\Http\Controllers\Admin\JlcpcbSettingsController::class, 'addGstOption']);
         Route::post('jlcpcb-settings/preview', [\App\Http\Controllers\Admin\JlcpcbSettingsController::class, 'calculatePreview']);
         Route::get('settings/jlcpcb-settings', [\App\Http\Controllers\Admin\JlcpcbSettingsController::class, 'index']);
