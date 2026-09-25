@@ -81,9 +81,9 @@ assertTest($invalidVer['success'] === false, "Invalid OTP rejected properly");
 $otpRecordRefresh = PasswordResetOtp::find($otpRecord->id);
 assertTest($otpRecordRefresh->attempts === 1, "OTP attempts incremented after failed attempt");
 
-// Test Account Enumeration Protection for unknown email
+// Test Account check for unknown email
 $unknownReq = PasswordResetService::requestOtp('nonexistent_' . time() . '@example.com', 'client');
-assertTest($unknownReq['success'] === true, "Account enumeration protection gives generic success message for unknown email");
+assertTest($unknownReq['success'] === false, "Unknown email returns error: Account does not exist");
 
 // Create valid OTP for testing verification and reset
 $validOtp = '123456';
@@ -163,10 +163,23 @@ $regRes = $registerService->register([
 
 assertTest($regRes['status'] === true, "New client registration completed successfully");
 
+// 5. Test Email Log Entries
+echo "\n5. Testing Email Logs Table Entries...\n";
+
+$otpLog = \App\Models\EmailLog::where('template_key', 'password_reset_otp')->where('to', $testEmail)->first();
+assertTest(!empty($otpLog), "password_reset_otp logged in email_logs table");
+
+$resetLog = \App\Models\EmailLog::where('template_key', 'password_reset_success')->where('to', $testEmail)->first();
+assertTest(!empty($resetLog), "password_reset_success logged in email_logs table");
+
+$welcomeLog = \App\Models\EmailLog::where('template_key', 'client_welcome')->where('to', $regEmail)->first();
+assertTest(!empty($welcomeLog), "client_welcome logged in email_logs table");
+
 // Cleanup test records
 DB::table('users')->where('email', $testEmail)->orWhere('email', $regEmail)->delete();
 DB::table('admins')->where('id', $adminId)->delete();
 DB::table('password_reset_otps')->where('identifier', $testEmail)->orWhere('identifier', $adminEmail)->delete();
+DB::table('email_logs')->whereIn('to', [$testEmail, $adminEmail, $regEmail])->delete();
 
 echo "\n===========================================\n";
 echo "TEST RESULTS: {$passedCount} Passed, {$failedCount} Failed.\n";

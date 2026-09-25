@@ -184,9 +184,42 @@ class RegisterService
                             ->subject($rendered['subject'])
                             ->html($rendered['body']);
                     });
+
+                    // Log welcome email in email_logs table
+                    try {
+                        \App\Models\EmailLog::create([
+                            'template_key' => 'client_welcome',
+                            'email_type'   => 'welcome',
+                            'customer_id'  => $user_id,
+                            'from_email'   => $fromAddress,
+                            'from_name'    => $fromName,
+                            'to'           => $email,
+                            'subject'      => $rendered['subject'],
+                            'body'         => $rendered['body'],
+                            'status'       => 'sent',
+                            'sent_at'      => now(),
+                            'is_test'      => false,
+                        ]);
+                    } catch (\Throwable $logEx) {}
                 }
             } catch (\Throwable $emailErr) {
                 \Illuminate\Support\Facades\Log::error("Failed to send welcome email to {$email}: " . $emailErr->getMessage());
+                try {
+                    \App\Models\EmailLog::create([
+                        'template_key'  => 'client_welcome',
+                        'email_type'    => 'welcome',
+                        'customer_id'   => $user_id,
+                        'from_email'    => $fromAddress ?? config('mail.from.address', 'quote@megabytecircuit.com'),
+                        'from_name'     => $fromName ?? config('app.name', 'Megabyte Circuit'),
+                        'to'            => $email,
+                        'subject'       => $rendered['subject'] ?? 'Welcome to Megabyte Circuits',
+                        'body'          => $rendered['body'] ?? '',
+                        'status'        => 'failed',
+                        'failed_at'     => now(),
+                        'error_message' => $emailErr->getMessage(),
+                        'is_test'       => false,
+                    ]);
+                } catch (\Throwable $logEx) {}
             }
 
             // Dispatch user notification

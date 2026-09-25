@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\PasswordResetOtp;
 use App\Models\User;
 use App\Models\Admin;
+use App\Models\EmailLog;
 use App\Services\EmailTemplateService;
 use App\Services\CredentialService;
 use App\Services\NotificationService;
@@ -71,23 +72,20 @@ class PasswordResetService
             }
         }
 
-        // Generic account enumeration protection
-        $genericMessage = 'If an account exists with the provided information, a verification code has been sent.';
-
+        // Check if account exists
         if (!$email) {
             return [
-                'success' => true,
-                'message' => $genericMessage,
-                'masked_email' => null
+                'success' => false,
+                'message' => 'Account does not exist. Please check your details and try again.'
             ];
         }
 
         // Check account status if applicable
         $accountStatus = $type === 'admin' ? ($admin->status ?? 'active') : ($user->status ?? 'active');
-        if (strtolower($accountStatus) !== 'active') {
+        if (strtolower((string)$accountStatus) !== 'active') {
             return [
                 'success' => false,
-                'message' => 'Your account is currently inactive. Please contact support.'
+                'message' => 'Your account is currently inactive. Please contact administrator.'
             ];
         }
 
@@ -108,7 +106,7 @@ class PasswordResetService
                     'success' => false,
                     'message' => "Please wait {$remaining} seconds before requesting a new verification code.",
                     'cooldown_remaining' => $remaining,
-                    'masked_email' => self::maskEmail($email)
+                    'masked_email' => $email
                 ];
             }
         }
@@ -141,7 +139,7 @@ class PasswordResetService
         ]);
 
         // Render & Send Email
-        self::sendOtpEmail($email, $name, $otp);
+        self::sendOtpEmail($email, $name, $otp, $type === 'client' ? $user->id : null);
 
         // Record event in notification service
         NotificationService::dispatch('password_reset_requested', [
@@ -155,8 +153,8 @@ class PasswordResetService
 
         return [
             'success' => true,
-            'message' => $genericMessage,
-            'masked_email' => self::maskEmail($email)
+            'message' => 'Verification code sent to your registered email!',
+            'masked_email' => $email
         ];
     }
 
@@ -383,7 +381,7 @@ class PasswordResetService
 
         // Send confirmation email
         if ($email) {
-            self::sendPasswordResetSuccessEmail($email, $name);
+            self::sendPasswordResetSuccessEmail($email, $name, $type === 'client' ? $otpRecord->user_id : null);
         }
 
         // Audit Log Notification
@@ -406,7 +404,7 @@ class PasswordResetService
      * Send OTP email using database template or fallback.
      */
 
-    private static function sendOtpEmail(string $email, string $name, string $otp): void
+    private static function sendOtpEmail(string $email, string $name, string $otp, ?int $customerId = null): void
     {
         try {
             $rendered = EmailTemplateService::render('password_reset_otp', null, [
@@ -417,7 +415,7 @@ class PasswordResetService
             ]);
 
             if ($rendered['success']) {
-                self::dispatchSmtpMail($email, $rendered['subject'], $rendered['body'], $rendered['from_email'], $rendered['from_name']);
+                self::dispatchSmtpMail($email, $rendered['subject'], $rendered['body'], $rendered['from_email'], $rendered['from_name'], 'password_reset_otp', $customerId);
             } else {
                 // Fallback email content if template is disabled or missing
                 $appName = config('app.name', 'Megabyte Circuits');
@@ -430,7 +428,7 @@ class PasswordResetService
                     <p>This code will expire in " . self::OTP_EXPIRATION_MINUTES . " minutes.</p>
                 </div>";
 
-                self::dispatchSmtpMail($email, $subject, $body);
+                self::dispatchSmtpMail($email, $subject, $body, null, null, 'password_reset_otp', $customerId);
             }
         } catch (\Throwable $th) {
             Log::error("Failed to send OTP email to {$email}: " . $th->getMessage());
@@ -440,7 +438,7 @@ class PasswordResetService
     /**
      * Send password reset success confirmation email.
      */
-    private static function sendPasswordResetSuccessEmail(string $email, string $name): void
+    private static function sendPasswordResetSuccessEmail(string $email, string $name, ?int $customerId = null): void
     {
         try {
             $rendered = EmailTemplateService::render('password_reset_success', null, [
@@ -449,7 +447,7 @@ class PasswordResetService
             ]);
 
             if ($rendered['success']) {
-                self::dispatchSmtpMail($email, $rendered['subject'], $rendered['body'], $rendered['from_email'], $rendered['from_name']);
+                self::dispatchSmtpMail($email, $rendered['subject'], $rendered['body'], $rendered['from_email'], $rendered['from_name'], 'password_reset_success', $customerId);
             } else {
                 $appName = config('app.name', 'Megabyte Circuits');
                 $subject = "Your {$appName} password has been updated";
@@ -459,7 +457,7 @@ class PasswordResetService
                     <p>Your password was updated successfully.</p>
                 </div>";
 
-                self::dispatchSmtpMail($email, $subject, $body);
+                self::dispatchSmtpMail($email, $subject, $body, null, null, 'password_reset_success', $customerId);
             }
         } catch (\Throwable $th) {
             Log::error("Failed to send password reset success email to {$email}: " . $th->getMessage());
@@ -467,9 +465,9 @@ class PasswordResetService
     }
 
     /**
-     * Helper to dispatch mail with SMTP credentials configured in CredentialService.
+     * Helper to dispatch mail with SMTP credentials configured in CredentialService and record EmailLog.
      */
-    private static function dispatchSmtpMail(string $toEmail, string $subject, string $htmlBody, ?string $fromEmail = null, ?string $fromName = null): void
+    private static function dispatchSmtpMail(string $toEmail, string $subject, string $htmlBody, ?string $fromEmail = null, ?string $fromName = null, ?string $templateKey = null, ?int $customerId = null): void
     {
         $defaultFromAddress = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', config('mail.from.address', 'quote@megabytecircuit.com'));
         $defaultFromName = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('app.name', 'Megabyte Circuit'));
@@ -482,12 +480,53 @@ class PasswordResetService
         Config::set('mail.mailers.smtp_global.username', CredentialService::get('mail', 'MAIL_GLOBAL_USERNAME', 'MAIL_GLOBAL_USERNAME', config('mail.mailers.smtp.username')));
         Config::set('mail.mailers.smtp_global.password', CredentialService::get('mail', 'MAIL_GLOBAL_PASSWORD', 'MAIL_GLOBAL_PASSWORD', config('mail.mailers.smtp.password')));
 
-        Mail::mailer('smtp_global')->send([], [], function ($message) use ($toEmail, $fromAddress, $fromNameStr, $subject, $htmlBody) {
-            $message->to($toEmail)
-                ->from($fromAddress, $fromNameStr)
-                ->subject($subject)
-                ->html($htmlBody);
-        });
+        try {
+            Mail::mailer('smtp_global')->send([], [], function ($message) use ($toEmail, $fromAddress, $fromNameStr, $subject, $htmlBody) {
+                $message->to($toEmail)
+                    ->from($fromAddress, $fromNameStr)
+                    ->subject($subject)
+                    ->html($htmlBody);
+            });
+
+            // Log successful email dispatch
+            try {
+                EmailLog::create([
+                    'template_key' => $templateKey ?: 'password_reset_otp',
+                    'email_type'   => 'auth',
+                    'customer_id'  => $customerId,
+                    'from_email'   => $fromAddress,
+                    'from_name'    => $fromNameStr,
+                    'to'           => $toEmail,
+                    'subject'      => $subject,
+                    'body'         => $htmlBody,
+                    'status'       => 'sent',
+                    'sent_at'      => now(),
+                    'is_test'      => false,
+                ]);
+            } catch (\Throwable $logEx) {
+                Log::error("Failed to record EmailLog entry: " . $logEx->getMessage());
+            }
+        } catch (\Throwable $th) {
+            // Log failed email dispatch
+            try {
+                EmailLog::create([
+                    'template_key'  => $templateKey ?: 'password_reset_otp',
+                    'email_type'    => 'auth',
+                    'customer_id'   => $customerId,
+                    'from_email'    => $fromAddress,
+                    'from_name'     => $fromNameStr,
+                    'to'             => $toEmail,
+                    'subject'        => $subject,
+                    'body'           => $htmlBody,
+                    'status'         => 'failed',
+                    'failed_at'      => now(),
+                    'error_message'  => $th->getMessage(),
+                    'is_test'        => false,
+                ]);
+            } catch (\Throwable $logEx) {}
+
+            throw $th;
+        }
     }
 
     /**
