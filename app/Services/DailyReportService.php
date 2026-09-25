@@ -60,17 +60,23 @@ class DailyReportService
         // Query status histories / movements today
         $statusMovements = [];
         if (Schema::hasTable('pcb_order_status_histories')) {
+            $selectCols = [
+                'pcb_order_status_histories.*',
+                'pcb_orders.order_number',
+                'admins.name as admin_name',
+            ];
+            if (Schema::hasColumn('pcb_orders', 'customer_name')) {
+                $selectCols[] = 'pcb_orders.customer_name';
+            }
+            if (Schema::hasColumn('pcb_orders', 'user_email')) {
+                $selectCols[] = 'pcb_orders.user_email';
+            }
+
             $statusMovements = DB::table('pcb_order_status_histories')
                 ->join('pcb_orders', 'pcb_order_status_histories.pcb_order_id', '=', 'pcb_orders.id')
                 ->leftJoin('admins', 'pcb_order_status_histories.admin_id', '=', 'admins.id')
                 ->whereBetween('pcb_order_status_histories.created_at', [$start, $end])
-                ->select(
-                    'pcb_order_status_histories.*',
-                    'pcb_orders.order_number',
-                    'pcb_orders.customer_name',
-                    'pcb_orders.user_email',
-                    'admins.name as admin_name'
-                )
+                ->select($selectCols)
                 ->orderBy('pcb_order_status_histories.id', 'desc')
                 ->get();
         }

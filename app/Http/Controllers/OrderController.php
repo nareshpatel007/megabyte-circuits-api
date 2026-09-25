@@ -206,8 +206,39 @@ class OrderController extends Controller
                 return \Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'board_name');
             });
 
+            $hasUserEmailCol = \Illuminate\Support\Facades\Cache::rememberForever('schema_has_user_email_col', function () {
+                return \Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'user_email');
+            });
+
+            $hasUserMobileCol = \Illuminate\Support\Facades\Cache::rememberForever('schema_has_user_mobile_col', function () {
+                return \Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'user_mobile');
+            });
+
+            $hasCustomerNameCol = \Illuminate\Support\Facades\Cache::rememberForever('schema_has_customer_name_col', function () {
+                return \Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'customer_name');
+            });
+
             $hasPaymentTxTable = \Illuminate\Support\Facades\Cache::rememberForever('schema_has_payment_tx_table', function () {
                 return \Illuminate\Support\Facades\Schema::hasTable('payment_transactions');
+            });
+
+            $hasUsersName = \Illuminate\Support\Facades\Cache::rememberForever('schema_users_has_name', function () {
+                return \Illuminate\Support\Facades\Schema::hasColumn('users', 'name');
+            });
+            $hasUsersCompanyName = \Illuminate\Support\Facades\Cache::rememberForever('schema_users_has_company_name', function () {
+                return \Illuminate\Support\Facades\Schema::hasColumn('users', 'company_name');
+            });
+            $hasUsersEmail = \Illuminate\Support\Facades\Cache::rememberForever('schema_users_has_email', function () {
+                return \Illuminate\Support\Facades\Schema::hasColumn('users', 'email');
+            });
+            $hasUsersMobile = \Illuminate\Support\Facades\Cache::rememberForever('schema_users_has_mobile', function () {
+                return \Illuminate\Support\Facades\Schema::hasColumn('users', 'mobile');
+            });
+            $hasUsersPhoneNumber = \Illuminate\Support\Facades\Cache::rememberForever('schema_users_has_phone_number', function () {
+                return \Illuminate\Support\Facades\Schema::hasColumn('users', 'phone_number');
+            });
+            $hasUsersPhone = \Illuminate\Support\Facades\Cache::rememberForever('schema_users_has_phone', function () {
+                return \Illuminate\Support\Facades\Schema::hasColumn('users', 'phone');
             });
 
             $allowedMetaKeys = [
@@ -264,19 +295,67 @@ class OrderController extends Controller
             // Search Filter (by Order #, Board Name, Email, Mobile, Customer Name, User/Company, Metas, Razorpay Payment IDs)
             if ($request->filled('search')) {
                 $search = trim($request->input('search'));
-                $query->where(function ($q) use ($search, $hasBoardNameCol, $hasPaymentTxTable) {
-                    $q->where('order_number', 'LIKE', "%{$search}%")
-                        ->orWhere('user_email', 'LIKE', "%{$search}%")
-                        ->orWhere('user_mobile', 'LIKE', "%{$search}%")
-                        ->orWhere('customer_name', 'LIKE', "%{$search}%");
+                $query->where(function ($q) use (
+                    $search,
+                    $hasBoardNameCol,
+                    $hasUserEmailCol,
+                    $hasUserMobileCol,
+                    $hasCustomerNameCol,
+                    $hasPaymentTxTable,
+                    $hasUsersName,
+                    $hasUsersCompanyName,
+                    $hasUsersEmail,
+                    $hasUsersMobile,
+                    $hasUsersPhoneNumber,
+                    $hasUsersPhone
+                ) {
+                    $q->where('order_number', 'LIKE', "%{$search}%");
+                    if ($hasUserEmailCol) {
+                        $q->orWhere('user_email', 'LIKE', "%{$search}%");
+                    }
+                    if ($hasUserMobileCol) {
+                        $q->orWhere('user_mobile', 'LIKE', "%{$search}%");
+                    }
+                    if ($hasCustomerNameCol) {
+                        $q->orWhere('customer_name', 'LIKE', "%{$search}%");
+                    }
                     if ($hasBoardNameCol) {
                         $q->orWhere('board_name', 'LIKE', "%{$search}%");
                     }
-                    $q->orWhereHas('user', function ($uq) use ($search) {
-                        $uq->where('name', 'LIKE', "%{$search}%")
-                            ->orWhere('company_name', 'LIKE', "%{$search}%")
-                            ->orWhere('email', 'LIKE', "%{$search}%")
-                            ->orWhere('mobile', 'LIKE', "%{$search}%");
+                    $q->orWhereHas('user', function ($uq) use (
+                        $search,
+                        $hasUsersName,
+                        $hasUsersCompanyName,
+                        $hasUsersEmail,
+                        $hasUsersMobile,
+                        $hasUsersPhoneNumber,
+                        $hasUsersPhone
+                    ) {
+                        $hasUserClause = false;
+                        if ($hasUsersName) {
+                            $uq->where('name', 'LIKE', "%{$search}%");
+                            $hasUserClause = true;
+                        }
+                        if ($hasUsersCompanyName) {
+                            $hasUserClause ? $uq->orWhere('company_name', 'LIKE', "%{$search}%") : $uq->where('company_name', 'LIKE', "%{$search}%");
+                            $hasUserClause = true;
+                        }
+                        if ($hasUsersEmail) {
+                            $hasUserClause ? $uq->orWhere('email', 'LIKE', "%{$search}%") : $uq->where('email', 'LIKE', "%{$search}%");
+                            $hasUserClause = true;
+                        }
+                        if ($hasUsersMobile) {
+                            $hasUserClause ? $uq->orWhere('mobile', 'LIKE', "%{$search}%") : $uq->where('mobile', 'LIKE', "%{$search}%");
+                            $hasUserClause = true;
+                        }
+                        if ($hasUsersPhoneNumber) {
+                            $hasUserClause ? $uq->orWhere('phone_number', 'LIKE', "%{$search}%") : $uq->where('phone_number', 'LIKE', "%{$search}%");
+                            $hasUserClause = true;
+                        }
+                        if ($hasUsersPhone) {
+                            $hasUserClause ? $uq->orWhere('phone', 'LIKE', "%{$search}%") : $uq->where('phone', 'LIKE', "%{$search}%");
+                            $hasUserClause = true;
+                        }
                     });
                     $q->orWhereHas('metas', function ($mq) use ($search) {
                         $mq->where('meta_value', 'LIKE', "%{$search}%");
@@ -292,6 +371,14 @@ class OrderController extends Controller
                 });
             }
 
+            // Calculate total counts and summary stats before applying sorting & pagination limit/offset
+            $totalRecords = PcbOrder::count();
+            $totalFiltered = (clone $query)->count();
+
+            $statsTotalValue = (float) (clone $query)->sum('order_value');
+            $statsActiveOrders = (clone $query)->whereNotIn(\Illuminate\Support\Facades\DB::raw('LOWER(TRIM(status))'), ['completed', 'shipped', 'delivered', 'cancelled', 'canceled'])->count();
+            $statsCompletedOrders = (clone $query)->whereIn(\Illuminate\Support\Facades\DB::raw('LOWER(TRIM(status))'), ['completed', 'shipped', 'delivered'])->count();
+
             // Sorting (Default: delivery_date desc)
             $sortBy = $request->input('sort_by', 'delivery_date');
             $sortOrder = strtolower($request->input('sort_order', 'desc')) === 'asc' ? 'asc' : 'desc';
@@ -302,13 +389,16 @@ class OrderController extends Controller
                 $query->orderBy($sortBy, $sortOrder);
             }
 
-            if ($request->filled('limit')) {
-                $query->take(max(1, intval($request->input('limit'))));
-            } else if ($request->filled('per_page') && $request->input('per_page') !== 'all') {
-                $query->take(max(1, intval($request->input('per_page'))));
-            }
+            $page = max(1, intval($request->input('page', 1)));
+            $perPageInput = $request->input('per_page', $request->input('limit', 10));
 
-            $orders = $query->get();
+            if ($perPageInput === 'all' || (is_numeric($perPageInput) && intval($perPageInput) <= 0)) {
+                $perPage = $totalFiltered > 0 ? $totalFiltered : 10;
+                $orders = $query->get();
+            } else {
+                $perPage = max(1, intval($perPageInput));
+                $orders = $query->skip(($page - 1) * $perPage)->take($perPage)->get();
+            }
 
             $orders->transform(function ($order) {
                 if (isset($order->statusDetails) && !empty($order->statusDetails->name)) {
@@ -321,7 +411,19 @@ class OrderController extends Controller
 
             return response()->json([
                 'status' => true,
-                'data' => $orders
+                'data' => $orders,
+                'total' => $totalFiltered,
+                'total_records' => $totalRecords,
+                'current_page' => $page,
+                'per_page' => $perPage,
+                'last_page' => (int) ceil($totalFiltered / ($perPage > 0 ? $perPage : 1)),
+                'stats' => [
+                    'total_orders' => $totalFiltered,
+                    'total_records' => $totalRecords,
+                    'active_orders' => $statsActiveOrders,
+                    'completed_orders' => $statsCompletedOrders,
+                    'total_value' => $statsTotalValue,
+                ]
             ]);
         } catch (\Throwable $th) {
             return response()->json([
