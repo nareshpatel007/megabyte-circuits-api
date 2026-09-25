@@ -20,6 +20,8 @@ $commands = [
     'digikey-sync'        => 'digikey:sync',
     'digikey-manufacturers' => 'digikey:sync-manufacturers',
     'digikey-categories'  => 'digikey:sync-categories',
+    'email-logs-cleanup'  => 'email-logs:cleanup',
+    'notifications-cleanup' => 'notifications:cleanup',
 ];
 
 $commandToRun = $commands[$task] ?? 'schedule:run';
