@@ -612,6 +612,9 @@ class AuthController extends Controller
                     'created_at' => date('Y-m-d H:i:s')
                 ]);
 
+                // Send Client Welcome Email
+                \App\Services\RegisterService::sendWelcomeEmail($userId, $fullName ?: $email, $email);
+
                 $user = DB::table('users')->where('id', $userId)->first();
             } else {
                 // Update user avatar, first/last name if empty, and login stats
@@ -772,6 +775,9 @@ class AuthController extends Controller
                     'remarks' => '20 FREE Credits added on successful via Google registration.',
                     'created_at' => date('Y-m-d H:i:s')
                 ]);
+
+                // Send Client Welcome Email
+                \App\Services\RegisterService::sendWelcomeEmail($userId, $fullName ?: $email, $email);
 
                 // Fetch user
                 $user = DB::table('users')->where('id', $userId)->first();

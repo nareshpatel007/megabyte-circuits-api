@@ -19,7 +19,9 @@ class GoogleController extends Controller
     public function redirect()
     {
         try {
-            return Socialite::driver('google')->stateless()->redirect();
+            /** @var \Laravel\Socialite\Two\AbstractProvider $provider */
+            $provider = Socialite::driver('google');
+            return $provider->stateless()->redirect();
         } catch (Exception $e) {
             $quoteUrl = env('QUOTE_URL', 'http://localhost:3002');
             return redirect(rtrim($quoteUrl, '/') . '/login?error=' . urlencode('Failed to initialize Google login: ' . $e->getMessage()));
@@ -44,7 +46,9 @@ class GoogleController extends Controller
             }
 
             // Retrieve user details from Google Socialite (stateless)
-            $googleUser = Socialite::driver('google')->stateless()->user();
+            /** @var \Laravel\Socialite\Two\AbstractProvider $provider */
+            $provider = Socialite::driver('google');
+            $googleUser = $provider->stateless()->user();
 
             if (!$googleUser || empty($googleUser->getEmail())) {
                 return redirect($quoteUrl . '/login?error=' . urlencode('Unable to retrieve email from Google user account.'));
@@ -88,6 +92,9 @@ class GoogleController extends Controller
                     'last_login_at' => now(),
                     'last_login_ip' => $request->ip(),
                 ]);
+
+                // Send Client Welcome Email
+                \App\Services\RegisterService::sendWelcomeEmail($user->id, $user->name ?: $email, $email);
             } else {
                 // Update user details
                 $updateData = [

@@ -159,68 +159,7 @@ class RegisterService
             DB::commit();
 
             // Send Client Welcome Email using database template
-            try {
-                $quoteUrl = config('app.cart_url', 'https://cart.megabytecircuit.com');
-                $loginUrl = rtrim($quoteUrl, '/') . '/login';
-
-                $rendered = EmailTemplateService::render('client_welcome', null, [
-                    'name' => $name,
-                    'email' => $email,
-                    'login_url' => $loginUrl,
-                ]);
-
-                if ($rendered['success']) {
-                    $fromAddress = $rendered['from_email'] ?: config('mail.from.address', 'quote@megabytecircuit.com');
-                    $fromName = $rendered['from_name'] ?: config('app.name', 'Megabyte Circuit');
-
-                    \Illuminate\Support\Facades\Config::set('mail.mailers.smtp_global.host', CredentialService::get('mail', 'MAIL_GLOBAL_HOST', 'MAIL_GLOBAL_HOST', config('mail.mailers.smtp.host')));
-                    \Illuminate\Support\Facades\Config::set('mail.mailers.smtp_global.port', CredentialService::get('mail', 'MAIL_GLOBAL_PORT', 'MAIL_GLOBAL_PORT', config('mail.mailers.smtp.port', 587)));
-                    \Illuminate\Support\Facades\Config::set('mail.mailers.smtp_global.username', CredentialService::get('mail', 'MAIL_GLOBAL_USERNAME', 'MAIL_GLOBAL_USERNAME', config('mail.mailers.smtp.username')));
-                    \Illuminate\Support\Facades\Config::set('mail.mailers.smtp_global.password', CredentialService::get('mail', 'MAIL_GLOBAL_PASSWORD', 'MAIL_GLOBAL_PASSWORD', config('mail.mailers.smtp.password')));
-
-                    \Illuminate\Support\Facades\Mail::mailer('smtp_global')->send([], [], function ($message) use ($email, $fromAddress, $fromName, $rendered) {
-                        $message->to($email)
-                            ->from($fromAddress, $fromName)
-                            ->subject($rendered['subject'])
-                            ->html($rendered['body']);
-                    });
-
-                    // Log welcome email in email_logs table
-                    try {
-                        \App\Models\EmailLog::create([
-                            'template_key' => 'client_welcome',
-                            'email_type'   => 'welcome',
-                            'customer_id'  => $user_id,
-                            'from_email'   => $fromAddress,
-                            'from_name'    => $fromName,
-                            'to'           => $email,
-                            'subject'      => $rendered['subject'],
-                            'body'         => $rendered['body'],
-                            'status'       => 'sent',
-                            'sent_at'      => now(),
-                            'is_test'      => false,
-                        ]);
-                    } catch (\Throwable $logEx) {}
-                }
-            } catch (\Throwable $emailErr) {
-                \Illuminate\Support\Facades\Log::error("Failed to send welcome email to {$email}: " . $emailErr->getMessage());
-                try {
-                    \App\Models\EmailLog::create([
-                        'template_key'  => 'client_welcome',
-                        'email_type'    => 'welcome',
-                        'customer_id'   => $user_id,
-                        'from_email'    => $fromAddress ?? config('mail.from.address', 'quote@megabytecircuit.com'),
-                        'from_name'     => $fromName ?? config('app.name', 'Megabyte Circuit'),
-                        'to'            => $email,
-                        'subject'       => $rendered['subject'] ?? 'Welcome to Megabyte Circuits',
-                        'body'          => $rendered['body'] ?? '',
-                        'status'        => 'failed',
-                        'failed_at'     => now(),
-                        'error_message' => $emailErr->getMessage(),
-                        'is_test'       => false,
-                    ]);
-                } catch (\Throwable $logEx) {}
-            }
+            self::sendWelcomeEmail($user_id, $name, $email);
 
             // Dispatch user notification
             try {
@@ -269,5 +208,82 @@ class RegisterService
                 'message' => 'Registration failed: ' . $th->getMessage()
             ];
         }
+    }
+
+    /**
+     * Send Client Welcome Email using database template and log to email_logs table.
+     */
+    public static function sendWelcomeEmail($user_id, $name, $email)
+    {
+        try {
+            $quoteUrl = config('app.cart_url', config('app.frontend_url', 'https://cart.megabytecircuit.com'));
+            $loginUrl = rtrim($quoteUrl, '/') . '/login';
+
+            $rendered = EmailTemplateService::render('client_welcome', null, [
+                'name' => $name,
+                'email' => $email,
+                'login_url' => $loginUrl,
+            ]);
+
+            if ($rendered['success']) {
+                $defaultFromAddress = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', config('mail.from.address', 'quote@megabytecircuit.com'));
+                $defaultFromName = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('app.name', 'Megabyte Circuit'));
+
+                $fromAddress = filter_var($rendered['from_email'] ?? '', FILTER_VALIDATE_EMAIL) ? $rendered['from_email'] : $defaultFromAddress;
+                $fromName = !empty($rendered['from_name']) ? $rendered['from_name'] : $defaultFromName;
+
+                \Illuminate\Support\Facades\Config::set('mail.mailers.smtp_global.transport', 'smtp');
+                \Illuminate\Support\Facades\Config::set('mail.mailers.smtp_global.host', CredentialService::get('mail', 'MAIL_GLOBAL_HOST', 'MAIL_GLOBAL_HOST', config('mail.mailers.smtp.host', 'smtp.gmail.com')));
+                \Illuminate\Support\Facades\Config::set('mail.mailers.smtp_global.port', CredentialService::get('mail', 'MAIL_GLOBAL_PORT', 'MAIL_GLOBAL_PORT', config('mail.mailers.smtp.port', 587)));
+                \Illuminate\Support\Facades\Config::set('mail.mailers.smtp_global.username', CredentialService::get('mail', 'MAIL_GLOBAL_USERNAME', 'MAIL_GLOBAL_USERNAME', config('mail.mailers.smtp.username')));
+                \Illuminate\Support\Facades\Config::set('mail.mailers.smtp_global.password', CredentialService::get('mail', 'MAIL_GLOBAL_PASSWORD', 'MAIL_GLOBAL_PASSWORD', config('mail.mailers.smtp.password')));
+                \Illuminate\Support\Facades\Config::set('mail.mailers.smtp_global.encryption', CredentialService::get('mail', 'MAIL_GLOBAL_ENCRYPTION', 'MAIL_GLOBAL_ENCRYPTION', config('mail.mailers.smtp.encryption', 'tls')));
+
+                \Illuminate\Support\Facades\Mail::mailer('smtp_global')->send([], [], function ($message) use ($email, $fromAddress, $fromName, $rendered) {
+                    $message->to($email)
+                        ->from($fromAddress, $fromName)
+                        ->subject($rendered['subject'])
+                        ->html($rendered['body']);
+                });
+
+                // Log welcome email in email_logs table
+                try {
+                    \App\Models\EmailLog::create([
+                        'template_key' => 'client_welcome',
+                        'email_type'   => 'welcome',
+                        'customer_id'  => $user_id,
+                        'from_email'   => $fromAddress,
+                        'from_name'    => $fromName,
+                        'to'           => $email,
+                        'subject'      => $rendered['subject'],
+                        'body'         => $rendered['body'],
+                        'status'       => 'sent',
+                        'sent_at'      => now(),
+                        'is_test'      => false,
+                    ]);
+                } catch (\Throwable $logEx) {}
+
+                return true;
+            }
+        } catch (\Throwable $emailErr) {
+            \Illuminate\Support\Facades\Log::error("Failed to send welcome email to {$email}: " . $emailErr->getMessage());
+            try {
+                \App\Models\EmailLog::create([
+                    'template_key'  => 'client_welcome',
+                    'email_type'    => 'welcome',
+                    'customer_id'   => $user_id,
+                    'from_email'    => $fromAddress ?? config('mail.from.address', 'quote@megabytecircuit.com'),
+                    'from_name'     => $fromName ?? config('app.name', 'Megabyte Circuit'),
+                    'to'            => $email,
+                    'subject'       => $rendered['subject'] ?? 'Welcome to Megabyte Circuits',
+                    'body'          => $rendered['body'] ?? '',
+                    'status'        => 'failed',
+                    'failed_at'     => now(),
+                    'error_message' => $emailErr->getMessage(),
+                    'is_test'       => false,
+                ]);
+            } catch (\Throwable $logEx) {}
+        }
+        return false;
     }
 }

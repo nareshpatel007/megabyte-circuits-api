@@ -412,6 +412,9 @@ class AdminController extends Controller
 
             $userId = DB::table('users')->insertGetId($insertData);
 
+            // Send Client Welcome Email
+            \App\Services\RegisterService::sendWelcomeEmail($userId, $name, $email);
+
             // Sync with pcb_users if table exists
             if (Schema::hasTable('pcb_users')) {
                 $pcbCols = Schema::getColumnListing('pcb_users');
