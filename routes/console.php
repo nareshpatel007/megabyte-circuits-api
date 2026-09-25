@@ -7,3 +7,10 @@ Artisan::command('holidays:cleanup', function () {
     DeliveryCalendarService::cleanupPastHolidays();
     $this->info('Past holidays cleaned up successfully.');
 })->purpose('Auto-delete past holidays from database');
+
+Artisan::command('pending-registrations:cleanup', function () {
+    $deleted = \Illuminate\Support\Facades\DB::table('pending_registrations')
+        ->where('otp_expires_at', '<', now()->subHours(24))
+        ->delete();
+    $this->info("Expired pending registrations cleaned up successfully ({$deleted} records removed).");
+})->purpose('Auto-delete expired pending registrations older than 24 hours');

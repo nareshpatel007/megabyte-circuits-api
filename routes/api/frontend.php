@@ -56,6 +56,8 @@ Route::prefix('auth/')->group(function () {
     Route::get('google/callback', [GoogleController::class, 'callback']);
     Route::post('login', [AuthController::class, 'login']);
     Route::post('register', [AuthController::class, 'register']);
+    Route::post('register/verify-otp', [AuthController::class, 'verifyRegisterOtp']);
+    Route::post('register/resend-otp', [AuthController::class, 'resendRegisterOtp']);
     Route::post('google-login', [AuthController::class, 'googleLogin']);
     Route::post('logout', [AuthController::class, 'logout']);
     Route::post('forgot-password', [\App\Http\Controllers\PasswordResetController::class, 'clientForgotPassword']);

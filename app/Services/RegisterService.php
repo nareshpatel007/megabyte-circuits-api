@@ -5,11 +5,30 @@ namespace App\Services;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use App\Models\PendingRegistration;
+use App\Jobs\SendClientSignupOtpEmailJob;
+use App\Jobs\SendClientWelcomeEmailJob;
 
 class RegisterService
 {
-    // Handle user registration and workspace setup
+    const OTP_EXPIRATION_MINUTES = 10;
+    const OTP_LENGTH = 6;
+    const OTP_MAX_ATTEMPTS = 5;
+    const OTP_RESEND_COOLDOWN_SECONDS = 60;
+
+    /**
+     * Legacy register method wrapper.
+     */
     public function register($userdata = [])
+    {
+        return $this->initiateRegistration($userdata, request()->ip(), request()->userAgent());
+    }
+
+    /**
+     * Initiate custom email signup: validate details, store pending registration, generate & send OTP.
+     * NOTE: Does NOT create user in database yet!
+     */
+    public function initiateRegistration($userdata = [], $ip = null, $userAgent = null)
     {
         $name = $userdata['name'] ?? null;
         $first_name = $userdata['first_name'] ?? null;
@@ -20,25 +39,34 @@ class RegisterService
         $phone = $userdata['phone'] ?? null;
         $referral_source = $userdata['referral_source'] ?? null;
 
-        // If names/credentials are empty
-        if(empty($name)) {
+        if (empty($name)) {
+            $name = trim(($first_name ?? '') . ' ' . ($last_name ?? ''));
+        }
+
+        // Validation rules
+        if (empty($name)) {
             return [
                 'status' => false,
                 'message' => 'Name is required.'
             ];
-        } else if(empty($email)) {
+        } else if (empty($email)) {
             return [
                 'status' => false,
                 'message' => 'Email address is required.'
             ];
-        } else if(empty($password)) {
+        } else if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return [
+                'status' => false,
+                'message' => 'Please enter a valid email address.'
+            ];
+        } else if (empty($password)) {
             return [
                 'status' => false,
                 'message' => 'Password is required.'
             ];
         }
 
-        // Check if user exists by email or username/name
+        // Check if user already exists by email or username/name in users table
         $username = $userdata['username'] ?? null;
         $hasUsernameCol = Schema::hasColumn('users', 'username');
         $existingUser = DB::table('users')
@@ -53,7 +81,6 @@ class RegisterService
             })
             ->first();
 
-        // If user found
         if (!empty($existingUser)) {
             if (strtolower($existingUser->email ?? '') === strtolower($email)) {
                 return [
@@ -67,9 +94,8 @@ class RegisterService
             ];
         }
 
-        // Check if invite token is provided
+        // Check if invite token is provided and valid
         $inviteToken = $userdata['invite_token'] ?? null;
-        $invite = null;
         if ($inviteToken) {
             $invite = DB::table('workspace_invitations')
                 ->where('token', $inviteToken)
@@ -83,131 +109,326 @@ class RegisterService
             }
         }
 
-        // Begin Transaction
+        // Remove any old unexpired pending registration for this same email to avoid clutter
+        PendingRegistration::where('email', $email)
+            ->whereNull('used_at')
+            ->delete();
+
+        // Generate Secure Registration Token (64 chars)
+        $registrationToken = Str::random(64);
+        $registrationTokenHash = hash('sha256', $registrationToken);
+
+        // Generate Cryptographically Secure 6-Digit OTP
+        $otp = (string) random_int(100000, 999999);
+        $otpHash = hash('sha256', $otp);
+
+        // Hash Password - NEVER store plain password
+        $passwordHash = password_hash($password, PASSWORD_BCRYPT);
+
+        // Store Pending Registration Data
+        $pending = PendingRegistration::create([
+            'registration_token_hash' => $registrationTokenHash,
+            'email'                   => $email,
+            'username'                => $username,
+            'name'                    => $name,
+            'first_name'              => $first_name,
+            'last_name'               => $last_name,
+            'password_hash'           => $passwordHash,
+            'company_name'            => $company_name,
+            'country'                 => $userdata['country'] ?? null,
+            'gst_number'              => $userdata['gst_number'] ?? null,
+            'phone'                   => $phone,
+            'referral_source'         => $referral_source,
+            'invite_token'            => $inviteToken,
+            'payload'                 => $userdata,
+            'otp_hash'                => $otpHash,
+            'otp_expires_at'          => now()->addMinutes(self::OTP_EXPIRATION_MINUTES),
+            'otp_attempts'            => 0,
+            'max_attempts'            => self::OTP_MAX_ATTEMPTS,
+            'last_otp_sent_at'        => now(),
+            'ip_address'              => $ip,
+            'user_agent'              => $userAgent,
+        ]);
+
+        // Send OTP Email via Job & Fallback
+        try {
+            SendClientSignupOtpEmailJob::dispatch($pending->id, $otp);
+        } catch (\Throwable $jobErr) {}
+        
+        // Execute synchronous send to guarantee delivery if queue runner is not active
+        SendClientSignupOtpEmailJob::sendOtp($pending, $otp);
+
+        return [
+            'status'             => true,
+            'success'            => true,
+            'message'            => 'Verification code sent to your email.',
+            'registration_token' => $registrationToken,
+            'expires_in'         => self::OTP_EXPIRATION_MINUTES * 60,
+        ];
+    }
+
+    /**
+     * Verify OTP and Create Verified User Account.
+     * Transactional and Idempotent.
+     */
+    public function verifyOtpAndCreateUser(string $registrationToken, string $otp)
+    {
+        $registrationToken = trim($registrationToken);
+        $otp = trim($otp);
+
+        if (empty($registrationToken) || empty($otp)) {
+            return [
+                'status'  => false,
+                'message' => 'Registration token and verification code are required.'
+            ];
+        }
+
+        $tokenHash = hash('sha256', $registrationToken);
+
+        $pending = PendingRegistration::where('registration_token_hash', $tokenHash)
+            ->whereNull('used_at')
+            ->first();
+
+        if (!$pending) {
+            return [
+                'status'  => false,
+                'message' => 'Invalid or expired registration session. Please start signup again.'
+            ];
+        }
+
+        // Check if OTP has expired
+        if ($pending->otp_expires_at && $pending->otp_expires_at->isPast()) {
+            return [
+                'status'  => false,
+                'message' => 'This verification code has expired. Please request a new code.'
+            ];
+        }
+
+        // Check if maximum attempts exceeded
+        if ($pending->otp_attempts >= $pending->max_attempts) {
+            return [
+                'status'  => false,
+                'message' => 'Too many attempts. Please request a new verification code.'
+            ];
+        }
+
+        // Validate OTP
+        $inputOtpHash = hash('sha256', $otp);
+        if ($inputOtpHash !== $pending->otp_hash && !password_verify($otp, $pending->otp_hash)) {
+            $pending->increment('otp_attempts');
+            return [
+                'status'  => false,
+                'message' => 'Invalid verification code.'
+            ];
+        }
+
+        // Check if email already registered in interim
+        $existing = DB::table('users')->where('email', $pending->email)->first();
+        if ($existing) {
+            $pending->update(['used_at' => now(), 'verified_at' => now()]);
+            return [
+                'status'  => false,
+                'message' => 'An account with this email address already exists. Please sign in.'
+            ];
+        }
+
+        // Begin Transaction for atomic account creation
         DB::beginTransaction();
 
         try {
-            // Create User
-            $token = md5(uniqid());
-            $password_hash = password_hash($password, PASSWORD_BCRYPT);
+            // Mark pending registration as verified and used
+            $pending->update([
+                'verified_at' => now(),
+                'used_at'     => now(),
+            ]);
 
             // Generate unique referral code
             do {
                 $referralCode = strtoupper(Str::random(8));
             } while (DB::table('users')->where('referral_code', $referralCode)->exists());
 
-            // Create new user with 50 starting credits
+            $token = md5(uniqid());
+
             $user_data = [
-                'name' => $name,
-                'first_name' => $first_name,
-                'last_name' => $last_name,
-                'email' => $email,
-                'password_hash' => $password_hash,
-                'token' => $token,
-                'referral_code' => $referralCode,
+                'name'              => $pending->name,
+                'first_name'        => $pending->first_name,
+                'last_name'         => $pending->last_name,
+                'email'             => $pending->email,
+                'password_hash'     => $pending->password_hash,
+                'token'             => $token,
+                'referral_code'     => $referralCode,
                 'available_credits' => 50,
-                'status' => 'active',
-                'created_at' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s')
+                'status'            => 'active',
+                'created_at'        => date('Y-m-d H:i:s'),
+                'updated_at'        => date('Y-m-d H:i:s')
             ];
 
-            if (!empty($company_name)) {
-                $user_data['company_name'] = $company_name;
+            if (!empty($pending->company_name) && Schema::hasColumn('users', 'company_name')) {
+                $user_data['company_name'] = $pending->company_name;
             }
-            if (!empty($userdata['country'])) {
-                $user_data['country'] = $userdata['country'];
+            if (!empty($pending->country) && Schema::hasColumn('users', 'country')) {
+                $user_data['country'] = $pending->country;
             }
-            if (!empty($userdata['gst_number'])) {
-                $user_data['gst_number'] = $userdata['gst_number'];
+            if (!empty($pending->gst_number) && Schema::hasColumn('users', 'gst_number')) {
+                $user_data['gst_number'] = $pending->gst_number;
             }
-            if (!empty($phone)) {
-                $user_data['phone_number'] = $phone;
+            if (!empty($pending->phone) && Schema::hasColumn('users', 'phone_number')) {
+                $user_data['phone_number'] = $pending->phone;
             }
-            if (!empty($referral_source)) {
-                $user_data['referral_source'] = $referral_source;
+            if (!empty($pending->referral_source) && Schema::hasColumn('users', 'referral_source')) {
+                $user_data['referral_source'] = $pending->referral_source;
             }
 
             $user_id = DB::table('users')->insertGetId($user_data);
 
-            // Create a wallet transaction for the signup bonus if table exists
+            // Wallet transaction for starting credits
             if (Schema::hasTable('wallet_transactions')) {
                 DB::table('wallet_transactions')->insert([
-                    'user_id' => $user_id,
+                    'user_id'          => $user_id,
                     'transaction_type' => 'signup_bonus',
-                    'credit_type' => 'credit',
-                    'credits' => 50,
-                    'opening_balance' => 0,
-                    'closing_balance' => 50,
-                    'remarks' => '50 FREE Credits added on successful registration.',
-                    'created_at' => date('Y-m-d H:i:s')
+                    'credit_type'       => 'credit',
+                    'credits'          => 50,
+                    'opening_balance'  => 0,
+                    'closing_balance'  => 50,
+                    'remarks'          => '50 FREE Credits added on successful registration.',
+                    'created_at'       => date('Y-m-d H:i:s')
                 ]);
             }
 
-            // Log activity with signup details if table exists
+            // Activity Log
             if (Schema::hasTable('activity_logs')) {
                 DB::table('activity_logs')->insert([
-                    'user_id' => $user_id,
-                    'action' => 'register',
-                    'module' => 'Authentication',
-                    'log_data' => json_encode(['description' => 'New user registered.']),
-                    'ip_address' => request()->ip(),
-                    'user_agent' => request()->userAgent(),
+                    'user_id'    => $user_id,
+                    'action'     => 'register',
+                    'module'     => 'Authentication',
+                    'log_data'   => json_encode(['description' => 'New user registered after OTP email verification.']),
+                    'ip_address' => $pending->ip_address,
+                    'user_agent' => $pending->user_agent,
                     'created_at' => date('Y-m-d H:i:s')
                 ]);
             }
 
             DB::commit();
 
-            // Send Client Welcome Email using database template
-            self::sendWelcomeEmail($user_id, $name, $email);
+            // Dispatch Welcome Email via Queue & Fallback
+            try {
+                SendClientWelcomeEmailJob::dispatch($user_id);
+            } catch (\Throwable $jobEx) {}
+            self::sendWelcomeEmail($user_id, $pending->name, $pending->email);
 
-            // Dispatch user notification
+            // Trigger Notifications
             try {
                 NotificationService::notifyUser($user_id, 'user.registered', [
-                    'title' => 'Welcome to Megabyte Circuits',
-                    'message' => 'Your account has been registered successfully.',
-                    'category' => 'system',
-                    'theme' => 'success',
+                    'title'       => 'Welcome to Megabyte Circuits',
+                    'message'     => 'Your account has been registered successfully.',
+                    'category'    => 'system',
+                    'theme'       => 'success',
                     'entity_type' => 'user',
-                    'entity_id' => $user_id,
+                    'entity_id'   => $user_id,
                 ]);
 
                 NotificationService::notifyAdmins('user.registered', [
-                    'title' => 'New Customer Registration',
-                    'message' => "New customer registered: {$name} ({$email})",
-                    'category' => 'system',
-                    'theme' => 'info',
+                    'title'       => 'New Customer Registration',
+                    'message'     => "New customer registered: {$pending->name} ({$pending->email})",
+                    'category'    => 'system',
+                    'theme'       => 'info',
                     'entity_type' => 'user',
-                    'entity_id' => $user_id,
+                    'entity_id'   => $user_id,
                 ]);
             } catch (\Throwable $notifErr) {}
 
-            // Generate JWT Token for immediate login
+            // Generate JWT Token for immediate auto login
             $payload = [
                 'user_id' => $user_id,
-                'name' => $name,
-                'email' => $email,
+                'name'    => $pending->name,
+                'email'   => $pending->email,
             ];
             $jwt_token = \Firebase\JWT\JWT::encode($payload, env('JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA='), 'HS256');
 
             return [
-                'status' => true,
-                'message' => 'Registration successful.',
-                'data' => [
+                'status'  => true,
+                'success' => true,
+                'message' => 'Account created successfully!',
+                'data'    => [
                     'access_token' => $jwt_token,
-                    'user_id' => $user_id,
-                    'name' => $name,
-                    'email' => $email
+                    'user_id'      => $user_id,
+                    'name'         => $pending->name,
+                    'email'        => $pending->email
                 ]
             ];
 
         } catch (\Throwable $th) {
             DB::rollBack();
             return [
-                'status' => false,
-                'message' => 'Registration failed: ' . $th->getMessage()
+                'status'  => false,
+                'message' => 'Account creation failed: ' . $th->getMessage()
             ];
         }
+    }
+
+    /**
+     * Resend Signup Verification OTP.
+     */
+    public function resendOtp(string $registrationToken)
+    {
+        $registrationToken = trim($registrationToken);
+
+        if (empty($registrationToken)) {
+            return [
+                'status'  => false,
+                'message' => 'Registration token is required.'
+            ];
+        }
+
+        $tokenHash = hash('sha256', $registrationToken);
+
+        $pending = PendingRegistration::where('registration_token_hash', $tokenHash)
+            ->whereNull('used_at')
+            ->first();
+
+        if (!$pending) {
+            return [
+                'status'  => false,
+                'message' => 'Invalid or expired registration session.'
+            ];
+        }
+
+        // Rate limiting: check resend cooldown (60s)
+        if ($pending->last_otp_sent_at) {
+            $secondsSinceLastSent = now()->diffInSeconds($pending->last_otp_sent_at);
+            if ($secondsSinceLastSent < self::OTP_RESEND_COOLDOWN_SECONDS) {
+                $remaining = self::OTP_RESEND_COOLDOWN_SECONDS - $secondsSinceLastSent;
+                return [
+                    'status'    => false,
+                    'message'   => "Please wait {$remaining} seconds before requesting a new code.",
+                    'remaining' => $remaining,
+                ];
+            }
+        }
+
+        // Generate new OTP
+        $newOtp = (string) random_int(100000, 999999);
+        $newOtpHash = hash('sha256', $newOtp);
+
+        $pending->update([
+            'otp_hash'         => $newOtpHash,
+            'otp_expires_at'    => now()->addMinutes(self::OTP_EXPIRATION_MINUTES),
+            'otp_attempts'      => 0,
+            'last_otp_sent_at'  => now(),
+        ]);
+
+        // Send new OTP email via Job & Fallback
+        try {
+            SendClientSignupOtpEmailJob::dispatch($pending->id, $newOtp);
+        } catch (\Throwable $jobErr) {}
+        SendClientSignupOtpEmailJob::sendOtp($pending, $newOtp);
+
+        return [
+            'status'     => true,
+            'success'    => true,
+            'message'    => 'A new verification code has been sent to your email.',
+            'expires_in' => self::OTP_EXPIRATION_MINUTES * 60,
+        ];
     }
 
     /**
@@ -220,17 +441,17 @@ class RegisterService
             $loginUrl = rtrim($quoteUrl, '/') . '/login';
 
             $rendered = EmailTemplateService::render('client_welcome', null, [
-                'name' => $name,
-                'email' => $email,
+                'name'      => $name,
+                'email'     => $email,
                 'login_url' => $loginUrl,
             ]);
 
             if ($rendered['success']) {
                 $defaultFromAddress = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', config('mail.from.address', 'quote@megabytecircuit.com'));
-                $defaultFromName = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('app.name', 'Megabyte Circuit'));
+                $defaultFromName    = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('app.name', 'Megabyte Circuit'));
 
                 $fromAddress = filter_var($rendered['from_email'] ?? '', FILTER_VALIDATE_EMAIL) ? $rendered['from_email'] : $defaultFromAddress;
-                $fromName = !empty($rendered['from_name']) ? $rendered['from_name'] : $defaultFromName;
+                $fromName    = !empty($rendered['from_name']) ? $rendered['from_name'] : $defaultFromName;
 
                 \Illuminate\Support\Facades\Config::set('mail.mailers.smtp_global.transport', 'smtp');
                 \Illuminate\Support\Facades\Config::set('mail.mailers.smtp_global.host', CredentialService::get('mail', 'MAIL_GLOBAL_HOST', 'MAIL_GLOBAL_HOST', config('mail.mailers.smtp.host', 'smtp.gmail.com')));

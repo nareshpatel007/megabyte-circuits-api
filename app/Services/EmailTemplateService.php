@@ -146,6 +146,7 @@ class EmailTemplateService
         $cartBaseUrl = config('app.cart_url', 'https://cart.megabytecircuit.com');
 
         $commonCompanyVars = [
+            'app_name'         => $appName,
             'company_name'     => $companyName,
             'company_logo_url' => $companyLogoUrl,
             'company_email'    => $companyEmail,
@@ -471,7 +472,32 @@ class EmailTemplateService
      */
     public static function getAvailableVariables(string $templateKey): array
     {
-        if ($templateKey === 'daily_order_progress_report') {
+        $normalizedKey = strtolower(trim($templateKey));
+
+        if ($normalizedKey === 'client_signup_otp') {
+            return [
+                ['var' => '{{name}}', 'desc' => 'Customer Full Name'],
+                ['var' => '{{email}}', 'desc' => 'Customer Email Address'],
+                ['var' => '{{otp}}', 'desc' => '6-Digit Verification Code'],
+                ['var' => '{{otp_expiry_minutes}}', 'desc' => 'OTP Validity Duration in Minutes (e.g. 10)'],
+                ['var' => '{{app_name}}', 'desc' => 'Application Name'],
+                ['var' => '{{company_name}}', 'desc' => 'Company Name from Settings'],
+                ['var' => '{{company_email}}', 'desc' => 'Company Support Email'],
+            ];
+        }
+
+        if ($normalizedKey === 'client_welcome') {
+            return [
+                ['var' => '{{name}}', 'desc' => 'Customer Full Name'],
+                ['var' => '{{email}}', 'desc' => 'Customer Email Address'],
+                ['var' => '{{login_url}}', 'desc' => 'Direct Portal Sign-In URL'],
+                ['var' => '{{app_name}}', 'desc' => 'Application Name'],
+                ['var' => '{{company_name}}', 'desc' => 'Company Name from Settings'],
+                ['var' => '{{company_email}}', 'desc' => 'Company Support Email'],
+            ];
+        }
+
+        if ($normalizedKey === 'daily_order_progress_report') {
             return [
                 ['var' => '{{report_date}}', 'desc' => 'Report Date (e.g. 23 September 2026)'],
                 ['var' => '{{total_orders}}', 'desc' => 'Total Active Orders Count'],

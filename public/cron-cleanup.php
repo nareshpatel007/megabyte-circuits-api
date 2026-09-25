@@ -26,7 +26,7 @@ if (isset($_GET['all']) && (filter_var($_GET['all'], FILTER_VALIDATE_BOOLEAN) ||
 $type = $_GET['type'] ?? 'all';
 
 header('Content-Type: text/plain');
-echo "=== System Cleanup Execution (Email Logs & Notifications) ===\n";
+echo "=== System Cleanup Execution (Email Logs, Notifications, Pending Registrations & Holidays) ===\n";
 echo "Timestamp: " . date('Y-m-d H:i:s') . "\n\n";
 
 if ($type === 'all' || $type === 'email' || $type === 'email-logs') {
@@ -42,6 +42,22 @@ if ($type === 'all' || $type === 'notifications' || $type === 'notification') {
     $statusNotif = $kernel->call('notifications:cleanup', $notificationOptions);
     $outputNotif = $kernel->output();
     echo $outputNotif ? $outputNotif : "Notifications cleanup executed successfully.\n";
+    echo "\n";
+}
+
+if ($type === 'all' || $type === 'pending-registrations' || $type === 'pending' || $type === 'registrations') {
+    echo "--- Executing Pending Registrations Cleanup ---\n";
+    $statusPending = $kernel->call('pending-registrations:cleanup');
+    $outputPending = $kernel->output();
+    echo $outputPending ? $outputPending : "Pending registrations cleanup executed successfully.\n";
+    echo "\n";
+}
+
+if ($type === 'all' || $type === 'holidays' || $type === 'holiday') {
+    echo "--- Executing Past Holidays Cleanup ---\n";
+    $statusHolidays = $kernel->call('holidays:cleanup');
+    $outputHolidays = $kernel->output();
+    echo $outputHolidays ? $outputHolidays : "Past holidays cleanup executed successfully.\n";
     echo "\n";
 }
 

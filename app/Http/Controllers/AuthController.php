@@ -112,6 +112,51 @@ class AuthController extends Controller
         }
     }
 
+    // Verify Register OTP
+    public function verifyRegisterOtp(Request $request, \App\Services\RegisterService $registerService)
+    {
+        try {
+            $input = $request->all();
+            if (empty($input) && $request->getContent()) {
+                $input = json_decode($request->getContent(), true) ?? [];
+            }
+
+            $registrationToken = $input['registration_token'] ?? $input['token'] ?? $request->input('registration_token');
+            $otp = $input['otp'] ?? $input['code'] ?? $request->input('otp');
+
+            $result = $registerService->verifyOtpAndCreateUser((string)$registrationToken, (string)$otp);
+
+            return response()->json($result, ($result['status'] ?? $result['success'] ?? false) ? 200 : 400);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => false,
+                'message' => 'OTP verification failed: ' . $th->getMessage()
+            ], 500);
+        }
+    }
+
+    // Resend Register OTP
+    public function resendRegisterOtp(Request $request, \App\Services\RegisterService $registerService)
+    {
+        try {
+            $input = $request->all();
+            if (empty($input) && $request->getContent()) {
+                $input = json_decode($request->getContent(), true) ?? [];
+            }
+
+            $registrationToken = $input['registration_token'] ?? $input['token'] ?? $request->input('registration_token');
+
+            $result = $registerService->resendOtp((string)$registrationToken);
+
+            return response()->json($result, ($result['status'] ?? $result['success'] ?? false) ? 200 : 400);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Resend OTP failed: ' . $th->getMessage()
+            ], 500);
+        }
+    }
+
     // Verify account
     public function verification(Request $request)
     {
