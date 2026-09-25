@@ -1232,6 +1232,153 @@ class AuthController extends Controller
         }
     }
 
+    /**
+     * Centralized current user validation API.
+     * Verifies token and checks current account status from the database (source of truth).
+     */
+    public function me(Request $request)
+    {
+        try {
+            $authHeader = $request->header('Authorization');
+            if (!$authHeader || !str_starts_with($authHeader, 'Bearer ')) {
+                return response()->json([
+                    'status' => false,
+                    'success' => false,
+                    'authenticated' => false,
+                    'code' => 'AUTH_REQUIRED',
+                    'message' => 'No authentication token provided.'
+                ], 401);
+            }
+
+            $token = str_replace('Bearer ', '', $authHeader);
+            $secret = \App\Services\CredentialService::get('auth', 'JWT_SECRET', 'JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
+
+            try {
+                $decoded = JWT::decode($token, new \Firebase\JWT\Key($secret, 'HS256'));
+            } catch (\Firebase\JWT\ExpiredException $e) {
+                return response()->json([
+                    'status' => false,
+                    'success' => false,
+                    'authenticated' => false,
+                    'code' => 'TOKEN_EXPIRED',
+                    'message' => 'Your session has expired. Please log in again.'
+                ], 401);
+            } catch (\Throwable $e) {
+                return response()->json([
+                    'status' => false,
+                    'success' => false,
+                    'authenticated' => false,
+                    'code' => 'TOKEN_INVALID',
+                    'message' => 'Invalid session token. Please log in again.'
+                ], 401);
+            }
+
+            $userId = $decoded->user_id ?? null;
+            if (empty($userId)) {
+                return response()->json([
+                    'status' => false,
+                    'success' => false,
+                    'authenticated' => false,
+                    'code' => 'TOKEN_INVALID',
+                    'message' => 'Invalid session payload.'
+                ], 401);
+            }
+
+            // Always fetch fresh user status from database
+            $user = DB::table('users')->where('id', $userId)->first();
+
+            if (!$user) {
+                return response()->json([
+                    'status' => false,
+                    'success' => false,
+                    'authenticated' => false,
+                    'code' => 'ACCOUNT_NOT_FOUND',
+                    'message' => 'Account not found.'
+                ], 401);
+            }
+
+            $status = strtolower(trim((string)($user->status ?? 'active')));
+
+            if ($status === 'suspended') {
+                return response()->json([
+                    'status' => false,
+                    'success' => false,
+                    'authenticated' => false,
+                    'code' => 'ACCOUNT_SUSPENDED',
+                    'message' => 'Your account has been suspended by the administrator.'
+                ], 403);
+            }
+
+            if ($status === 'blocked') {
+                return response()->json([
+                    'status' => false,
+                    'success' => false,
+                    'authenticated' => false,
+                    'code' => 'ACCOUNT_BLOCKED',
+                    'message' => 'Your account has been blocked. Please contact support.'
+                ], 403);
+            }
+
+            if ($status === 'inactive') {
+                return response()->json([
+                    'status' => false,
+                    'success' => false,
+                    'authenticated' => false,
+                    'code' => 'ACCOUNT_INACTIVE',
+                    'message' => 'Your account is currently inactive.'
+                ], 403);
+            }
+
+            if ($status === 'pending') {
+                return response()->json([
+                    'status' => false,
+                    'success' => false,
+                    'authenticated' => false,
+                    'code' => 'ACCOUNT_PENDING',
+                    'message' => 'Your account is awaiting approval.'
+                ], 403);
+            }
+
+            if ($status === 'deactivated' || $status === 'deleted') {
+                return response()->json([
+                    'status' => false,
+                    'success' => false,
+                    'authenticated' => false,
+                    'code' => 'ACCOUNT_DEACTIVATED',
+                    'message' => 'Your account is no longer active.'
+                ], 403);
+            }
+
+            return response()->json([
+                'status' => true,
+                'success' => true,
+                'authenticated' => true,
+                'user' => [
+                    'id' => $user->id,
+                    'uuid' => $user->uuid ?? null,
+                    'name' => $user->name ?? (($user->first_name ?? '') . ' ' . ($user->last_name ?? '')),
+                    'first_name' => $user->first_name ?? '',
+                    'last_name' => $user->last_name ?? '',
+                    'email' => $user->email,
+                    'status' => $status,
+                    'company_name' => $user->company_name ?? '',
+                    'phone_number' => $user->phone_number ?? '',
+                    'avatar' => $user->avatar ?? null,
+                    'available_credits' => intval($user->available_credits ?? 0),
+                    'total_bonus_credits' => intval($user->total_bonus_credits ?? 0),
+                ]
+            ]);
+
+        } catch (\Throwable $th) {
+            return response()->json([
+                'status' => false,
+                'success' => false,
+                'authenticated' => false,
+                'message' => $th->getMessage()
+            ], 500);
+        }
+    }
+
     private function getUserIdFromToken(Request $request)
     {
         $authHeader = $request->header('Authorization');

@@ -186,6 +186,32 @@ class NotificationController extends Controller
 
             // Loop for 25 seconds max (standard SSE polling connection duration)
             while (time() - $start < 25) {
+                if ($userId) {
+                    $u = \Illuminate\Support\Facades\DB::table('users')->where('id', $userId)->first();
+                    if ($u) {
+                        $st = strtolower(trim((string)($u->status ?? 'active')));
+                        if ($st !== 'active') {
+                            $code = 'ACCOUNT_' . strtoupper($st);
+                            $msg = 'Your account status has been updated to ' . ucfirst($st) . '.';
+                            if ($st === 'suspended') {
+                                $msg = 'Your account has been suspended by the administrator.';
+                            } else if ($st === 'blocked') {
+                                $msg = 'Your account has been blocked. Please contact support.';
+                            }
+
+                            echo "data: " . json_encode([
+                                'type' => 'account_status_changed',
+                                'status' => $st,
+                                'code' => $code,
+                                'message' => $msg
+                            ]) . "\n\n";
+                            if (ob_get_level() > 0) ob_flush();
+                            flush();
+                            break;
+                        }
+                    }
+                }
+
                 $query = Notification::where('recipient_type', 'user')
                     ->where(function ($q) use ($userId) {
                         if ($userId) {

@@ -52,6 +52,7 @@ Route::post('digikey/sync', [\App\Http\Controllers\DigiKeyProductsController::cl
 
 // Auth Routes
 Route::prefix('auth/')->group(function () {
+    Route::get('me', [AuthController::class, 'me']);
     Route::get('google', [GoogleController::class, 'redirect']);
     Route::get('google/callback', [GoogleController::class, 'callback']);
     Route::post('login', [AuthController::class, 'login']);

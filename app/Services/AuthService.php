@@ -35,11 +35,41 @@ class AuthService
             ];
         }
 
-        // Check status
-        if (isset($user->status) && $user->status !== 'active' && $user->status !== 'Active') {
+        // Check account status
+        $status = strtolower(trim((string)($user->status ?? 'active')));
+        if ($status !== 'active') {
+            if ($status === 'suspended') {
+                return [
+                    'status' => false,
+                    'code' => 'ACCOUNT_SUSPENDED',
+                    'message' => 'Your account has been suspended by the administrator.'
+                ];
+            }
+            if ($status === 'blocked') {
+                return [
+                    'status' => false,
+                    'code' => 'ACCOUNT_BLOCKED',
+                    'message' => 'Your account has been blocked. Please contact support.'
+                ];
+            }
+            if ($status === 'pending') {
+                return [
+                    'status' => false,
+                    'code' => 'ACCOUNT_PENDING',
+                    'message' => 'Your account is awaiting approval.'
+                ];
+            }
+            if ($status === 'deactivated' || $status === 'deleted') {
+                return [
+                    'status' => false,
+                    'code' => 'ACCOUNT_DEACTIVATED',
+                    'message' => 'Your account is no longer active.'
+                ];
+            }
             return [
                 'status' => false,
-                'message' => 'Your account is inactive.'
+                'code' => 'ACCOUNT_INACTIVE',
+                'message' => 'Your account is currently inactive.'
             ];
         }
 

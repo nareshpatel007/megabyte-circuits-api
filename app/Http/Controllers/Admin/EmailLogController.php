@@ -172,6 +172,9 @@ class EmailLogController extends Controller
             SUM(CASE WHEN DATE(created_at) = ? AND status = 'failed' THEN 1 ELSE 0 END) as today_failed_count
         ", [$todayStr, $todayStr])->first();
 
+        $retentionDays = CredentialService::get('email_logs', 'retention_days', 'EMAIL_LOG_RETENTION_DAYS', '90');
+        $loggingEnabled = CredentialService::get('email_logs', 'logging_enabled', 'EMAIL_LOGGING_ENABLED', '1');
+
         return response()->json([
             'success' => true,
             'data' => [
@@ -183,6 +186,8 @@ class EmailLogController extends Controller
                 'skipped'         => (int)($stats->skipped_count ?? 0),
                 'today_count'     => (int)($stats->today_count ?? 0),
                 'today_failed'    => (int)($stats->today_failed_count ?? 0),
+                'retention_days'  => $retentionDays,
+                'logging_enabled' => filter_var($loggingEnabled, FILTER_VALIDATE_BOOLEAN),
             ]
         ]);
     }
