@@ -156,20 +156,59 @@ class RegisterService
                 ]);
             }
 
-            // Queue verification email if table exists
-            if (Schema::hasTable('email_queue')) {
-                DB::table('email_queue')->insert([
-                    'to' => $email,
-                    'subject' => 'Verify Your Email Address - Megabyte',
-                    'template_path' => 'emails/auth/verify_email',
-                    'data' => json_encode([
-                        'customer_name' => $name,
-                        'token' => $token,
-                    ]),
+            DB::commit();
+
+            // Send Client Welcome Email using database template
+            try {
+                $quoteUrl = config('app.cart_url', 'https://cart.megabytecircuit.com');
+                $loginUrl = rtrim($quoteUrl, '/') . '/login';
+
+                $rendered = EmailTemplateService::render('client_welcome', null, [
+                    'name' => $name,
+                    'email' => $email,
+                    'login_url' => $loginUrl,
                 ]);
+
+                if ($rendered['success']) {
+                    $fromAddress = $rendered['from_email'] ?: config('mail.from.address', 'quote@megabytecircuit.com');
+                    $fromName = $rendered['from_name'] ?: config('app.name', 'Megabyte Circuit');
+
+                    \Illuminate\Support\Facades\Config::set('mail.mailers.smtp_global.host', CredentialService::get('mail', 'MAIL_GLOBAL_HOST', 'MAIL_GLOBAL_HOST', config('mail.mailers.smtp.host')));
+                    \Illuminate\Support\Facades\Config::set('mail.mailers.smtp_global.port', CredentialService::get('mail', 'MAIL_GLOBAL_PORT', 'MAIL_GLOBAL_PORT', config('mail.mailers.smtp.port', 587)));
+                    \Illuminate\Support\Facades\Config::set('mail.mailers.smtp_global.username', CredentialService::get('mail', 'MAIL_GLOBAL_USERNAME', 'MAIL_GLOBAL_USERNAME', config('mail.mailers.smtp.username')));
+                    \Illuminate\Support\Facades\Config::set('mail.mailers.smtp_global.password', CredentialService::get('mail', 'MAIL_GLOBAL_PASSWORD', 'MAIL_GLOBAL_PASSWORD', config('mail.mailers.smtp.password')));
+
+                    \Illuminate\Support\Facades\Mail::mailer('smtp_global')->send([], [], function ($message) use ($email, $fromAddress, $fromName, $rendered) {
+                        $message->to($email)
+                            ->from($fromAddress, $fromName)
+                            ->subject($rendered['subject'])
+                            ->html($rendered['body']);
+                    });
+                }
+            } catch (\Throwable $emailErr) {
+                \Illuminate\Support\Facades\Log::error("Failed to send welcome email to {$email}: " . $emailErr->getMessage());
             }
 
-            DB::commit();
+            // Dispatch user notification
+            try {
+                NotificationService::notifyUser($user_id, 'user.registered', [
+                    'title' => 'Welcome to Megabyte Circuits',
+                    'message' => 'Your account has been registered successfully.',
+                    'category' => 'system',
+                    'theme' => 'success',
+                    'entity_type' => 'user',
+                    'entity_id' => $user_id,
+                ]);
+
+                NotificationService::notifyAdmins('user.registered', [
+                    'title' => 'New Customer Registration',
+                    'message' => "New customer registered: {$name} ({$email})",
+                    'category' => 'system',
+                    'theme' => 'info',
+                    'entity_type' => 'user',
+                    'entity_id' => $user_id,
+                ]);
+            } catch (\Throwable $notifErr) {}
 
             // Generate JWT Token for immediate login
             $payload = [

@@ -527,6 +527,74 @@ class EmailTemplateSeeder extends Seeder
                 'cc' => null,
                 'bcc' => null,
                 'is_active' => true,
+            ],
+            [
+                'key' => 'password_reset_otp',
+                'name' => 'Password Reset Verification Code (OTP)',
+                'subject' => 'Your Megabyte password reset verification code',
+                'body' => '<h2 style="color: #111827; font-size: 20px; font-weight: 700; margin-top: 0; margin-bottom: 16px;">Password Reset Code</h2>
+<p>Hello <strong>{{name}}</strong>,</p>
+<p>We received a request to reset your password for your <strong>{{company_name}}</strong> account.</p>
+<p>Your verification code is:</p>
+<div style="background-color: #f3f4f6; border: 2px dashed #10b981; padding: 16px; text-align: center; border-radius: 8px; margin: 20px 0;">
+    <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #047857; font-family: monospace;">{{otp}}</span>
+</div>
+<p>This code will expire in <strong>{{otp_expiry_minutes}}</strong> minutes.</p>
+<p style="color: #6b7280; font-size: 13px;">If you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.</p>',
+                'to' => '{{email}}',
+                'from_email' => null,
+                'from_name' => '{{company_name}} Security',
+                'cc' => null,
+                'bcc' => null,
+                'is_active' => true,
+            ],
+            [
+                'key' => 'password_reset_success',
+                'name' => 'Password Reset Success Notification',
+                'subject' => 'Your Megabyte password has been updated',
+                'body' => '<h2 style="color: #059669; font-size: 20px; font-weight: 700; margin-top: 0; margin-bottom: 16px;">Password Updated Successfully</h2>
+<p>Hello <strong>{{name}}</strong>,</p>
+<p>Your password for your <strong>{{company_name}}</strong> account was successfully updated.</p>
+<p style="background-color: #ecfdf5; border-left: 4px solid #10b981; padding: 12px; margin: 20px 0; color: #065f46; font-size: 14px;">
+    If you made this change, no further action is needed. You can now sign in with your new password.
+</p>
+<p style="color: #dc2626; font-size: 13px; font-weight: bold;">If you did not make this change, please contact our support team immediately.</p>',
+                'to' => '{{email}}',
+                'from_email' => null,
+                'from_name' => '{{company_name}} Security',
+                'cc' => null,
+                'bcc' => null,
+                'is_active' => true,
+            ],
+            [
+                'key' => 'client_welcome',
+                'name' => 'Client Welcome Email',
+                'subject' => 'Welcome to Megabyte Circuits',
+                'body' => '<h2 style="color: #10b981; font-size: 22px; font-weight: 700; margin-top: 0; margin-bottom: 16px;">Welcome to Megabyte Circuits!</h2>
+<p>Hello <strong>{{name}}</strong>,</p>
+<p>Welcome to <strong>{{company_name}}</strong>! Your client account has been successfully created.</p>
+<p>You can now sign in to your dashboard to upload Gerber files, calculate instant PCB quotes, and track orders in real-time.</p>
+
+<table style="width: 100%; border-collapse: collapse; margin: 20px 0; background-color: #f9fafb; border: 1px solid #e5e7eb;">
+    <tr style="border-bottom: 1px solid #e5e7eb;">
+        <td style="padding: 10px; font-weight: bold; width: 40%;">Account Email:</td>
+        <td style="padding: 10px;">{{email}}</td>
+    </tr>
+    <tr style="border-bottom: 1px solid #e5e7eb;">
+        <td style="padding: 10px; font-weight: bold;">Status:</td>
+        <td style="padding: 10px; color: #059669; font-weight: bold;">Active</td>
+    </tr>
+</table>
+
+<p style="text-align: center; margin-top: 25px;">
+    <a href="{{login_url}}" style="background-color: #10b981; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; display: inline-block;">Sign In to Your Account</a>
+</p>',
+                'to' => '{{email}}',
+                'from_email' => null,
+                'from_name' => '{{company_name}}',
+                'cc' => null,
+                'bcc' => null,
+                'is_active' => true,
             ]
         ];
 
@@ -539,3 +607,4 @@ class EmailTemplateSeeder extends Seeder
         }
     }
 }
+

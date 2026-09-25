@@ -17,11 +17,23 @@ use Illuminate\Support\Facades\Log;
 class EmailTemplateService
 {
     /**
+     * Find an email template by key (supports case-insensitive lookup).
+     */
+    public static function findTemplate(string $templateKey): ?EmailTemplate
+    {
+        $normalizedKey = strtolower(trim($templateKey));
+        return EmailTemplate::where('key', $templateKey)
+            ->orWhere('key', $normalizedKey)
+            ->orWhere('key', strtoupper($normalizedKey))
+            ->first();
+    }
+
+    /**
      * Check if an email template exists and is currently active.
      */
     public static function isTemplateActive(string $templateKey): bool
     {
-        $template = EmailTemplate::where('key', $templateKey)->first();
+        $template = self::findTemplate($templateKey);
         return $template ? (bool)$template->is_active : false;
     }
 
@@ -37,7 +49,7 @@ class EmailTemplateService
      */
     public static function sendOrderEmail(string $templateKey, int $orderId, ?string $overrideTo = null, array $customVars = []): bool
     {
-        $template = EmailTemplate::where('key', $templateKey)->first();
+        $template = self::findTemplate($templateKey);
 
         if (!$template) {
             Log::info("Email skipped: template '{$templateKey}' does not exist.");
@@ -50,7 +62,7 @@ class EmailTemplateService
         }
 
         try {
-            SendTemplateEmailJob::dispatch($templateKey, $orderId, $overrideTo, $customVars);
+            SendTemplateEmailJob::dispatch($template->key, $orderId, $overrideTo, $customVars);
             return true;
         } catch (\Throwable $th) {
             Log::error("Failed to dispatch order email job for template '{$templateKey}': " . $th->getMessage());
@@ -285,7 +297,7 @@ class EmailTemplateService
      */
     public static function render(string $templateKey, ?PcbOrder $order = null, array $customVars = []): array
     {
-        $template = EmailTemplate::where('key', $templateKey)->first();
+        $template = self::findTemplate($templateKey);
 
         if (!$template) {
             return [
@@ -549,7 +561,7 @@ class EmailTemplateService
      */
     public static function renderInventory(string $templateKey, ?InventoryItem $item = null, ?InventoryLog $log = null, array $customVars = []): array
     {
-        $template = EmailTemplate::where('key', $templateKey)->first();
+        $template = self::findTemplate($templateKey);
 
         if (!$template) {
             return [

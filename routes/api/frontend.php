@@ -58,6 +58,10 @@ Route::prefix('auth/')->group(function () {
     Route::post('register', [AuthController::class, 'register']);
     Route::post('google-login', [AuthController::class, 'googleLogin']);
     Route::post('logout', [AuthController::class, 'logout']);
+    Route::post('forgot-password', [\App\Http\Controllers\PasswordResetController::class, 'clientForgotPassword']);
+    Route::post('verify-password-reset-otp', [\App\Http\Controllers\PasswordResetController::class, 'clientVerifyOtp']);
+    Route::post('resend-password-reset-otp', [\App\Http\Controllers\PasswordResetController::class, 'clientResendOtp']);
+    Route::post('reset-password', [\App\Http\Controllers\PasswordResetController::class, 'clientResetPassword']);
 });
 
 // Cart Routes

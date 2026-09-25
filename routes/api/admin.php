@@ -10,6 +10,10 @@ use App\Http\Controllers\OrderController;
 // Public Admin Routes (No Token Required)
 Route::prefix('admin')->group(function () {
     Route::post('login', [AdminController::class, 'login']);
+    Route::post('auth/forgot-password', [\App\Http\Controllers\PasswordResetController::class, 'adminForgotPassword']);
+    Route::post('auth/verify-password-reset-otp', [\App\Http\Controllers\PasswordResetController::class, 'adminVerifyOtp']);
+    Route::post('auth/resend-password-reset-otp', [\App\Http\Controllers\PasswordResetController::class, 'adminResendOtp']);
+    Route::post('auth/reset-password', [\App\Http\Controllers\PasswordResetController::class, 'adminResetPassword']);
     Route::get('blogs/first-10', [BlogController::class, 'firstTenBlogs']);
 });
 
