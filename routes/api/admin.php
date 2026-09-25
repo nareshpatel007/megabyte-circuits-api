@@ -162,6 +162,7 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::get('credentials', [\App\Http\Controllers\CredentialController::class, 'index']);
         Route::post('credentials', [\App\Http\Controllers\CredentialController::class, 'update']);
         Route::put('credentials', [\App\Http\Controllers\CredentialController::class, 'update']);
+        Route::post('credentials/test-smtp', [\App\Http\Controllers\CredentialController::class, 'testSmtp']);
         Route::get('settings/credentials', [\App\Http\Controllers\CredentialController::class, 'index']);
         Route::post('settings/credentials', [\App\Http\Controllers\CredentialController::class, 'update']);
         Route::put('settings/credentials', [\App\Http\Controllers\CredentialController::class, 'update']);
