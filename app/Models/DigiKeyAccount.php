@@ -81,7 +81,7 @@ class DigiKeyAccount extends Model
     {
         $this->update([
             'status' => 'rate_limited',
-            'rate_limited_until' => now()->addDay(),
+            'rate_limited_until' => now()->addHour(),
             'error_message' => $reason,
         ]);
     }
