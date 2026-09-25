@@ -71,7 +71,7 @@ class EmailLogController extends Controller
 
         // 7. Date Range Filter
         $datePreset = $request->input('date_range');
-        if ($datePreset) {
+        if ($datePreset && $datePreset !== 'custom') {
             $now = Carbon::now();
             if ($datePreset === 'today') {
                 $query->whereDate('created_at', $now->toDateString());
@@ -83,13 +83,13 @@ class EmailLogController extends Controller
                 $query->where('created_at', '>=', $now->copy()->subDays(30)->startOfDay());
             } elseif ($datePreset === '90days') {
                 $query->where('created_at', '>=', $now->copy()->subDays(90)->startOfDay());
-            } elseif ($datePreset === 'custom') {
-                if ($startDate = $request->input('start_date')) {
-                    $query->where('created_at', '>=', Carbon::parse($startDate)->startOfDay());
-                }
-                if ($endDate = $request->input('end_date')) {
-                    $query->where('created_at', '<=', Carbon::parse($endDate)->endOfDay());
-                }
+            }
+        } else {
+            if ($startDate = $request->input('start_date')) {
+                $query->where('created_at', '>=', Carbon::parse($startDate)->startOfDay());
+            }
+            if ($endDate = $request->input('end_date')) {
+                $query->where('created_at', '<=', Carbon::parse($endDate)->endOfDay());
             }
         }
 
