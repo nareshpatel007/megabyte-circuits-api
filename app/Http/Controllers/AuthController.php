@@ -1376,6 +1376,17 @@ class AuthController extends Controller
                 ], 403);
             }
 
+            $impersonationData = null;
+            if (!empty($decoded->is_impersonating)) {
+                $impersonationData = [
+                    'active' => true,
+                    'admin_id' => $decoded->admin_id ?? null,
+                    'admin_name' => $decoded->admin_name ?? 'Admin',
+                    'session_id' => $decoded->impersonation_session_id ?? null,
+                    'expires_at' => isset($decoded->exp) ? date('Y-m-d H:i:s', $decoded->exp) : null
+                ];
+            }
+
             return response()->json([
                 'status' => true,
                 'success' => true,
@@ -1393,7 +1404,8 @@ class AuthController extends Controller
                     'avatar' => $user->avatar ?? null,
                     'available_credits' => intval($user->available_credits ?? 0),
                     'total_bonus_credits' => intval($user->total_bonus_credits ?? 0),
-                ]
+                ],
+                'impersonation' => $impersonationData
             ]);
 
         } catch (\Throwable $th) {

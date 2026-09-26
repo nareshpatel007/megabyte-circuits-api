@@ -121,6 +121,37 @@ class VerifyApiToken
                 ], 403);
             }
 
+            // Check for impersonation session validity
+            if (!empty($decoded->is_impersonating) && !empty($decoded->impersonation_session_id)) {
+                $session = DB::table('impersonation_sessions')->where('id', $decoded->impersonation_session_id)->first();
+                if (!$session || $session->status !== 'active') {
+                    return response()->json([
+                        'status' => false,
+                        'success' => false,
+                        'code' => 'IMPERSONATION_ENDED',
+                        'message' => 'Client impersonation session has ended.'
+                    ], 401);
+                }
+
+                if (strtotime($session->expires_at) < time()) {
+                    DB::table('impersonation_sessions')
+                        ->where('id', $session->id)
+                        ->update(['status' => 'expired', 'updated_at' => date('Y-m-d H:i:s')]);
+
+                    return response()->json([
+                        'status' => false,
+                        'success' => false,
+                        'code' => 'IMPERSONATION_EXPIRED',
+                        'message' => 'Your client impersonation session has expired. You have been returned to the Admin panel.'
+                    ], 401);
+                }
+
+                $request->attributes->set('is_impersonating', true);
+                $request->attributes->set('impersonation_admin_id', $decoded->admin_id ?? null);
+                $request->attributes->set('impersonation_admin_name', $decoded->admin_name ?? 'Admin');
+                $request->attributes->set('impersonation_session_id', $session->id);
+            }
+
             // Attach user model/object to request attributes
             $request->attributes->set('authenticated_user', $user);
             return null; // Token and account status valid

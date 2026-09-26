@@ -68,6 +68,10 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::post('clients/merge/preview', [\App\Http\Controllers\ClientMergeController::class, 'preview']);
         Route::post('clients/merge', [\App\Http\Controllers\ClientMergeController::class, 'execute']);
 
+        // Admin Client Impersonation
+        Route::post('clients/{id}/impersonate', [\App\Http\Controllers\ImpersonationController::class, 'start']);
+        Route::post('impersonation/stop', [\App\Http\Controllers\ImpersonationController::class, 'stop']);
+
         Route::get('users', [AdminController::class, 'users']);
         Route::post('users', [AdminController::class, 'createUser']);
         Route::get('users/{id}', [AdminController::class, 'showUser']);
