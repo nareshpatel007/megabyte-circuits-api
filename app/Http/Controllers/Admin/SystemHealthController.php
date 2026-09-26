@@ -425,32 +425,34 @@ class SystemHealthController extends Controller
         }
 
         if ($service === 'razorpay') {
-            $keyId = env('RAZORPAY_KEY_ID') ?: \App\Services\CredentialService::get('razorpay', 'RAZORPAY_KEY_ID');
+            $keyId = \App\Services\CredentialService::get('razorpay', 'RAZORPAY_KEY_ID');
             if (empty($keyId)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Razorpay API Key ID is not configured in credentials or environment.',
                 ], 422);
             }
+            $mode = \App\Services\CredentialService::get('razorpay', 'RAZORPAY_MODE', 'RAZORPAY_MODE', config('services.razorpay.mode', 'sandbox'));
             return response()->json([
                 'success' => true,
                 'message' => 'Razorpay credentials present and configured.',
-                'key_id_preview' => substr($keyId, 0, 8) . '********',
+                'key_id_preview' => (strlen($keyId) > 8 ? substr($keyId, 0, 8) : substr($keyId, 0, 3)) . '********',
+                'mode' => $mode,
             ]);
         }
 
         if ($service === 'digikey') {
-            $clientId = env('DIGIKEY_CLIENT_ID');
+            $clientId = \App\Services\CredentialService::get('digikey', 'DIGIKEY_CLIENT_ID');
             if (empty($clientId)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'DigiKey Client ID is not configured in environment.',
+                    'message' => 'DigiKey Client ID is not configured in credentials or environment.',
                 ], 422);
             }
             return response()->json([
                 'success' => true,
                 'message' => 'DigiKey API credentials present and configured.',
-                'client_id_preview' => substr($clientId, 0, 6) . '********',
+                'client_id_preview' => (strlen($clientId) > 6 ? substr($clientId, 0, 6) : substr($clientId, 0, 3)) . '********',
             ]);
         }
 

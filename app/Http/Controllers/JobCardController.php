@@ -8,30 +8,35 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
 use App\Models\PcbOrder;
 use App\Models\PcbOrderMeta;
+use App\Models\JobCardDocument;
+use App\Services\JobCardDocumentService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 
 class JobCardController extends Controller
 {
+    protected JobCardDocumentService $documentService;
+
+    public function __construct(JobCardDocumentService $documentService)
+    {
+        $this->documentService = $documentService;
+    }
+
     /**
-     * Get or build Job Card data for an order.
+     * Get or build Job Card data and attached documents for an order.
      */
     public function show($id)
     {
         try {
-            $order = PcbOrder::with(['metas'])->where(function ($q) use ($id) {
-                if (is_numeric($id)) {
-                    $q->where('id', $id)->orWhere('order_number', $id);
-                } else {
-                    $q->where('order_number', $id);
-                }
-            })->firstOrFail();
-
+            $order = $this->findOrder($id);
             $jobCardData = $this->getOrBuildJobCardData($order);
+            $documents = $this->documentService->getDocumentsForOrder($order);
 
             return response()->json([
                 'success' => true,
-                'data' => $jobCardData
+                'data' => array_merge($jobCardData, [
+                    'documents' => $documents
+                ])
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -48,14 +53,7 @@ class JobCardController extends Controller
     public function save(Request $request, $id)
     {
         try {
-            $order = PcbOrder::with(['metas'])->where(function ($q) use ($id) {
-                if (is_numeric($id)) {
-                    $q->where('id', $id)->orWhere('order_number', $id);
-                } else {
-                    $q->where('order_number', $id);
-                }
-            })->firstOrFail();
-
+            $order = $this->findOrder($id);
             $payload = $request->input('job_card_data') ?: $request->all();
 
             $jobCardData = $this->cleanAndMergeJobCardData($order, $payload);
@@ -67,53 +65,27 @@ class JobCardController extends Controller
             );
 
             // Sync main fields back to order metas where applicable
-            if (isset($jobCardData['production_note'])) {
-                PcbOrderMeta::updateOrCreate(
-                    ['pcb_order_id' => $order->id, 'meta_key' => 'production_note'],
-                    ['meta_value' => (string)$jobCardData['production_note']]
-                );
+            $metaKeys = [
+                'production_note', 'customer_note', 'cutting_size',
+                'final_panel_qty', 'final_board_qty', 'rejected_board_qty', 'why_rejected'
+            ];
+            foreach ($metaKeys as $key) {
+                if (isset($jobCardData[$key])) {
+                    PcbOrderMeta::updateOrCreate(
+                        ['pcb_order_id' => $order->id, 'meta_key' => $key],
+                        ['meta_value' => (string)$jobCardData[$key]]
+                    );
+                }
             }
-            if (isset($jobCardData['customer_note'])) {
-                PcbOrderMeta::updateOrCreate(
-                    ['pcb_order_id' => $order->id, 'meta_key' => 'customer_note'],
-                    ['meta_value' => (string)$jobCardData['customer_note']]
-                );
-            }
-            if (isset($jobCardData['cutting_size'])) {
-                PcbOrderMeta::updateOrCreate(
-                    ['pcb_order_id' => $order->id, 'meta_key' => 'cutting_size'],
-                    ['meta_value' => (string)$jobCardData['cutting_size']]
-                );
-            }
-            if (isset($jobCardData['final_panel_qty'])) {
-                PcbOrderMeta::updateOrCreate(
-                    ['pcb_order_id' => $order->id, 'meta_key' => 'final_panel_qty'],
-                    ['meta_value' => (string)$jobCardData['final_panel_qty']]
-                );
-            }
-            if (isset($jobCardData['final_board_qty'])) {
-                PcbOrderMeta::updateOrCreate(
-                    ['pcb_order_id' => $order->id, 'meta_key' => 'final_board_qty'],
-                    ['meta_value' => (string)$jobCardData['final_board_qty']]
-                );
-            }
-            if (isset($jobCardData['rejected_board_qty'])) {
-                PcbOrderMeta::updateOrCreate(
-                    ['pcb_order_id' => $order->id, 'meta_key' => 'rejected_board_qty'],
-                    ['meta_value' => (string)$jobCardData['rejected_board_qty']]
-                );
-            }
-            if (isset($jobCardData['why_rejected'])) {
-                PcbOrderMeta::updateOrCreate(
-                    ['pcb_order_id' => $order->id, 'meta_key' => 'why_rejected'],
-                    ['meta_value' => (string)$jobCardData['why_rejected']]
-                );
-            }
+
+            $documents = $this->documentService->getDocumentsForOrder($order);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Job Card updated successfully',
-                'data' => $jobCardData
+                'data' => array_merge($jobCardData, [
+                    'documents' => $documents
+                ])
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -125,40 +97,24 @@ class JobCardController extends Controller
     }
 
     /**
-     * Generate & stream server-side PDF for an order Job Card.
+     * Generate & stream server-side PDF for an order Job Card (Only Job Card).
      */
     public function generatePdf(Request $request, $id)
     {
         try {
-            $order = PcbOrder::with(['metas'])->where(function ($q) use ($id) {
-                if (is_numeric($id)) {
-                    $q->where('id', $id)->orWhere('order_number', $id);
-                } else {
-                    $q->where('order_number', $id);
-                }
-            })->firstOrFail();
-
+            $order = $this->findOrder($id);
             $inputData = $request->input('job_card_data') ?: $request->all();
 
-            // If inputData has custom fields, use/merge them; otherwise load from order
             if (!empty($inputData) && is_array($inputData) && (isset($inputData['job_number']) || isset($inputData['processes']))) {
                 $jobCardData = $this->cleanAndMergeJobCardData($order, $inputData);
             } else {
                 $jobCardData = $this->getOrBuildJobCardData($order);
             }
 
-            $pdf = Pdf::loadView('pdf.job-card', ['data' => $jobCardData]);
-            $pdf->setPaper('a4', 'portrait');
-            $pdf->setOption([
-                'isHtml5ParserEnabled' => true,
-                'isRemoteEnabled' => true,
-                'defaultFont' => 'sans-serif',
-                'dpi' => 150
-            ]);
-
+            $pdfBinary = $this->documentService->generateJobCardPdfBinary($jobCardData);
             $fileName = "JOB_CARD_" . preg_replace('/[^A-Za-z0-9_\-]/', '_', $jobCardData['job_number']) . ".pdf";
 
-            return response($pdf->output(), 200, [
+            return response($pdfBinary, 200, [
                 'Content-Type' => 'application/pdf',
                 'Content-Disposition' => 'attachment; filename="' . $fileName . '"',
                 'Access-Control-Expose-Headers' => 'Content-Disposition'
@@ -170,6 +126,201 @@ class JobCardController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * List attached documents for an order.
+     */
+    public function listDocuments($id)
+    {
+        try {
+            $order = $this->findOrder($id);
+            $documents = $this->documentService->getDocumentsForOrder($order);
+
+            return response()->json([
+                'success' => true,
+                'data' => $documents
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to list attached documents',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Upload an additional document (PDF / DOC / DOCX) for a Job Card.
+     */
+    public function uploadDocument(Request $request, $id)
+    {
+        try {
+            $order = $this->findOrder($id);
+
+            if (!$request->hasFile('document')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No file uploaded. Please choose a PDF, DOC, or DOCX document.'
+                ], 422);
+            }
+
+            $file = $request->file('document');
+            $adminId = $request->attributes->get('admin_id') ?: ($request->user()?->id);
+
+            $document = $this->documentService->uploadDocument($order, $file, $adminId);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Document uploaded successfully',
+                'data' => $document
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage() ?: 'Failed to upload document',
+                'error' => $e->getMessage()
+            ], 400);
+        }
+    }
+
+    /**
+     * Delete an attached document.
+     */
+    public function deleteDocument(Request $request, $id, $docId)
+    {
+        try {
+            $order = $this->findOrder($id);
+            $adminId = $request->attributes->get('admin_id') ?: ($request->user()?->id);
+
+            $this->documentService->deleteDocument($order, (int)$docId, $adminId);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Document removed successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to remove document',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Reorder attached documents sequence.
+     */
+    public function reorderDocuments(Request $request, $id)
+    {
+        try {
+            $order = $this->findOrder($id);
+            $documents = $request->input('documents', []);
+
+            if (!is_array($documents)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid sequence payload.'
+                ], 422);
+            }
+
+            $adminId = $request->attributes->get('admin_id') ?: ($request->user()?->id);
+            $this->documentService->reorderDocuments($order, $documents, $adminId);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Document sequence updated successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update document sequence',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Stream an attached document's PDF for inline preview or download.
+     */
+    public function streamDocumentFile(Request $request, $id, $docId)
+    {
+        try {
+            $order = $this->findOrder($id);
+            $doc = JobCardDocument::where('pcb_order_id', $order->id)
+                ->where('id', $docId)
+                ->firstOrFail();
+
+            $pdfPath = !empty($doc->converted_pdf_path) ? $doc->converted_pdf_path : $doc->file_path;
+            $absolutePath = storage_path('app/' . $pdfPath);
+
+            if (!file_exists($absolutePath)) {
+                return response()->json(['success' => false, 'message' => 'File not found on server'], 404);
+            }
+
+            $filename = !empty($doc->converted_pdf_name) ? $doc->converted_pdf_name : $doc->original_name;
+
+            return response()->file($absolutePath, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'inline; filename="' . $filename . '"',
+                'Access-Control-Expose-Headers' => 'Content-Disposition'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to stream document file',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Generate & stream single combined PDF (Job Card + attached documents in order).
+     */
+    public function generateCombinedPdf(Request $request, $id)
+    {
+        try {
+            $order = $this->findOrder($id);
+            $inputData = $request->input('job_card_data') ?: [];
+            $documentSequence = $request->input('document_sequence') ?: $request->input('document_ids') ?: [];
+
+            if (!empty($inputData) && is_array($inputData) && (isset($inputData['job_number']) || isset($inputData['processes']))) {
+                $jobCardData = $this->cleanAndMergeJobCardData($order, $inputData);
+            } else {
+                $jobCardData = $this->getOrBuildJobCardData($order);
+            }
+
+            $adminId = $request->attributes->get('admin_id') ?: ($request->user()?->id);
+            $combinedBinary = $this->documentService->generateCombinedPdf($order, $jobCardData, $documentSequence, $adminId);
+
+            $fileName = "JOB_CARD_" . preg_replace('/[^A-Za-z0-9_\-]/', '_', $jobCardData['job_number']) . "_COMPLETE.pdf";
+
+            return response($combinedBinary, 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="' . $fileName . '"',
+                'Access-Control-Expose-Headers' => 'Content-Disposition'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage() ?: 'Failed to generate combined Job Card PDF',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Helper to resolve order by ID or order_number.
+     */
+    private function findOrder($id)
+    {
+        return PcbOrder::with(['metas'])->where(function ($q) use ($id) {
+            if (is_numeric($id)) {
+                $q->where('id', $id)->orWhere('order_number', $id);
+            } else {
+                $q->where('order_number', $id);
+            }
+        })->firstOrFail();
     }
 
     /**

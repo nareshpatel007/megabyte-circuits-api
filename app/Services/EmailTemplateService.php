@@ -21,6 +21,9 @@ class EmailTemplateService
      */
     public static function findTemplate(string $templateKey): ?EmailTemplate
     {
+        if (!\Illuminate\Support\Facades\Schema::hasTable('email_templates')) {
+            return null;
+        }
         $normalizedKey = strtolower(trim($templateKey));
         return EmailTemplate::where('key', $templateKey)
             ->orWhere('key', $normalizedKey)

@@ -310,6 +310,7 @@ class OrderController extends Controller
                     $hasUsersPhone
                 ) {
                     $q->where('order_number', 'LIKE', "%{$search}%");
+                    $q->orWhere('bill_number', 'LIKE', "%{$search}%");
                     if ($hasUserEmailCol) {
                         $q->orWhere('user_email', 'LIKE', "%{$search}%");
                     }
@@ -547,6 +548,7 @@ class OrderController extends Controller
 
     public function update(Request $request, $id)
     {
+        \Illuminate\Support\Facades\DB::beginTransaction();
         try {
             $order = PcbOrder::where(function ($q) use ($id) {
                 if (is_numeric($id)) {
@@ -559,6 +561,31 @@ class OrderController extends Controller
             $remark = $request->input('remark', null);
             
             $hasCustomerNameCol = \Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'customer_name');
+
+            // Business Rule: An order cannot be changed to Completed (or kept Completed) without a valid non-empty Bill Number.
+            $completedStatuses = ['completed', 'delivered', 'order completed', 'production completed'];
+            $targetStatusStr = $request->has('status') ? trim((string)$request->status) : (string)($order->status ?? '');
+            $isTargetCompleted = in_array(strtolower($targetStatusStr), $completedStatuses);
+
+            if ($isTargetCompleted) {
+                $effectiveBillNumber = $request->has('bill_number')
+                    ? trim((string)$request->input('bill_number'))
+                    : trim((string)($order->bill_number ?? ''));
+
+                if ($effectiveBillNumber === '') {
+                    \Illuminate\Support\Facades\DB::rollBack();
+                    return response()->json([
+                        'success' => false,
+                        'status'  => false,
+                        'message' => 'Bill number is required before changing the order status to Completed.',
+                        'errors'  => [
+                            'bill_number' => [
+                                'Bill number is required when completing an order.'
+                            ]
+                        ]
+                    ], 422);
+                }
+            }
 
             if ($request->has('user_id') && (string)$order->user_id !== (string)$request->user_id) {
                 $oldUserId = $order->user_id ?? 'N/A';
@@ -589,7 +616,6 @@ class OrderController extends Controller
             if ($request->has('status') && (string)$order->status !== (string)$request->status) {
                 $oldValStr = strtolower(trim((string)($order->status ?? 'Pending')));
                 $newValStr = strtolower(trim((string)$request->status));
-                $completedStatuses = ['completed', 'delivered', 'order completed', 'production completed'];
 
                 if ($oldValStr !== $newValStr) {
                     $statusChanged = true;
@@ -631,10 +657,13 @@ class OrderController extends Controller
                 $changesLog[] = "Delivery Date: '{$oldVal}' → '{$request->delivery_date}'";
             }
 
-            if ($request->has('bill_number') && (string)$order->bill_number !== (string)$request->bill_number) {
-                $oldVal = $order->bill_number ?? 'N/A';
-                $order->bill_number = $request->bill_number;
-                $changesLog[] = "Bill No: '{$oldVal}' → '{$request->bill_number}'";
+            if ($request->has('bill_number')) {
+                $cleanBillNumber = trim((string)$request->bill_number);
+                if ((string)$order->bill_number !== $cleanBillNumber) {
+                    $oldVal = $order->bill_number ?? 'N/A';
+                    $order->bill_number = $cleanBillNumber !== '' ? $cleanBillNumber : null;
+                    $changesLog[] = "Bill No: '{$oldVal}' → '{$cleanBillNumber}'";
+                }
             }
 
             if ($request->has('q_no') && (string)$order->q_no !== (string)$request->q_no) {
@@ -653,6 +682,7 @@ class OrderController extends Controller
                 $err = null;
                 \App\Services\ComboOrderService::syncComboOrders($order, $comboInput, $err);
                 if ($err) {
+                    \Illuminate\Support\Facades\DB::rollBack();
                     return response()->json(['success' => false, 'message' => $err], 422);
                 }
                 $changesLog[] = "Combo Orders Updated";
@@ -662,6 +692,7 @@ class OrderController extends Controller
                 $err = null;
                 \App\Services\ComboOrderService::syncComboOrders($order, $comboInput, $err);
                 if ($err) {
+                    \Illuminate\Support\Facades\DB::rollBack();
                     return response()->json(['success' => false, 'message' => $err], 422);
                 }
                 $changesLog[] = "Combo: '{$oldVal}' → '{$request->combo}'";
@@ -739,14 +770,14 @@ class OrderController extends Controller
 
             $order->save();
 
+            // Synchronize status and bill_number to child combo member orders if parent order
+            $adminId = $request->attributes->get('admin_id') ?? $request->admin_id ?? 1;
+            $adminUser = $adminId ? \Illuminate\Support\Facades\DB::table('admins')->where('id', $adminId)->first() : null;
+            $adminName = $adminUser ? $adminUser->name : 'Admin';
+            \App\Services\ComboOrderService::syncComboStatus($order, (string)$order->status, (int)$adminId, (string)$adminName);
+
             // Dispatch order_status_updated email & in-app notification when status changes (previous != new)
             if ($statusChanged) {
-                // Synchronize status to child combo member orders
-                $adminId = $request->attributes->get('admin_id') ?? $request->admin_id ?? 1;
-                $adminUser = $adminId ? \Illuminate\Support\Facades\DB::table('admins')->where('id', $adminId)->first() : null;
-                $adminName = $adminUser ? $adminUser->name : 'Admin';
-                \App\Services\ComboOrderService::syncComboStatus($order, (string)$order->status, (int)$adminId, (string)$adminName);
-
                 \App\Services\EmailTemplateService::sendOrderEmail('order_status_updated', $order->id, null, [
                     'previous_order_status' => $previousStatusName,
                 ]);
@@ -873,12 +904,15 @@ class OrderController extends Controller
                 )->orderBy('pcb_order_logs.created_at', 'desc')->get();
             }
 
+            \Illuminate\Support\Facades\DB::commit();
+
             return response()->json([
                 'status' => true,
                 'message' => 'Order updated successfully',
                 'data' => $order->load(['metas', 'statusDetails', 'statusHistories'])
             ]);
         } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\DB::rollBack();
             return response()->json([
                 'status' => false,
                 'message' => $e->getMessage(),

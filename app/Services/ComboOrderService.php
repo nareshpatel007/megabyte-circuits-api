@@ -150,11 +150,18 @@ class ComboOrderService
             if (!$childOrder) continue;
 
             $oldStatus = $childOrder->status ?? 'Pending';
-            if (strtolower(trim($oldStatus)) === strtolower(trim($newStatus))) {
+            $statusDiffers = strtolower(trim((string)$oldStatus)) !== strtolower(trim((string)$newStatus));
+            $billDiffers = !empty($parentOrder->bill_number) && (string)$childOrder->bill_number !== (string)$parentOrder->bill_number;
+
+            if (!$statusDiffers && !$billDiffers) {
                 continue;
             }
 
             $childOrder->status = $newStatus;
+
+            if (!empty($parentOrder->bill_number)) {
+                $childOrder->bill_number = $parentOrder->bill_number;
+            }
 
             // Map status_id if pcb_order_statuses table exists
             if (Schema::hasTable('pcb_order_statuses')) {

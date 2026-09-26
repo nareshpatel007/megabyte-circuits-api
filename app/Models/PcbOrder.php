@@ -52,6 +52,12 @@ class PcbOrder extends Model
         return $this->belongsTo(Status::class, 'status_id');
     }
 
+    // Status Histories relationship
+    public function statusHistories()
+    {
+        return $this->hasMany(PcbOrderStatusHistory::class, 'pcb_order_id')->orderBy('created_at', 'desc');
+    }
+
     // Customer User relationship
     public function user()
     {
@@ -155,9 +161,10 @@ class PcbOrder extends Model
         return $meta ? $meta->meta_value : $default;
     }
 
-    // Status Histories relationship
-    public function statusHistories()
+    // Job Card Documents relationship
+    public function jobCardDocuments()
     {
-        return $this->hasMany(PcbOrderStatusHistory::class, 'pcb_order_id')->with('admin')->orderBy('created_at', 'desc');
+        return $this->hasMany(JobCardDocument::class, 'pcb_order_id')->orderBy('sort_order', 'asc');
     }
 }
+

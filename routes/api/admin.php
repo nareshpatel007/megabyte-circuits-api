@@ -54,6 +54,13 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::get('orders/{id}/job-card', [\App\Http\Controllers\JobCardController::class, 'show']);
         Route::post('orders/{id}/job-card', [\App\Http\Controllers\JobCardController::class, 'save']);
         Route::match(['get', 'post'], 'orders/{id}/job-card/pdf', [\App\Http\Controllers\JobCardController::class, 'generatePdf']);
+        Route::get('orders/{id}/job-card/documents', [\App\Http\Controllers\JobCardController::class, 'listDocuments']);
+        Route::post('orders/{id}/job-card/documents/upload', [\App\Http\Controllers\JobCardController::class, 'uploadDocument']);
+        Route::delete('orders/{id}/job-card/documents/{docId}', [\App\Http\Controllers\JobCardController::class, 'deleteDocument']);
+        Route::put('orders/{id}/job-card/documents/reorder', [\App\Http\Controllers\JobCardController::class, 'reorderDocuments']);
+        Route::get('orders/{id}/job-card/documents/{docId}/file', [\App\Http\Controllers\JobCardController::class, 'streamDocumentFile']);
+        Route::post('orders/{id}/job-card/combined-pdf', [\App\Http\Controllers\JobCardController::class, 'generateCombinedPdf']);
+
 
         // User & Role Management
         Route::get('users', [AdminController::class, 'users']);

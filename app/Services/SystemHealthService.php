@@ -3,11 +3,13 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Console\Scheduling\Schedule;
+
 
 class SystemHealthService
 {
@@ -482,7 +484,8 @@ class SystemHealthService
         ];
 
         // 2. DigiKey Service Config
-        $digikeyConfigured = !empty(env('DIGIKEY_CLIENT_ID'));
+        $digikeyClientId = CredentialService::get('digikey', 'DIGIKEY_CLIENT_ID');
+        $digikeyConfigured = !empty($digikeyClientId);
         $services['digikey'] = [
             'name' => 'DigiKey API',
             'status' => $digikeyConfigured ? 'healthy' : 'unknown',
@@ -490,7 +493,8 @@ class SystemHealthService
         ];
 
         // 3. Razorpay Payment Gateway Config
-        $razorpayConfigured = !empty(env('RAZORPAY_KEY_ID')) || !empty(CredentialService::get('razorpay', 'RAZORPAY_KEY_ID'));
+        $razorpayKey = CredentialService::get('razorpay', 'RAZORPAY_KEY_ID');
+        $razorpayConfigured = !empty($razorpayKey);
         $services['razorpay'] = [
             'name' => 'Razorpay Gateway',
             'status' => $razorpayConfigured ? 'healthy' : 'warning',

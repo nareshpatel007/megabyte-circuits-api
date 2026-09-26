@@ -10,6 +10,20 @@ use Illuminate\Support\Facades\Crypt;
 
 class CredentialServiceTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        if (!\Illuminate\Support\Facades\Schema::hasTable('credentials')) {
+            \Illuminate\Support\Facades\Schema::create('credentials', function ($table) {
+                $table->id();
+                $table->string('group', 50)->index();
+                $table->string('key', 100)->unique();
+                $table->longText('value')->nullable();
+                $table->timestamps();
+            });
+        }
+    }
 
     public function test_database_credential_wins_over_env()
     {

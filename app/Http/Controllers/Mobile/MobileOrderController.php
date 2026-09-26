@@ -397,25 +397,53 @@ class MobileOrderController extends Controller
             return $forbidden;
         }
 
+        DB::beginTransaction();
         try {
-            $newStatus = trim($request->input('status'));
+            $newStatus = trim((string)$request->input('status'));
             if (empty($newStatus)) {
+                DB::rollBack();
                 return response()->json(['success' => false, 'message' => 'Status is required'], 400);
             }
 
             $order = DB::table('pcb_orders')->where('id', $id)->first();
             if (!$order) {
+                DB::rollBack();
                 return response()->json(['success' => false, 'message' => 'Order not found'], 404);
             }
 
             $oldStatus = $order->status ?? 'Pending';
             $oldValStr = strtolower(trim((string)$oldStatus));
             $newValStr = strtolower(trim((string)$newStatus));
+            $completedStatuses = ['completed', 'delivered', 'order completed', 'production completed'];
 
-            DB::table('pcb_orders')->where('id', $id)->update([
+            $isCompleted = in_array($newValStr, $completedStatuses);
+            $inputBillNumber = $request->has('bill_number') ? trim((string)$request->input('bill_number')) : null;
+            $effectiveBillNumber = $inputBillNumber !== null ? $inputBillNumber : trim((string)($order->bill_number ?? ''));
+
+            if ($isCompleted && $effectiveBillNumber === '') {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'status'  => false,
+                    'message' => 'Bill number is required before changing the order status to Completed.',
+                    'errors'  => [
+                        'bill_number' => [
+                            'Bill number is required when completing an order.'
+                        ]
+                    ]
+                ], 422);
+            }
+
+            $updateData = [
                 'status' => $newStatus,
                 'updated_at' => date('Y-m-d H:i:s')
-            ]);
+            ];
+
+            if ($inputBillNumber !== null) {
+                $updateData['bill_number'] = $inputBillNumber !== '' ? $inputBillNumber : null;
+            }
+
+            DB::table('pcb_orders')->where('id', $id)->update($updateData);
 
             // Dispatch order_status_updated email notification when status changes (previous != new)
             if ($oldValStr !== $newValStr) {
@@ -469,12 +497,19 @@ class MobileOrderController extends Controller
                 \App\Services\ComboOrderService::syncComboStatus($parentPcbOrder, $newStatus, (int)($adminId ?: 1), $adminName);
             }
 
+            DB::commit();
+
             return response()->json([
                 'success' => true,
-                'message' => 'Order status updated successfully'
+                'message' => 'Order status updated successfully',
+                'data' => [
+                    'status' => $newStatus,
+                    'bill_number' => $effectiveBillNumber !== '' ? $effectiveBillNumber : null
+                ]
             ]);
 
         } catch (\Throwable $th) {
+            DB::rollBack();
             return response()->json(['success' => false, 'message' => $th->getMessage()], 500);
         }
     }
