@@ -38,15 +38,15 @@ class JobCardDocumentService
     }
 
     /**
-     * Store an uploaded document for a Job Card order.
+     * Store an uploaded document (PDF, Word, or Image) for a Job Card order.
      */
     public function uploadDocument(PcbOrder $order, UploadedFile $file, ?int $adminId = null): JobCardDocument
     {
         // 1. Validate file extension
         $extension = strtolower($file->getClientOriginalExtension());
-        $allowedExtensions = ['pdf', 'doc', 'docx'];
+        $allowedExtensions = ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png', 'webp'];
         if (!in_array($extension, $allowedExtensions)) {
-            throw new Exception("Invalid file extension. Only .pdf, .doc, and .docx files are allowed.");
+            throw new Exception("Invalid file extension. Only PDF, Word (.doc, .docx), and Image (.jpg, .jpeg, .png, .webp) files are allowed.");
         }
 
         // 2. Validate MIME type
@@ -55,10 +55,15 @@ class JobCardDocumentService
             'application/msword',
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             'application/octet-stream', // fallback for some browser uploads
+            'image/jpeg',
+            'image/jpg',
+            'image/png',
+            'image/webp',
         ];
         $mime = $file->getMimeType();
-        if (!in_array($mime, $allowedMimes) && !in_array($file->getClientMimeType(), $allowedMimes)) {
-            throw new Exception("Invalid file type. Only PDF and Word documents are permitted.");
+        $clientMime = $file->getClientMimeType();
+        if (!in_array($mime, $allowedMimes) && !in_array($clientMime, $allowedMimes)) {
+            throw new Exception("Invalid file type. Only PDF, Word, and Image documents are permitted.");
         }
 
         // 3. Validate size (Max 25MB)
@@ -67,46 +72,70 @@ class JobCardDocumentService
             throw new Exception("File exceeds the maximum upload limit of 25MB.");
         }
 
-        // 4. Validate file corruption before saving
         $tempPath = $file->getRealPath();
+
+        // 4. Validate file corruption before saving
         if ($extension === 'pdf') {
             $this->mergeService->validatePdfFile($tempPath, $file->getClientOriginalName());
+        } else if (in_array($extension, ['jpg', 'jpeg', 'png', 'webp']) || str_starts_with($mime, 'image/')) {
+            $imgSize = @getimagesize($tempPath);
+            if (!$imgSize) {
+                throw new Exception("Document \"{$file->getClientOriginalName()}\" is not a valid or readable image file.");
+            }
+            if ($imgSize[0] > 10000 || $imgSize[1] > 10000) {
+                throw new Exception("Image dimensions exceed the maximum allowed limit of 10000x10000 pixels.");
+            }
         }
 
         // 5. Store file in dedicated order directory
         $orderDir = "job-cards/{$order->id}/attachments";
-        $storedFilename = uniqid('doc_') . '_' . time() . '.' . $extension;
+        $storedFilename = (in_array($extension, ['jpg', 'jpeg', 'png', 'webp']) ? 'img_' : 'doc_') . uniqid() . '_' . time() . '.' . $extension;
         $storedPath = $file->storeAs($orderDir, $storedFilename, 'local');
         $absolutePath = storage_path('app/' . $storedPath);
 
-        $sourceType = 'uploaded_' . $extension;
+        $sourceType = in_array($extension, ['jpg', 'jpeg', 'png', 'webp']) ? 'uploaded_image' : ('uploaded_' . $extension);
         $convertedPathRelative = null;
         $convertedFilename = null;
         $pdfPathForCounting = $absolutePath;
 
-        // 6. Handle DOC/DOCX conversion
+        // 6. Handle DOC/DOCX conversion to A4 PDF
         if (in_array($extension, ['doc', 'docx'])) {
             $convertedDir = "job-cards/{$order->id}/attachments/converted";
             $convertedFilename = uniqid('conv_') . '_' . time() . '.pdf';
             $convertedPathRelative = $convertedDir . '/' . $convertedFilename;
             $absoluteConvertedPath = storage_path('app/' . $convertedPathRelative);
 
-            // Ensure directory exists
             $absoluteConvertedDir = storage_path('app/' . $convertedDir);
             if (!is_dir($absoluteConvertedDir)) {
                 @mkdir($absoluteConvertedDir, 0755, true);
             }
 
-            // Perform conversion
             $this->conversionService->convertDocToPdf($absolutePath, $absoluteConvertedPath);
             $pdfPathForCounting = $absoluteConvertedPath;
             $sourceType = 'converted_pdf';
+        } 
+        // Handle IMAGE conversion to A4 PDF page
+        else if (in_array($extension, ['jpg', 'jpeg', 'png', 'webp'])) {
+            $convertedDir = "job-cards/{$order->id}/attachments/converted";
+            $convertedFilename = uniqid('img_conv_') . '_' . time() . '.pdf';
+            $convertedPathRelative = $convertedDir . '/' . $convertedFilename;
+            $absoluteConvertedPath = storage_path('app/' . $convertedPathRelative);
+
+            $absoluteConvertedDir = storage_path('app/' . $convertedDir);
+            if (!is_dir($absoluteConvertedDir)) {
+                @mkdir($absoluteConvertedDir, 0755, true);
+            }
+
+            $this->convertImageToA4Pdf($absolutePath, $absoluteConvertedPath);
+            $pdfPathForCounting = $absoluteConvertedPath;
         }
 
-        // 7. Get PDF page count
-        $pageCount = $this->mergeService->getPdfPageCount($pdfPathForCounting);
+        // 7. Get PDF page count (1 for images, accurate count for PDFs)
+        $pageCount = in_array($extension, ['jpg', 'jpeg', 'png', 'webp']) 
+            ? 1 
+            : $this->mergeService->getPdfPageCount($pdfPathForCounting);
 
-        // 8. Calculate sort_order (put at end by default, Job Card is index 1 default)
+        // 8. Calculate sort_order
         $maxOrder = JobCardDocument::where('pcb_order_id', $order->id)->max('sort_order') ?: 1;
         $sortOrder = $maxOrder + 1;
 
@@ -136,6 +165,139 @@ class JobCardDocumentService
         ]);
 
         return $document;
+    }
+
+    /**
+     * Convert an image file into a single A4 PDF page (fitted proportionally & centered).
+     */
+    public function convertImageToA4Pdf(string $sourceImagePath, string $outputPdfPath): void
+    {
+        if (!file_exists($sourceImagePath)) {
+            throw new Exception("Source image file not found.");
+        }
+
+        $tempImgFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'norm_img_' . uniqid() . '.jpg';
+        $this->normalizeAndRotateImage($sourceImagePath, $tempImgFile);
+
+        try {
+            $imgSize = @getimagesize($tempImgFile);
+            if (!$imgSize) {
+                throw new Exception("Failed to read normalized image dimensions.");
+            }
+
+            $srcW = (float)$imgSize[0];
+            $srcH = (float)$imgSize[1];
+
+            // Target Job Card A4 dimensions in mm
+            $targetW = 216.0;
+            $targetH = 279.0;
+
+            // Calculate contain scaling (proportional)
+            $scale = min($targetW / $srcW, $targetH / $srcH);
+            $newW = $srcW * $scale;
+            $newH = $srcH * $scale;
+
+            // Center image horizontally and vertically
+            $x = ($targetW - $newW) / 2.0;
+            $y = ($targetH - $newH) / 2.0;
+
+            $pdf = new \setasign\Fpdi\Fpdi('P', 'mm', [$targetW, $targetH]);
+            $pdf->SetAutoPageBreak(false);
+            $pdf->AddPage('P', [$targetW, $targetH]);
+            $pdf->Image($tempImgFile, $x, $y, $newW, $newH, 'JPG');
+
+            $outputDir = dirname($outputPdfPath);
+            if (!is_dir($outputDir)) {
+                @mkdir($outputDir, 0755, true);
+            }
+
+            $pdf->Output('F', $outputPdfPath);
+        } finally {
+            if (file_exists($tempImgFile)) {
+                @unlink($tempImgFile);
+            }
+        }
+    }
+
+    /**
+     * Read, handle EXIF orientation, and normalize an image to JPEG for PDF embedding.
+     */
+    private function normalizeAndRotateImage(string $sourceImagePath, string $destJpegPath): void
+    {
+        $ext = strtolower(pathinfo($sourceImagePath, PATHINFO_EXTENSION));
+
+        $gdImg = null;
+        if (in_array($ext, ['jpg', 'jpeg'])) {
+            $gdImg = @imagecreatefromjpeg($sourceImagePath);
+        } else if ($ext === 'png') {
+            $gdImg = @imagecreatefrompng($sourceImagePath);
+        } else if ($ext === 'webp') {
+            $gdImg = @imagecreatefromwebp($sourceImagePath);
+        }
+
+        if (!$gdImg) {
+            $data = @file_get_contents($sourceImagePath);
+            if ($data) {
+                $gdImg = @imagecreatefromstring($data);
+            }
+        }
+
+        if (!$gdImg) {
+            throw new Exception("Unable to process image data.");
+        }
+
+        // Handle EXIF orientation for JPEG files
+        if (in_array($ext, ['jpg', 'jpeg']) && function_exists('exif_read_data')) {
+            try {
+                $exif = @exif_read_data($sourceImagePath);
+                $orientation = $exif['Orientation'] ?? null;
+                if ($orientation) {
+                    switch ($orientation) {
+                        case 3:
+                            $gdImg = imagerotate($gdImg, 180, 0);
+                            break;
+                        case 6:
+                            $gdImg = imagerotate($gdImg, -90, 0);
+                            break;
+                        case 8:
+                            $gdImg = imagerotate($gdImg, 90, 0);
+                            break;
+                    }
+                }
+            } catch (\Throwable $e) {
+                // Ignore EXIF read errors if header absent
+            }
+        }
+
+        $w = imagesx($gdImg);
+        $h = imagesy($gdImg);
+
+        // Downscale if image is larger than 3500px in either dimension to keep memory & print file reasonable
+        $maxDim = 3500;
+        if ($w > $maxDim || $h > $maxDim) {
+            $scale = min($maxDim / $w, $maxDim / $h);
+            $targetW = (int)round($w * $scale);
+            $targetH = (int)round($h * $scale);
+
+            $resized = imagecreatetruecolor($targetW, $targetH);
+            $white = imagecolorallocate($resized, 255, 255, 255);
+            imagefilledrectangle($resized, 0, 0, $targetW, $targetH, $white);
+            imagecopyresampled($resized, $gdImg, 0, 0, 0, 0, $targetW, $targetH, $w, $h);
+            imagedestroy($gdImg);
+            $gdImg = $resized;
+            $w = $targetW;
+            $h = $targetH;
+        }
+
+        $canvas = imagecreatetruecolor($w, $h);
+        $white = imagecolorallocate($canvas, 255, 255, 255);
+        imagefilledrectangle($canvas, 0, 0, $w, $h, $white);
+        imagecopy($canvas, $gdImg, 0, 0, 0, 0, $w, $h);
+
+        imagejpeg($canvas, $destJpegPath, 92);
+
+        imagedestroy($gdImg);
+        imagedestroy($canvas);
     }
 
     /**

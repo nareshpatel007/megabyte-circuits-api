@@ -13,13 +13,17 @@ use App\Services\JobCardDocumentService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 
+use App\Services\JobCardDocxService;
+
 class JobCardController extends Controller
 {
     protected JobCardDocumentService $documentService;
+    protected JobCardDocxService $docxService;
 
-    public function __construct(JobCardDocumentService $documentService)
+    public function __construct(JobCardDocumentService $documentService, JobCardDocxService $docxService)
     {
         $this->documentService = $documentService;
+        $this->docxService = $docxService;
     }
 
     /**
@@ -123,6 +127,38 @@ class JobCardController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to generate Job Card PDF',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Generate & stream server-side editable DOCX document for Job Card.
+     */
+    public function generateDocx(Request $request, $id)
+    {
+        try {
+            $order = $this->findOrder($id);
+            $inputData = $request->input('job_card_data') ?: $request->all();
+
+            if (!empty($inputData) && is_array($inputData) && (isset($inputData['job_number']) || isset($inputData['processes']))) {
+                $jobCardData = $this->cleanAndMergeJobCardData($order, $inputData);
+            } else {
+                $jobCardData = $this->getOrBuildJobCardData($order);
+            }
+
+            $docxBinary = $this->docxService->generateDocx($jobCardData, $order);
+            $fileName = "JOB_CARD_" . preg_replace('/[^A-Za-z0-9_\-]/', '_', $jobCardData['job_number']) . ".docx";
+
+            return response($docxBinary, 200, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'Content-Disposition' => 'attachment; filename="' . $fileName . '"',
+                'Access-Control-Expose-Headers' => 'Content-Disposition'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to generate Job Card DOCX',
                 'error' => $e->getMessage()
             ], 500);
         }

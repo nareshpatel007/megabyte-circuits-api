@@ -54,6 +54,7 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::get('orders/{id}/job-card', [\App\Http\Controllers\JobCardController::class, 'show']);
         Route::post('orders/{id}/job-card', [\App\Http\Controllers\JobCardController::class, 'save']);
         Route::match(['get', 'post'], 'orders/{id}/job-card/pdf', [\App\Http\Controllers\JobCardController::class, 'generatePdf']);
+        Route::match(['get', 'post'], 'orders/{id}/job-card/docx', [\App\Http\Controllers\JobCardController::class, 'generateDocx']);
         Route::get('orders/{id}/job-card/documents', [\App\Http\Controllers\JobCardController::class, 'listDocuments']);
         Route::post('orders/{id}/job-card/documents/upload', [\App\Http\Controllers\JobCardController::class, 'uploadDocument']);
         Route::delete('orders/{id}/job-card/documents/{docId}', [\App\Http\Controllers\JobCardController::class, 'deleteDocument']);
