@@ -53,7 +53,7 @@ class MobileAuthController extends Controller
                     'updated_at' => $now
                 ]);
 
-                $secret = env('JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
+                $secret = \App\Services\CredentialService::get('auth', 'JWT_SECRET', 'JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
                 $payload = [
                     'admin_id' => $admin->id,
                     'name'     => $admin->name,
@@ -101,6 +101,13 @@ class MobileAuthController extends Controller
                 ->first();
 
             if ($user) {
+                if (!empty($user->deleted_at) || (isset($user->status) && strtolower(trim((string)$user->status)) !== 'active')) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Your account is no longer active.'
+                    ], 403);
+                }
+
                 $passwordValid = false;
                 if (!empty($user->password_hash)) {
                     $passwordValid = password_verify($password, $user->password_hash);
@@ -115,7 +122,7 @@ class MobileAuthController extends Controller
                     ], 401);
                 }
 
-                $secret = env('JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
+                $secret = \App\Services\CredentialService::get('auth', 'JWT_SECRET', 'JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
                 $payload = [
                     'admin_id' => $user->id,
                     'name'     => $user->name,

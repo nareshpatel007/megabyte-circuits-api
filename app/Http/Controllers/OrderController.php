@@ -246,7 +246,7 @@ class OrderController extends Controller
                 'gerber_file_url', 'gerber_url', 'gerber_path',
                 'payment_id', 'razorpay_payment_id', 'transaction_id',
                 'payment_status', 'payment_mode', 'payment_method',
-                'film_datetime', 'film_date',
+                'film_datetime', 'film_date', 'film_applied',
                 'qty', 'quantity', 'product_type',
                 'pcb_color', 'solder_mask', 'layer', 'layers',
                 'min_hole', 'min_hole_size', 'panel_size', 'dimensions',
@@ -669,6 +669,21 @@ class OrderController extends Controller
 
             if ($request->has('c_g') && (string)$order->c_g !== (string)$request->c_g) {
                 $order->c_g = $request->c_g;
+            }
+
+            if ($request->has('film_applied')) {
+                $filmBool = filter_var($request->input('film_applied'), FILTER_VALIDATE_BOOLEAN) || $request->input('film_applied') == 1 || $request->input('film_applied') === '1' || $request->input('film_applied') === 'true';
+                $order->film_applied = $filmBool ? 1 : 0;
+                $changesLog[] = "Film Applied: " . ($filmBool ? "Yes" : "No");
+
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'film_applied')) {
+                    \Illuminate\Support\Facades\DB::table('pcb_orders')->where('id', $order->id)->update(['film_applied' => $filmBool ? 1 : 0]);
+                }
+
+                \App\Models\PcbOrderMeta::updateOrCreate(
+                    ['pcb_order_id' => $order->id, 'meta_key' => 'film_applied'],
+                    ['meta_value' => $filmBool ? '1' : '0']
+                );
             }
 
             if ($request->has('order_qty') && intval($order->order_qty) !== intval($request->order_qty)) {

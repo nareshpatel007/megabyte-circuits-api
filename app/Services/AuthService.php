@@ -24,14 +24,26 @@ class AuthService
             ];
         }
 
-        // Check if user exists
-        $user = DB::table('users')->where('email', $email)->first();
+        // Check if user exists (by email or username)
+        $user = DB::table('users')
+            ->where('email', $email)
+            ->orWhere('name', $email)
+            ->first();
 
         // If user not found
         if (empty($user)) {
             return [
                 'status' => false,
                 'message' => 'User not found. Please register first.'
+            ];
+        }
+
+        // Check soft-deleted column
+        if (!empty($user->deleted_at)) {
+            return [
+                'status' => false,
+                'code' => 'ACCOUNT_DEACTIVATED',
+                'message' => 'Your account is no longer active.'
             ];
         }
 
@@ -69,7 +81,7 @@ class AuthService
             return [
                 'status' => false,
                 'code' => 'ACCOUNT_INACTIVE',
-                'message' => 'Your account is currently inactive.'
+                'message' => 'Your account is no longer active.'
             ];
         }
 

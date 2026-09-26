@@ -64,6 +64,24 @@ class GoogleController extends Controller
                 ->orWhere('google_id', $googleId)
                 ->first();
 
+            if ($user) {
+                $status = strtolower(trim((string)($user->status ?? 'active')));
+                $isDeleted = !empty($user->deleted_at) || in_array($status, ['deleted', 'deactivated']);
+                $isInactive = $status !== 'active';
+
+                if ($isDeleted || $isInactive) {
+                    $msg = 'Your account is no longer active.';
+                    if ($status === 'suspended') {
+                        $msg = 'Your account has been suspended by the administrator.';
+                    } elseif ($status === 'blocked') {
+                        $msg = 'Your account has been blocked. Please contact support.';
+                    } elseif ($status === 'pending') {
+                        $msg = 'Your account is awaiting approval.';
+                    }
+                    return redirect($quoteUrl . '/login?error=' . urlencode($msg));
+                }
+            }
+
             if (!$user) {
                 // Register new user
                 $uuid = (string) Str::uuid();

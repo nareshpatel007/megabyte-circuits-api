@@ -585,6 +585,33 @@ class AuthController extends Controller
             // Check if user already exists
             $user = DB::table('users')->where('email', $email)->first();
 
+            if (!empty($user)) {
+                $status = strtolower(trim((string)($user->status ?? 'active')));
+                $isDeleted = !empty($user->deleted_at) || in_array($status, ['deleted', 'deactivated']);
+                $isInactive = $status !== 'active';
+
+                if ($isDeleted || $isInactive) {
+                    $msg = 'Your account is no longer active.';
+                    $code = 'ACCOUNT_DEACTIVATED';
+                    if ($status === 'suspended') {
+                        $msg = 'Your account has been suspended by the administrator.';
+                        $code = 'ACCOUNT_SUSPENDED';
+                    } elseif ($status === 'blocked') {
+                        $msg = 'Your account has been blocked. Please contact support.';
+                        $code = 'ACCOUNT_BLOCKED';
+                    } elseif ($status === 'pending') {
+                        $msg = 'Your account is awaiting approval.';
+                        $code = 'ACCOUNT_PENDING';
+                    }
+
+                    return response()->json([
+                        'status' => false,
+                        'code' => $code,
+                        'message' => $msg
+                    ]);
+                }
+            }
+
             if (empty($user)) {
                 // Register a new user
                 $uuid = (string) \Illuminate\Support\Str::uuid();

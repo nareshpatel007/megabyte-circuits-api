@@ -12,6 +12,9 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule): void
     {
+        $schedule->call(function () {
+            \Illuminate\Support\Facades\Cache::put('system_health_scheduler_heartbeat', now()->timestamp, 86400);
+        })->everyMinute();
         $schedule->command('gerber:clean-unattached')->dailyAt('00:00');
         $schedule->command('digikey:sync-manufacturers')->weekly();
         $schedule->command('digikey:sync-categories')->weekly();

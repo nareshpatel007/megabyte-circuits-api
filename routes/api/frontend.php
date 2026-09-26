@@ -11,6 +11,9 @@ use App\Http\Controllers\JlcpcbController;
 
 use App\Http\Controllers\ContactController;
 
+// Public System Health Ping
+Route::get('health', [\App\Http\Controllers\Admin\SystemHealthController::class, 'publicHealth']);
+
 // File Upload (Public for testing)
 Route::post('upload', [FileUploadController::class, 'upload']);
 Route::get('gerber/{id}/status', [FileUploadController::class, 'status']);

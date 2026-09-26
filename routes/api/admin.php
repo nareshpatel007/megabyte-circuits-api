@@ -50,6 +50,11 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::post('orders/{id}/notes', [OrderController::class, 'addNote']);
         Route::delete('orders/notes/{noteId}', [OrderController::class, 'deleteNote']);
 
+        // Job Card Management & PDF Generation
+        Route::get('orders/{id}/job-card', [\App\Http\Controllers\JobCardController::class, 'show']);
+        Route::post('orders/{id}/job-card', [\App\Http\Controllers\JobCardController::class, 'save']);
+        Route::match(['get', 'post'], 'orders/{id}/job-card/pdf', [\App\Http\Controllers\JobCardController::class, 'generatePdf']);
+
         // User & Role Management
         Route::get('users', [AdminController::class, 'users']);
         Route::post('users', [AdminController::class, 'createUser']);
@@ -195,6 +200,16 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::get('notifications/stream', [\App\Http\Controllers\Admin\AdminNotificationController::class, 'stream']);
         Route::get('notifications', [\App\Http\Controllers\Admin\AdminNotificationController::class, 'index']);
         Route::post('notifications/{id}/read', [\App\Http\Controllers\Admin\AdminNotificationController::class, 'markAsRead']);
+
+        // System Health & Recovery Center
+        Route::get('system-health', [\App\Http\Controllers\Admin\SystemHealthController::class, 'index']);
+        Route::get('system-health/logs', [\App\Http\Controllers\Admin\SystemHealthController::class, 'logs']);
+        Route::get('system-health/audit', [\App\Http\Controllers\Admin\SystemHealthController::class, 'audit']);
+        Route::get('system-health/failed-jobs', [\App\Http\Controllers\Admin\SystemHealthController::class, 'failedJobs']);
+        Route::post('system-health/maintenance', [\App\Http\Controllers\Admin\SystemHealthController::class, 'executeMaintenance']);
+        Route::post('system-health/failed-jobs/action', [\App\Http\Controllers\Admin\SystemHealthController::class, 'failedJobsAction']);
+        Route::post('system-health/test-mail', [\App\Http\Controllers\Admin\SystemHealthController::class, 'testMail']);
+        Route::post('system-health/test-service', [\App\Http\Controllers\Admin\SystemHealthController::class, 'testExternalService']);
     });
 });
 
