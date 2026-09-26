@@ -20,7 +20,7 @@ class ImpersonationController extends Controller
         try {
             // 1. Get authenticated admin ID from request (set by VerifyAdminToken)
             $adminId = $request->attributes->get('admin_id');
-            
+
             if (!$adminId) {
                 // Fallback token decoding if attribute not set
                 $adminId = $this->getAdminIdFromRequest($request);
@@ -131,7 +131,7 @@ class ImpersonationController extends Controller
             );
 
             // 11. Construct Handoff Redirect URL
-            $clientAppUrl = env('CLIENT_APP_URL', env('NEXT_PUBLIC_QUOTE_URL', 'http://localhost:3001'));
+            $clientAppUrl = env('QUOTE_URL', env('NEXT_PUBLIC_QUOTE_URL', 'http://localhost:3001'));
             $clientAppUrl = rtrim($clientAppUrl, '/');
             $redirectUrl = "{$clientAppUrl}/auth/impersonate?code={$handoffCode}";
 
@@ -150,7 +150,6 @@ class ImpersonationController extends Controller
                     ]
                 ]
             ]);
-
         } catch (\Throwable $th) {
             return response()->json([
                 'status' => false,
@@ -271,7 +270,6 @@ class ImpersonationController extends Controller
                     ]
                 ]
             ]);
-
         } catch (\Throwable $th) {
             return response()->json([
                 'status' => false,
@@ -329,7 +327,6 @@ class ImpersonationController extends Controller
                 'message' => 'Impersonation session ended successfully.',
                 'admin_redirect_url' => $adminAppUrl
             ]);
-
         } catch (\Throwable $th) {
             return response()->json([
                 'status' => false,
