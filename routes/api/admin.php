@@ -64,6 +64,10 @@ Route::middleware('verify.admin.token')->group(function () {
 
 
         // User & Role Management
+        Route::get('clients/merge/search', [\App\Http\Controllers\ClientMergeController::class, 'search']);
+        Route::post('clients/merge/preview', [\App\Http\Controllers\ClientMergeController::class, 'preview']);
+        Route::post('clients/merge', [\App\Http\Controllers\ClientMergeController::class, 'execute']);
+
         Route::get('users', [AdminController::class, 'users']);
         Route::post('users', [AdminController::class, 'createUser']);
         Route::get('users/{id}', [AdminController::class, 'showUser']);

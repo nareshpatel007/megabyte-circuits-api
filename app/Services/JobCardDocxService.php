@@ -16,6 +16,7 @@ class JobCardDocxService
 {
     /**
      * Generate an editable DOCX Word document representing the Job Card.
+     * Fully compliant with Microsoft Word OpenXML schema standards.
      *
      * @param array $jobCardData Structured Job Card specifications
      * @param PcbOrder $order Order model
@@ -25,11 +26,17 @@ class JobCardDocxService
     {
         $phpWord = new PhpWord();
 
+        // Document Metadata
+        $docInfo = $phpWord->getDocInfo();
+        $docInfo->setCreator('Megabyte Circuits');
+        $docInfo->setCompany('Megabyte Circuits');
+        $docInfo->setTitle('JOB CARD ' . ($jobCardData['job_number'] ?? $order->order_number));
+
         // Global styles
         $phpWord->setDefaultFontName('Arial');
         $phpWord->setDefaultFontSize(9.5);
 
-        // Section setup: A4 Portrait (210mm x 297mm) with 15mm margins
+        // Section setup: A4 Portrait (210mm x 297mm) with 12mm margins
         $section = $phpWord->addSection([
             'pageSizeW' => Converter::cmToTwip(21.0),
             'pageSizeH' => Converter::cmToTwip(29.7),
@@ -39,34 +46,46 @@ class JobCardDocxService
             'marginRight' => Converter::cmToTwip(1.2),
         ]);
 
-        // Table styles
+        // Standard Table styling
         $tableStyle = [
             'borderSize' => 6,
             'borderColor' => '000000',
-            'cellMarginTop' => Converter::cmToTwip(0.1),
-            'cellMarginBottom' => Converter::cmToTwip(0.1),
+            'cellMarginTop' => Converter::cmToTwip(0.12),
+            'cellMarginBottom' => Converter::cmToTwip(0.12),
             'cellMarginLeft' => Converter::cmToTwip(0.15),
             'cellMarginRight' => Converter::cmToTwip(0.15),
         ];
 
         $headerBg = '000000';
-        $subHeaderBg = 'F3F4F6';
-        $lightBg = 'FAFAFA';
 
-        // 1. Header Box
-        $headerTable = $section->addTable(['borderSize' => 12, 'borderColor' => '000000', 'width' => 100 * 50, 'unit' => 'pct']);
-        $headerRow = $headerTable->addRow();
-        $cell1 = $headerRow->addCell(3000, ['valign' => VerticalJc::CENTER]);
-        $cell1->addText('JOB NO: ' . ($jobCardData['job_number'] ?? $order->order_number), ['bold' => true, 'size' => 12]);
+        // Helper function for safe non-empty text
+        $safeText = function ($text, $fallback = ' ') {
+            $str = trim((string)$text);
+            return $str !== '' ? $str : $fallback;
+        };
 
-        $cell2 = $headerRow->addCell(4000, ['valign' => VerticalJc::CENTER]);
+        // 1. Header Box Table (3 Columns)
+        $headerTable = $section->addTable([
+            'borderSize' => 12,
+            'borderColor' => '000000',
+            'cellMarginTop' => Converter::cmToTwip(0.15),
+            'cellMarginBottom' => Converter::cmToTwip(0.15),
+            'cellMarginLeft' => Converter::cmToTwip(0.2),
+            'cellMarginRight' => Converter::cmToTwip(0.2),
+        ]);
+        $headerRow = $headerTable->addRow(Converter::cmToTwip(0.8));
+        $c1 = $headerRow->addCell(3000, ['valign' => VerticalJc::CENTER]);
+        $c1->addText('JOB NO: ' . $safeText($jobCardData['job_number'] ?? $order->order_number), ['bold' => true, 'size' => 11]);
+
+        $c2 = $headerRow->addCell(4500, ['valign' => VerticalJc::CENTER]);
         $procText = '';
         if (!empty($jobCardData['expose'])) $procText .= '[X] Expose  ';
         if (!empty($jobCardData['print_and_etch'])) $procText .= '[X] Print & Etch';
-        $cell2->addText(trim($procText), ['size' => 10, 'bold' => true], ['alignment' => Jc::CENTER]);
+        if (empty($procText)) $procText = 'Standard Process';
+        $c2->addText($safeText($procText), ['size' => 10, 'bold' => true], ['alignment' => Jc::CENTER]);
 
-        $cell3 = $headerRow->addCell(3000, ['valign' => VerticalJc::CENTER]);
-        $cell3->addText($jobCardData['job_type'] ?? 'JOB CARD', ['bold' => true, 'size' => 12], ['alignment' => Jc::RIGHT]);
+        $c3 = $headerRow->addCell(2500, ['valign' => VerticalJc::CENTER]);
+        $c3->addText($safeText($jobCardData['job_type'] ?? 'JOB CARD'), ['bold' => true, 'size' => 11], ['alignment' => Jc::RIGHT]);
 
         $section->addTextBreak(1);
 
@@ -74,72 +93,84 @@ class JobCardDocxService
         $section->addText('JOB CARD', ['bold' => true, 'size' => 16, 'underline' => 'single'], ['alignment' => Jc::CENTER]);
         $section->addTextBreak(1);
 
-        // 3. Dates & Core Quantities Table
-        $infoTable = $section->addTable($tableStyle);
+        // 3. Specifications Block A: Dates & Qty Specs (3 Equal Columns)
+        $tableA = $section->addTable($tableStyle);
+        $tableA->addRow();
+        $tableA->addCell(3333)->addText('Order Date: ' . $safeText($this->formatDateOnly($jobCardData['order_date'] ?? null)), ['bold' => true]);
+        $tableA->addCell(3333)->addText('Launch Date: ' . $safeText($this->formatDateOnly($jobCardData['launch_date'] ?? null)), ['bold' => true]);
+        $tableA->addCell(3334)->addText('Shipping Date: ' . $safeText($this->formatDateOnly($jobCardData['shipping_date'] ?? null)), ['bold' => true]);
 
-        // Row 1: Dates
-        $infoTable->addRow();
-        $infoTable->addCell(3333)->addText('Order Date: ' . $this->formatDateOnly($jobCardData['order_date'] ?? null), ['bold' => true]);
-        $infoTable->addCell(3333)->addText('Launch Date: ' . $this->formatDateOnly($jobCardData['launch_date'] ?? null), ['bold' => true]);
-        $infoTable->addCell(3334)->addText('Shipping Date: ' . $this->formatDateOnly($jobCardData['shipping_date'] ?? null), ['bold' => true]);
-
-        // Row 2: Qty Specs
-        $infoTable->addRow();
-        $infoTable->addCell(3333)->addText('ORDER QTY: ' . ($jobCardData['order_qty'] ?? ''), ['bold' => true]);
-        $infoTable->addCell(3333)->addText('LAUNCHED: ' . ($jobCardData['launched_qty'] ?? ''), ['bold' => true]);
-        $infoTable->addCell(3334)->addText('UPS: ' . ($jobCardData['ups'] ?? '') . '   |   PANELS: ' . ($jobCardData['panels'] ?? '') . '   |   MIN HOLE: ' . ($jobCardData['min_hole'] ?? ''), ['bold' => true]);
-
-        // Row 3: Dimensions
-        $infoTable->addRow();
-        $infoTable->addCell(5000, ['gridSpan' => 2])->addText('PANEL SIZE: ' . ($jobCardData['panel_size'] ?? ''));
-        $infoTable->addCell(5000)->addText('CUTTING SIZE: ' . ($jobCardData['cutting_size'] ?? ''));
-
-        // Row 4: Materials
-        $infoTable->addRow();
-        $infoTable->addCell(2500)->addText('MATERIAL: ' . ($jobCardData['material'] ?? ''));
-        $infoTable->addCell(2500)->addText('THICK: ' . ($jobCardData['thickness'] ?? ''));
-        $infoTable->addCell(2500)->addText('COPPER THICK: ' . ($jobCardData['copper_thickness'] ?? ''));
-        $infoTable->addCell(2500)->addText('FINISH: ' . ($jobCardData['finish'] ?? ''));
-
-        // Row 5: Mask & LP
-        $infoTable->addRow();
-        $infoTable->addCell(3333)->addText('MASK COLOUR: ' . ($jobCardData['mask_colour'] ?? ''));
-        $infoTable->addCell(3333)->addText('LP COLOR: ' . ($jobCardData['lp_color'] ?? ''));
-        $infoTable->addCell(3334)->addText('LP SIDE: ' . ($jobCardData['lp_side'] ?? ''));
-
-        // Row 6: Fabrication Options
-        $infoTable->addRow();
-        $infoTable->addCell(2500)->addText('ROUTE: ' . ($jobCardData['route'] ?? ''));
-        $infoTable->addCell(2500)->addText('V-CUT: ' . ($jobCardData['v_cut'] ?? ''));
-        $infoTable->addCell(2500)->addText('SHEARING CUT: ' . ($jobCardData['shearing_cut'] ?? ''));
-        $infoTable->addCell(2500)->addText('INTERNAL CUTOUTS: ' . ($jobCardData['internal_cutouts'] ?? ''));
+        $tableA->addRow();
+        $tableA->addCell(3333)->addText('ORDER QTY: ' . $safeText($jobCardData['order_qty'] ?? ''), ['bold' => true]);
+        $tableA->addCell(3333)->addText('LAUNCHED: ' . $safeText($jobCardData['launched_qty'] ?? ''), ['bold' => true]);
+        $tableA->addCell(3334)->addText(
+            'UPS: ' . $safeText($jobCardData['ups'] ?? '') . '  |  PANELS: ' . $safeText($jobCardData['panels'] ?? '') . '  |  MIN HOLE: ' . $safeText($jobCardData['min_hole'] ?? ''),
+            ['bold' => true]
+        );
 
         $section->addTextBreak(1);
 
-        // 4. Notes Section
+        // 4. Specifications Block B: Panel & Cutting Dimensions (2 Equal Columns)
+        $tableB = $section->addTable($tableStyle);
+        $tableB->addRow();
+        $tableB->addCell(5000)->addText('PANEL SIZE: ' . $safeText($jobCardData['panel_size'] ?? ''));
+        $tableB->addCell(5000)->addText('CUTTING SIZE: ' . $safeText($jobCardData['cutting_size'] ?? ''));
+
+        $section->addTextBreak(1);
+
+        // 5. Specifications Block C: Material & Finish Options (4 Equal Columns)
+        $tableC = $section->addTable($tableStyle);
+        $tableC->addRow();
+        $tableC->addCell(2500)->addText('MATERIAL: ' . $safeText($jobCardData['material'] ?? ''));
+        $tableC->addCell(2500)->addText('THICK: ' . $safeText($jobCardData['thickness'] ?? ''));
+        $tableC->addCell(2500)->addText('COPPER THICK: ' . $safeText($jobCardData['copper_thickness'] ?? ''));
+        $tableC->addCell(2500)->addText('FINISH: ' . $safeText($jobCardData['finish'] ?? ''));
+
+        $section->addTextBreak(1);
+
+        // 6. Specifications Block D: Mask & Legend Specs (3 Equal Columns)
+        $tableD = $section->addTable($tableStyle);
+        $tableD->addRow();
+        $tableD->addCell(3333)->addText('MASK COLOUR: ' . $safeText($jobCardData['mask_colour'] ?? ''));
+        $tableD->addCell(3333)->addText('LP COLOR: ' . $safeText($jobCardData['lp_color'] ?? ''));
+        $tableD->addCell(3334)->addText('LP SIDE: ' . $safeText($jobCardData['lp_side'] ?? ''));
+
+        $section->addTextBreak(1);
+
+        // 7. Specifications Block E: Fabrication Options (4 Equal Columns)
+        $tableE = $section->addTable($tableStyle);
+        $tableE->addRow();
+        $tableE->addCell(2500)->addText('ROUTE: ' . $safeText($jobCardData['route'] ?? ''));
+        $tableE->addCell(2500)->addText('V-CUT: ' . $safeText($jobCardData['v_cut'] ?? ''));
+        $tableE->addCell(2500)->addText('SHEARING CUT: ' . $safeText($jobCardData['shearing_cut'] ?? ''));
+        $tableE->addCell(2500)->addText('INTERNAL CUTOUTS: ' . $safeText($jobCardData['internal_cutouts'] ?? ''));
+
+        $section->addTextBreak(1);
+
+        // 8. Notes Section Table (2 Equal Columns)
         $notesTable = $section->addTable($tableStyle);
         $notesTable->addRow();
         $cNotes1 = $notesTable->addCell(5000);
         $cNotes1->addText('PRODUCTION NOTE:', ['bold' => true, 'size' => 9]);
-        $cNotes1->addText($jobCardData['production_note'] ?? '', ['size' => 9]);
+        $cNotes1->addText($safeText($jobCardData['production_note'] ?? ''), ['size' => 9]);
 
         $cNotes2 = $notesTable->addCell(5000);
         $cNotes2->addText('CUSTOMER SPECIAL NOTE:', ['bold' => true, 'size' => 9]);
-        $cNotes2->addText($jobCardData['customer_note'] ?? '', ['size' => 9]);
+        $cNotes2->addText($safeText($jobCardData['customer_note'] ?? ''), ['size' => 9]);
 
         $section->addTextBreak(1);
 
-        // 5. Final Qty & Rejection Summary
+        // 9. Final Qty & Rejection Summary Table (4 Equal Columns)
         $finalTable = $section->addTable($tableStyle);
         $finalTable->addRow();
-        $finalTable->addCell(2500)->addText('FINAL PANEL QTY: ' . ($jobCardData['final_panel_qty'] ?? ''), ['bold' => true]);
-        $finalTable->addCell(2500)->addText('FINAL BOARD QTY: ' . ($jobCardData['final_board_qty'] ?? ''), ['bold' => true]);
-        $finalTable->addCell(2500)->addText('REJECTED BOARD QTY: ' . ($jobCardData['rejected_board_qty'] ?? ''), ['bold' => true]);
-        $finalTable->addCell(2500)->addText('WHY REJECTED: ' . ($jobCardData['why_rejected'] ?? ''));
+        $finalTable->addCell(2500)->addText('FINAL PANEL QTY: ' . $safeText($jobCardData['final_panel_qty'] ?? ''), ['bold' => true]);
+        $finalTable->addCell(2500)->addText('FINAL BOARD QTY: ' . $safeText($jobCardData['final_board_qty'] ?? ''), ['bold' => true]);
+        $finalTable->addCell(2500)->addText('REJECTED BOARD QTY: ' . $safeText($jobCardData['rejected_board_qty'] ?? ''), ['bold' => true]);
+        $finalTable->addCell(2500)->addText('WHY REJECTED: ' . $safeText($jobCardData['why_rejected'] ?? ''));
 
         $section->addTextBreak(1);
 
-        // 6. Manufacturing Process Routing Log Table
+        // 10. Manufacturing Process Routing Log Table (8 Equal Width Header/Data Rows)
         $section->addText('MANUFACTURING PROCESS ROUTING LOG', ['bold' => true, 'size' => 11], ['alignment' => Jc::CENTER]);
         $section->addTextBreak(1);
 
@@ -160,17 +191,17 @@ class JobCardDocxService
         $processes = $jobCardData['processes'] ?? [];
         foreach ($processes as $p) {
             $procTable->addRow(Converter::cmToTwip(0.55));
-            $procTable->addCell(2500)->addText($p['process'] ?? '', ['bold' => true, 'size' => 8.5]);
-            $procTable->addCell(800)->addText($p['in'] ?? '', ['size' => 8.5], ['alignment' => Jc::CENTER]);
-            $procTable->addCell(1100)->addText($p['panel_qty_in'] ?? '', ['size' => 8.5], ['alignment' => Jc::CENTER]);
-            $procTable->addCell(800)->addText($p['out'] ?? '', ['size' => 8.5], ['alignment' => Jc::CENTER]);
-            $procTable->addCell(1100)->addText($p['panel_qty_out'] ?? '', ['size' => 8.5], ['alignment' => Jc::CENTER]);
-            $procTable->addCell(800)->addText($p['qc'] ?? '', ['size' => 8.5], ['alignment' => Jc::CENTER]);
-            $procTable->addCell(1100)->addText($p['sign'] ?? '', ['size' => 8.5], ['alignment' => Jc::CENTER]);
-            $procTable->addCell(1800)->addText($p['remark'] ?? '', ['size' => 8.5]);
+            $procTable->addCell(2500)->addText($safeText($p['process'] ?? ''), ['bold' => true, 'size' => 8.5]);
+            $procTable->addCell(800)->addText($safeText($p['in'] ?? ''), ['size' => 8.5], ['alignment' => Jc::CENTER]);
+            $procTable->addCell(1100)->addText($safeText($p['panel_qty_in'] ?? ''), ['size' => 8.5], ['alignment' => Jc::CENTER]);
+            $procTable->addCell(800)->addText($safeText($p['out'] ?? ''), ['size' => 8.5], ['alignment' => Jc::CENTER]);
+            $procTable->addCell(1100)->addText($safeText($p['panel_qty_out'] ?? ''), ['size' => 8.5], ['alignment' => Jc::CENTER]);
+            $procTable->addCell(800)->addText($safeText($p['qc'] ?? ''), ['size' => 8.5], ['alignment' => Jc::CENTER]);
+            $procTable->addCell(1100)->addText($safeText($p['sign'] ?? ''), ['size' => 8.5], ['alignment' => Jc::CENTER]);
+            $procTable->addCell(1800)->addText($safeText($p['remark'] ?? ''), ['size' => 8.5]);
         }
 
-        // 7. Attached Images (if any attached image documents exist for order)
+        // 11. Attached Images (if any active image documents exist for order)
         try {
             $attachedImages = JobCardDocument::where('pcb_order_id', $order->id)
                 ->where('status', 'active')
@@ -185,10 +216,10 @@ class JobCardDocxService
                 $imgPath = storage_path('app/' . $imgDoc->file_path);
                 if (file_exists($imgPath) && filesize($imgPath) > 0) {
                     $section->addPageBreak();
-                    $section->addText('ATTACHMENT: ' . $imgDoc->original_name, ['bold' => true, 'size' => 12], ['alignment' => Jc::CENTER]);
+                    $section->addText('ATTACHMENT: ' . $safeText($imgDoc->original_name), ['bold' => true, 'size' => 12], ['alignment' => Jc::CENTER]);
                     $section->addTextBreak(1);
 
-                    // Insert image scaled to fit page width
+                    // Insert image scaled cleanly
                     $section->addImage($imgPath, [
                         'width' => 480,
                         'alignment' => Jc::CENTER,
@@ -196,10 +227,10 @@ class JobCardDocxService
                 }
             }
         } catch (\Throwable $e) {
-            // Silently skip image embedding if any error
+            // Silently skip image embedding if any filesystem issue
         }
 
-        // Generate DOCX binary
+        // Generate DOCX binary using standard Word2007 writer
         $writer = IOFactory::createWriter($phpWord, 'Word2007');
         $tempPath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'jobcard_' . uniqid() . '.docx';
         $writer->save($tempPath);
