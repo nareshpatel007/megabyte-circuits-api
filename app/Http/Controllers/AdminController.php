@@ -314,17 +314,42 @@ class AdminController extends Controller
     public function users(Request $request)
     {
         try {
-            $search = $request->input('search');
-            
+            $search = $request->input('search') ?: $request->input('q');
+            $status = $request->input('status');
+            $includeDeleted = filter_var($request->input('include_deleted', false), FILTER_VALIDATE_BOOLEAN);
+
             $query = DB::table('users');
 
+            if (!$includeDeleted) {
+                if (Schema::hasColumn('users', 'deleted_at')) {
+                    $query->whereNull('deleted_at');
+                }
+                $query->where(function($q) {
+                    $q->whereNull('status')->orWhereRaw('LOWER(TRIM(status)) != ?', ['deleted']);
+                });
+            }
+
+            if (!empty($status) && strtolower($status) !== 'all') {
+                $query->whereRaw('LOWER(TRIM(status)) = ?', [strtolower(trim($status))]);
+            }
+
             if (!empty($search)) {
+                $search = trim($search);
                 $query->where(function($q) use ($search) {
                     $q->where('name', 'like', "%{$search}%")
                       ->orWhere('email', 'like', "%{$search}%")
                       ->orWhere('first_name', 'like', "%{$search}%")
                       ->orWhere('last_name', 'like', "%{$search}%")
                       ->orWhere('company_name', 'like', "%{$search}%");
+                    if (Schema::hasColumn('users', 'phone_number')) {
+                        $q->orWhere('phone_number', 'like', "%{$search}%");
+                    }
+                    if (Schema::hasColumn('users', 'mobile')) {
+                        $q->orWhere('mobile', 'like', "%{$search}%");
+                    }
+                    if (Schema::hasColumn('users', 'phone')) {
+                        $q->orWhere('phone', 'like', "%{$search}%");
+                    }
                 });
             }
 

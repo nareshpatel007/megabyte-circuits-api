@@ -24,6 +24,7 @@ class PcbOrder extends Model
         'q_no',
         'c_g',
         'combo',
+        'old_order_number',
         'layers',
         'mask',
         'board_name',
@@ -85,6 +86,28 @@ class PcbOrder extends Model
     public function comboParentRecord()
     {
         return $this->hasOne(PcbOrderCombo::class, 'combo_order_id');
+    }
+
+    // Old Order Numbers (Referenced previous orders for this order)
+    public function oldOrders()
+    {
+        return $this->belongsToMany(
+            PcbOrder::class,
+            'pcb_order_old_orders',
+            'order_id',
+            'old_order_id'
+        )->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status', 'pcb_orders.customer_name');
+    }
+
+    // Reverse relationship (Orders that reference this order as their old order)
+    public function referencedAsOldOrderBy()
+    {
+        return $this->belongsToMany(
+            PcbOrder::class,
+            'pcb_order_old_orders',
+            'old_order_id',
+            'order_id'
+        )->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status', 'pcb_orders.customer_name');
     }
 
     protected $casts = [

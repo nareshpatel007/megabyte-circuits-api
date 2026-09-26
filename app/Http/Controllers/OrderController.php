@@ -269,6 +269,12 @@ class OrderController extends Controller
             if ($hasStatusTable) {
                 $withRelations[] = 'statusDetails';
             }
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_combos')) {
+                $withRelations[] = 'comboOrders';
+            }
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_old_orders')) {
+                $withRelations[] = 'oldOrders';
+            }
 
             $query = PcbOrder::with($withRelations);
 
@@ -449,6 +455,9 @@ class OrderController extends Controller
         }
         if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_combos')) {
             $withRelations[] = 'comboOrders';
+        }
+        if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_old_orders')) {
+            $withRelations[] = 'oldOrders';
         }
 
         $orderQuery = PcbOrder::with($withRelations)
@@ -696,6 +705,32 @@ class OrderController extends Controller
                     return response()->json(['success' => false, 'message' => $err], 422);
                 }
                 $changesLog[] = "Combo: '{$oldVal}' → '{$request->combo}'";
+            }
+
+            if ($request->has('old_order_ids')) {
+                $oldInput = $request->input('old_order_ids');
+                if (is_string($oldInput)) {
+                    $oldInput = \App\Services\OldOrderService::parseOldOrderString($oldInput);
+                } elseif (!is_array($oldInput)) {
+                    $oldInput = [];
+                }
+                $err = null;
+                \App\Services\OldOrderService::syncOldOrders($order, $oldInput, $err);
+                if ($err) {
+                    \Illuminate\Support\Facades\DB::rollBack();
+                    return response()->json(['success' => false, 'message' => $err], 422);
+                }
+                $changesLog[] = "Old Order Numbers Updated";
+            } elseif ($request->has('old_order_number') && (string)$order->old_order_number !== (string)$request->old_order_number) {
+                $oldVal = $order->old_order_number ?? 'N/A';
+                $oldInput = \App\Services\OldOrderService::parseOldOrderString($request->old_order_number);
+                $err = null;
+                \App\Services\OldOrderService::syncOldOrders($order, $oldInput, $err);
+                if ($err) {
+                    \Illuminate\Support\Facades\DB::rollBack();
+                    return response()->json(['success' => false, 'message' => $err], 422);
+                }
+                $changesLog[] = "Old Order Number: '{$oldVal}' → '{$request->old_order_number}'";
             }
 
             if ($request->has('c_g') && (string)$order->c_g !== (string)$request->c_g) {
