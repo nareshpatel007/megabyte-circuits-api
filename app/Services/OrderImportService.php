@@ -1311,6 +1311,21 @@ class OrderImportService
             }
         }
 
+        $launchQtyVal = isset($data['launch_qty']) && is_numeric($data['launch_qty']) ? (int)$data['launch_qty'] : 0;
+        $finalQtyVal = isset($data['final_qty']) && is_numeric($data['final_qty']) ? (int)$data['final_qty'] : 0;
+        $failedQtyVal = max(0, $launchQtyVal - $finalQtyVal);
+
+        if (!isset($addedKeys['failed_qty'])) {
+            $addedKeys['failed_qty'] = true;
+            $metaRows[] = [
+                'pcb_order_id' => $orderId,
+                'meta_key'     => 'failed_qty',
+                'meta_value'   => (string)$failedQtyVal,
+                'created_at'   => $now,
+                'updated_at'   => $now,
+            ];
+        }
+
         // Additional aliases for seamless frontend compatibility
         if (!empty($data['p_n'])) {
             foreach (['board_name', 'p_n'] as $aliasKey) {

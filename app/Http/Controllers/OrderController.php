@@ -386,12 +386,26 @@ namespace App\Http\Controllers;
                 $statsActiveOrders = (clone $query)->whereNotIn(\Illuminate\Support\Facades\DB::raw('LOWER(TRIM(status))'), ['completed', 'shipped', 'delivered', 'cancelled', 'canceled'])->count();
                 $statsCompletedOrders = (clone $query)->whereIn(\Illuminate\Support\Facades\DB::raw('LOWER(TRIM(status))'), ['completed', 'shipped', 'delivered'])->count();
 
-                // Sorting (Default: delivery_date desc)
-                $sortBy = $request->input('sort_by', 'delivery_date');
+                // Sorting (Default: created_at desc - latest placed orders first)
+                $sortBy = $request->input('sort_by', 'created_at');
                 $sortOrder = strtolower($request->input('sort_order', 'desc')) === 'asc' ? 'asc' : 'desc';
 
                 if ($sortBy === 'delivery_date') {
                     $query->orderByRaw("COALESCE(delivery_date, created_at) {$sortOrder}");
+                } else if ($sortBy === 'created_at' || $sortBy === 'order_date') {
+                    $query->orderBy('created_at', $sortOrder)->orderBy('id', $sortOrder);
+                } else if ($sortBy === 'customer_name' || $sortBy === 'customer') {
+                    $query->orderBy('customer_name', $sortOrder)->orderBy('user_email', $sortOrder);
+                } else if ($sortBy === 'order_number' || $sortBy === 'number') {
+                    $query->orderBy('order_number', $sortOrder);
+                } else if ($sortBy === 'status') {
+                    $query->orderBy('status', $sortOrder);
+                } else if ($sortBy === 'layers' || $sortBy === 'layer') {
+                    $query->orderBy('layers', $sortOrder);
+                } else if ($sortBy === 'film_applied' || $sortBy === 'film') {
+                    $query->orderBy('film_applied', $sortOrder);
+                } else if ($sortBy === 'order_qty' || $sortBy === 'qty') {
+                    $query->orderBy('order_qty', $sortOrder);
                 } else {
                     $query->orderBy($sortBy, $sortOrder);
                 }
@@ -879,13 +893,18 @@ namespace App\Http\Controllers;
                     }
                 }
 
-                if ($request->has('failed_qty') && intval($order->failed_qty) !== intval($request->failed_qty)) {
+                // Enforce failed_qty = max(0, launch_qty - final_qty) if launch_qty > 0
+                $launchQtyVal = intval($order->launch_qty ?? 0);
+                $finalQtyVal = intval($order->final_qty ?? $order->completed_qty ?? 0);
+                $calcFailedQty = $launchQtyVal > 0 ? max(0, $launchQtyVal - $finalQtyVal) : intval($request->input('failed_qty', $order->failed_qty ?? 0));
+
+                if (intval($order->failed_qty) !== $calcFailedQty) {
                     $oldVal = intval($order->failed_qty);
-                    $order->failed_qty = intval($request->failed_qty);
+                    $order->failed_qty = $calcFailedQty;
                     $changesLog[] = "Failed Qty: {$oldVal} → {$order->failed_qty} Pcs";
                     PcbOrderMeta::updateOrCreate(
                         ['pcb_order_id' => $order->id, 'meta_key' => 'failed_qty'],
-                        ['meta_value' => (string)intval($request->failed_qty)]
+                        ['meta_value' => (string)$calcFailedQty]
                     );
                 }
 
