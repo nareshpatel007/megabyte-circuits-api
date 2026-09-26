@@ -469,6 +469,27 @@ class PasswordResetService
      */
     private static function dispatchSmtpMail(string $toEmail, string $subject, string $htmlBody, ?string $fromEmail = null, ?string $fromName = null, ?string $templateKey = null, ?int $customerId = null): void
     {
+        if (EmailTemplateService::isImportLocalEmail($toEmail)) {
+            Log::info("PasswordResetService: Skipped sending password reset email to placeholder email {$toEmail}.");
+            if (class_exists(EmailLog::class)) {
+                try {
+                    EmailLog::create([
+                        'template_key'  => $templateKey ?: 'password_reset_otp',
+                        'email_type'    => 'auth',
+                        'customer_id'   => $customerId,
+                        'from_email'    => $fromEmail ?: 'quote@megabytecircuit.com',
+                        'from_name'     => $fromName ?: 'Megabyte Circuit',
+                        'to'            => $toEmail,
+                        'subject'       => $subject,
+                        'status'        => 'skipped',
+                        'error_message' => "Email skipped: recipient email '{$toEmail}' is an @import.local placeholder email.",
+                        'provider'      => 'smtp_global',
+                    ]);
+                } catch (\Throwable $logEx) {}
+            }
+            return;
+        }
+
         $defaultFromAddress = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_ADDRESS', 'MAIL_GLOBAL_FROM_ADDRESS', config('mail.from.address', 'quote@megabytecircuit.com'));
         $defaultFromName = CredentialService::get('mail', 'MAIL_GLOBAL_FROM_NAME', 'MAIL_GLOBAL_FROM_NAME', config('app.name', 'Megabyte Circuit'));
 

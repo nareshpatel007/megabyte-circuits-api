@@ -229,6 +229,13 @@ class EmailTemplateController extends Controller
             ], 422);
         }
 
+        if (EmailTemplateService::isImportLocalEmail($recipientEmail)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot send test email to an @import.local placeholder address. Please enter a real recipient email address.',
+            ], 422);
+        }
+
         try {
             $template = EmailTemplate::where('id', $id)->orWhere('key', $id)->firstOrFail();
 

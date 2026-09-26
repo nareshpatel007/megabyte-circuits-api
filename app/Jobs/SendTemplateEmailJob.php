@@ -100,7 +100,11 @@ class SendTemplateEmailJob implements ShouldQueue
         }
 
         // 2. Validate recipient email
-        if (empty($toEmail) || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
+        if (empty($toEmail) || !filter_var($toEmail, FILTER_VALIDATE_EMAIL) || EmailTemplateService::isImportLocalEmail($toEmail)) {
+            $errorMsg = EmailTemplateService::isImportLocalEmail($toEmail) 
+                ? "Email skipped: recipient email '{$toEmail}' is an @import.local placeholder email."
+                : 'Customer has no valid email address';
+
             if ($loggingEnabled) {
                 EmailLog::create([
                     'template_key'  => $this->templateKey,
@@ -112,10 +116,10 @@ class SendTemplateEmailJob implements ShouldQueue
                     'to'            => $toEmail ?? 'N/A',
                     'cc'            => implode(', ', $rendered['cc'] ?? []),
                     'bcc'           => implode(', ', $rendered['bcc'] ?? []),
-                    'subject'       => $rendered['subject'],
+                    'subject'       => $rendered['subject'] ?? 'Notification',
                     'body'          => $rendered['body'] ?? null,
                     'status'        => 'skipped',
-                    'error_message' => 'Customer has no valid email address',
+                    'error_message' => $errorMsg,
                     'provider'      => 'smtp_global',
                 ]);
             }

@@ -436,6 +436,11 @@ class RegisterService
      */
     public static function sendWelcomeEmail($user_id, $name, $email)
     {
+        if (EmailTemplateService::isImportLocalEmail($email)) {
+            \Illuminate\Support\Facades\Log::info("RegisterService: Skipped sending welcome email to placeholder email {$email}.");
+            return false;
+        }
+
         try {
             $quoteUrl = config('app.cart_url', config('app.frontend_url', 'https://cart.megabytecircuit.com'));
             $loginUrl = rtrim($quoteUrl, '/') . '/login';

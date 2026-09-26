@@ -26,6 +26,29 @@ class MailHelper
                 ];
             }
 
+            if (is_string($email_to) && \App\Services\EmailTemplateService::isImportLocalEmail($email_to)) {
+                \Illuminate\Support\Facades\Log::info("MailHelper: Skipped sending email to placeholder email {$email_to}.");
+                if ($loggingEnabled && class_exists(EmailLog::class)) {
+                    try {
+                        EmailLog::create([
+                            'template_key' => $data['template'] ?? 'general',
+                            'email_type'   => 'Direct Email',
+                            'from_email'   => $fromAddress,
+                            'from_name'    => $fromName,
+                            'to'           => (string)$email_to,
+                            'subject'      => $data['subject'] ?? 'Notification',
+                            'status'       => 'skipped',
+                            'error_message'=> 'Email skipped: recipient email is an @import.local placeholder email.',
+                            'provider'     => 'smtp_global',
+                        ]);
+                    } catch (\Throwable $logEx) {}
+                }
+                return [
+                    'success' => false,
+                    'message' => 'Email skipped: recipient email is an @import.local placeholder email.'
+                ];
+            }
+
             // Configure mailer using CredentialService (database priority with .env fallback)
             $mailer = 'smtp_global';
             Config::set('mail.mailers.smtp_global.host', CredentialService::get('mail', 'MAIL_GLOBAL_HOST', 'MAIL_GLOBAL_HOST', config('mail.mailers.smtp.host')));

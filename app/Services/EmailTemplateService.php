@@ -41,6 +41,18 @@ class EmailTemplateService
     }
 
     /**
+     * Check if an email address is an @import.local placeholder email.
+     */
+    public static function isImportLocalEmail(?string $email): bool
+    {
+        if (empty($email)) {
+            return false;
+        }
+        $email = strtolower(trim($email));
+        return str_contains($email, 'import.local');
+    }
+
+    /**
      * Centralized method to trigger/dispatch an order-related email template.
      *
      * Rules:
@@ -52,6 +64,22 @@ class EmailTemplateService
      */
     public static function sendOrderEmail(string $templateKey, int $orderId, ?string $overrideTo = null, array $customVars = []): bool
     {
+        if ($overrideTo && self::isImportLocalEmail($overrideTo)) {
+            Log::info("Email skipped: override recipient email '{$overrideTo}' is an @import.local placeholder email.");
+            return false;
+        }
+
+        if (!$overrideTo) {
+            $order = PcbOrder::with('user')->find($orderId);
+            if ($order) {
+                $targetEmail = $order->user_email ?: ($order->user->email ?? null);
+                if (self::isImportLocalEmail($targetEmail)) {
+                    Log::info("Email skipped: client email '{$targetEmail}' for Order #{$orderId} is an @import.local placeholder email.");
+                    return false;
+                }
+            }
+        }
+
         $template = self::findTemplate($templateKey);
 
         if (!$template) {
@@ -85,6 +113,11 @@ class EmailTemplateService
      */
     public static function sendInventoryEmail(string $templateKey, int $inventoryItemId, ?int $inventoryLogId = null, ?string $overrideTo = null, array $customVars = []): bool
     {
+        if ($overrideTo && self::isImportLocalEmail($overrideTo)) {
+            Log::info("Email skipped: override recipient email '{$overrideTo}' is an @import.local placeholder email.");
+            return false;
+        }
+
         $template = EmailTemplate::where('key', $templateKey)->first();
 
         if (!$template) {
@@ -120,7 +153,9 @@ class EmailTemplateService
         foreach ($rawList as $email) {
             $email = trim($email);
             if (!empty($email) && filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                $validEmails[] = strtolower($email);
+                if (!self::isImportLocalEmail($email)) {
+                    $validEmails[] = strtolower($email);
+                }
             }
         }
 
@@ -341,11 +376,30 @@ class EmailTemplateService
         $toEmails      = self::resolveVariablesAndParseEmails($toTemplateStr, $vars);
 
         if (empty($toEmails) && !empty($vars['customer_email']) && filter_var($vars['customer_email'], FILTER_VALIDATE_EMAIL)) {
-            $toEmails = [strtolower(trim($vars['customer_email']))];
+            if (!self::isImportLocalEmail($vars['customer_email'])) {
+                $toEmails = [strtolower(trim($vars['customer_email']))];
+            }
         }
 
         $ccEmails  = self::resolveVariablesAndParseEmails($template->cc, $vars);
         $bccEmails = self::resolveVariablesAndParseEmails($template->bcc, $vars);
+
+        $rawCustomerEmail = $vars['customer_email'] ?? '';
+        if (self::isImportLocalEmail($rawCustomerEmail)) {
+            return [
+                'success'       => false,
+                'message'       => "Email skipped: recipient email '{$rawCustomerEmail}' is an @import.local placeholder email.",
+                'is_active'     => true,
+                'template'      => $template,
+                'from_email'    => $renderedFromEmail,
+                'from_name'     => $renderedFromName,
+                'to'            => $rawCustomerEmail,
+                'cc'            => $ccEmails,
+                'bcc'           => $bccEmails,
+                'subject'       => $renderedSubject,
+                'body'          => $fullRenderedBody,
+            ];
+        }
 
         if (empty($toEmails)) {
             return [

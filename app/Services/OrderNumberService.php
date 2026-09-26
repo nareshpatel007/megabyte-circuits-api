@@ -75,16 +75,35 @@ class OrderNumberService
                     ->first();
             }
 
-            $nextNumber = ((int)$sequence->last_number) + 1;
+            $candidateNumber = ((int)$sequence->last_number) + 1;
+
+            // Check if candidate order number already exists in pcb_orders and auto-increment if found
+            while (true) {
+                $paddedCandidate   = $series . str_pad($candidateNumber, $paddingLength, '0', STR_PAD_LEFT);
+                $unpaddedCandidate = $series . $candidateNumber;
+
+                $exists = DB::table('pcb_orders')
+                    ->where(function ($q) use ($paddedCandidate, $unpaddedCandidate) {
+                        $q->where('order_number', $paddedCandidate)
+                          ->orWhere('order_number', $unpaddedCandidate);
+                    })
+                    ->exists();
+
+                if (!$exists) {
+                    break;
+                }
+
+                $candidateNumber++;
+            }
 
             DB::table('order_sequences')
                 ->where('series', $series)
                 ->update([
-                    'last_number' => $nextNumber,
-                    'updated_at' => date('Y-m-d H:i:s'),
+                    'last_number' => $candidateNumber,
+                    'updated_at'  => date('Y-m-d H:i:s'),
                 ]);
 
-            return $series . str_pad($nextNumber, $paddingLength, '0', STR_PAD_LEFT);
+            return $series . str_pad($candidateNumber, $paddingLength, '0', STR_PAD_LEFT);
         });
     }
 

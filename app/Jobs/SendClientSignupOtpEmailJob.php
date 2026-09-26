@@ -55,6 +55,11 @@ class SendClientSignupOtpEmailJob implements ShouldQueue
      */
     public static function sendOtp(PendingRegistration $pending, string $otp): bool
     {
+        if (EmailTemplateService::isImportLocalEmail($pending->email)) {
+            Log::info("SendClientSignupOtpEmailJob: Skipped sending OTP to placeholder email {$pending->email}.");
+            return false;
+        }
+
         try {
             $appName = CredentialService::get('company', 'COMPANY_NAME', 'COMPANY_NAME', config('app.name', 'Megabyte Circuits'));
 

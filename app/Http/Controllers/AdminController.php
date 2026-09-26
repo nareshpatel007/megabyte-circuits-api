@@ -133,7 +133,14 @@ class AdminController extends Controller
             $hasUsers = Schema::hasTable('pcb_users') || Schema::hasTable('users');
             $userTable = Schema::hasTable('pcb_users') ? 'pcb_users' : 'users';
 
-            $totalRevenue = $hasOrders ? (float)DB::table('pcb_orders')->sum('order_value') : 0;
+            $totalRevenue = 0;
+            if (Schema::hasTable('payment_transactions')) {
+                $totalRevenue = (float) DB::table('payment_transactions')
+                    ->whereIn(DB::raw('LOWER(TRIM(status))'), ['success', 'successful', 'captured', 'paid', 'completed'])
+                    ->sum('amount');
+            } elseif ($hasOrders) {
+                $totalRevenue = (float) DB::table('pcb_orders')->sum('order_value');
+            }
             $totalOrders  = $hasOrders ? DB::table('pcb_orders')->count() : 0;
 
             $statusTable = Schema::hasTable('pcb_order_statuses') ? 'pcb_order_statuses' : (Schema::hasTable('pcb_statuses') ? 'pcb_statuses' : (Schema::hasTable('statuses') ? 'statuses' : null));
@@ -202,7 +209,10 @@ class AdminController extends Controller
                 $period = 'day';
             }
 
-            if (!Schema::hasTable('pcb_orders')) {
+            $hasTxTable = Schema::hasTable('payment_transactions');
+            $hasOrders = Schema::hasTable('pcb_orders');
+
+            if (!$hasTxTable && !$hasOrders) {
                 return response()->json(['status' => true, 'data' => [], 'period' => $period]);
             }
 
@@ -231,30 +241,21 @@ class AdminController extends Controller
                 }
             }
 
-            $query = DB::table('pcb_orders')
-                ->whereNull('deleted_at');
+            $ordersMap = [];
+            $revenueMap = [];
+            $dateSamplesMap = [];
 
-            if (empty($startDate) && empty($endDate) && $period === 'day') {
-                $query->where('created_at', '>=', now()->subDays(30)->startOfDay());
-            }
+            // 1. Orders count per date key from pcb_orders
+            if ($hasOrders) {
+                $ordersQuery = DB::table('pcb_orders')->whereNull('deleted_at');
 
-            if (!empty($startDate)) {
-                if ($period === 'year') {
-                    $s = strlen($startDate) === 4 ? $startDate . '-01-01' : $startDate;
-                    $query->where('created_at', '>=', $s . ' 00:00:00');
-                } else if ($period === 'month') {
-                    $s = strlen($startDate) === 7 ? $startDate . '-01' : $startDate;
-                    $query->where('created_at', '>=', $s . ' 00:00:00');
-                } else {
-                    $query->where('created_at', '>=', $startDate . ' 00:00:00');
+                if (!empty($startDate)) {
+                    $s = strlen($startDate) === 4 ? $startDate . '-01-01' : (strlen($startDate) === 7 ? $startDate . '-01' : $startDate);
+                    $ordersQuery->where('created_at', '>=', $s . ' 00:00:00');
                 }
-            }
 
-            if (!empty($endDate)) {
-                if ($period === 'year') {
+                if (!empty($endDate)) {
                     $e = strlen($endDate) === 4 ? $endDate . '-12-31' : $endDate;
-                    $query->where('created_at', '<=', $e . ' 23:59:59');
-                } else if ($period === 'month') {
                     if (strlen($endDate) === 7) {
                         try {
                             $dateObj = new \DateTime($endDate . '-01');
@@ -263,42 +264,97 @@ class AdminController extends Controller
                         } catch (\Exception $ex) {
                             $e = $endDate . '-28';
                         }
-                    } else {
-                        $e = $endDate;
                     }
-                    $query->where('created_at', '<=', $e . ' 23:59:59');
-                } else {
-                    $query->where('created_at', '<=', $endDate . ' 23:59:59');
+                    $ordersQuery->where('created_at', '<=', $e . ' 23:59:59');
+                }
+
+                $orderRows = $ordersQuery->select(
+                        DB::raw("{$dateFormat} as date_key"),
+                        DB::raw("COUNT(id) as total_orders"),
+                        DB::raw("COALESCE(SUM(order_value), 0) as fallback_revenue"),
+                        DB::raw("MIN(created_at) as sample_date")
+                    )
+                    ->groupBy('date_key')
+                    ->orderBy('date_key', 'asc')
+                    ->get();
+
+                foreach ($orderRows as $row) {
+                    $ordersMap[$row->date_key] = (int)$row->total_orders;
+                    $dateSamplesMap[$row->date_key] = $row->sample_date;
+                    if (!$hasTxTable) {
+                        $revenueMap[$row->date_key] = round((float)$row->fallback_revenue, 2);
+                    }
                 }
             }
 
-            $rows = $query->select(
-                    DB::raw("{$dateFormat} as date_key"),
-                    DB::raw("COALESCE(SUM(order_value), 0) as total_revenue"),
-                    DB::raw("COUNT(id) as total_orders"),
-                    DB::raw("MIN(created_at) as sample_created_at")
-                )
-                ->groupBy('date_key')
-                ->orderBy('date_key', 'asc')
-                ->get();
+            // 2. Revenue sum per date key from payment_transactions
+            if ($hasTxTable) {
+                $txQuery = DB::table('payment_transactions')
+                    ->whereIn(DB::raw('LOWER(TRIM(status))'), ['success', 'successful', 'captured', 'paid', 'completed']);
 
-            $trend = $rows->map(function ($row) use ($period) {
-                $dateObj = new \DateTime($row->sample_created_at ?? $row->date_key);
-                if ($period === 'year') {
-                    $label = $dateObj->format('Y');
-                } else if ($period === 'month') {
-                    $label = $dateObj->format('M Y');
-                } else {
-                    $label = $dateObj->format('M j');
+                if (!empty($startDate)) {
+                    $s = strlen($startDate) === 4 ? $startDate . '-01-01' : (strlen($startDate) === 7 ? $startDate . '-01' : $startDate);
+                    $txQuery->where('created_at', '>=', $s . ' 00:00:00');
                 }
 
-                return [
-                    'date_key' => $row->date_key,
+                if (!empty($endDate)) {
+                    $e = strlen($endDate) === 4 ? $endDate . '-12-31' : $endDate;
+                    if (strlen($endDate) === 7) {
+                        try {
+                            $dateObj = new \DateTime($endDate . '-01');
+                            $dateObj->modify('last day of this month');
+                            $e = $dateObj->format('Y-m-d');
+                        } catch (\Exception $ex) {
+                            $e = $endDate . '-28';
+                        }
+                    }
+                    $txQuery->where('created_at', '<=', $e . ' 23:59:59');
+                }
+
+                $txRows = $txQuery->select(
+                        DB::raw("{$dateFormat} as date_key"),
+                        DB::raw("COALESCE(SUM(amount), 0) as total_revenue"),
+                        DB::raw("MIN(created_at) as sample_date")
+                    )
+                    ->groupBy('date_key')
+                    ->orderBy('date_key', 'asc')
+                    ->get();
+
+                foreach ($txRows as $row) {
+                    $revenueMap[$row->date_key] = round((float)$row->total_revenue, 2);
+                    if (!isset($dateSamplesMap[$row->date_key])) {
+                        $dateSamplesMap[$row->date_key] = $row->sample_date;
+                    }
+                }
+            }
+
+            // 3. Combine unique date keys
+            $allDateKeys = array_unique(array_merge(array_keys($ordersMap), array_keys($revenueMap)));
+            sort($allDateKeys);
+
+            $trend = [];
+            foreach ($allDateKeys as $dateKey) {
+                $sampleDate = $dateSamplesMap[$dateKey] ?? $dateKey;
+                try {
+                    $dateObj = new \DateTime($sampleDate);
+                    if ($period === 'year') {
+                        $label = $dateObj->format('Y');
+                    } else if ($period === 'month') {
+                        $label = $dateObj->format('M Y');
+                    } else {
+                        $label = $dateObj->format('M j');
+                    }
+                } catch (\Exception $ex) {
+                    $label = $dateKey;
+                }
+
+                $trend[] = [
+                    'date_key' => $dateKey,
                     'date'     => $label,
-                    'revenue'  => round((float)$row->total_revenue, 2),
-                    'orders'   => (int)$row->total_orders,
+                    'revenue'  => $revenueMap[$dateKey] ?? 0.0,
+                    'orders'   => $ordersMap[$dateKey] ?? 0,
                 ];
-            });
+            }
 
             return response()->json([
                 'status' => true,

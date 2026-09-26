@@ -91,7 +91,11 @@ class SendInventoryTemplateEmailJob implements ShouldQueue
         }
 
         // 2. Validate recipient email
-        if (empty($toEmail) || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
+        if (empty($toEmail) || !filter_var($toEmail, FILTER_VALIDATE_EMAIL) || EmailTemplateService::isImportLocalEmail($toEmail)) {
+            $errorMsg = EmailTemplateService::isImportLocalEmail($toEmail) 
+                ? "Email skipped: recipient email '{$toEmail}' is an @import.local placeholder email."
+                : 'No valid recipient email address configured for inventory notifications';
+
             if ($loggingEnabled) {
                 EmailLog::create([
                     'template_key'      => $this->templateKey,
@@ -102,10 +106,10 @@ class SendInventoryTemplateEmailJob implements ShouldQueue
                     'to'                => $toEmail ?? 'N/A',
                     'cc'                => implode(', ', $rendered['cc'] ?? []),
                     'bcc'               => implode(', ', $rendered['bcc'] ?? []),
-                    'subject'           => $rendered['subject'],
+                    'subject'           => $rendered['subject'] ?? 'Inventory Alert',
                     'body'              => $rendered['body'] ?? null,
                     'status'            => 'skipped',
-                    'error_message'     => 'No valid recipient email address configured for inventory notifications',
+                    'error_message'     => $errorMsg,
                     'provider'          => 'smtp_global',
                 ]);
             }
