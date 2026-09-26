@@ -306,11 +306,11 @@ class JobCardDocumentService
     public function generateJobCardPdfBinary(array $data): string
     {
         $pdf = Pdf::loadView('pdf.job-card', ['data' => $data]);
-        $pdf->setPaper('a4', 'portrait');
+        $pdf->setPaper([0, 0, 612.28, 790.87], 'portrait');
         $pdf->setOption([
             'isHtml5ParserEnabled' => true,
             'isRemoteEnabled' => true,
-            'defaultFont' => 'sans-serif',
+            'defaultFont' => 'serif',
             'dpi' => 150
         ]);
 

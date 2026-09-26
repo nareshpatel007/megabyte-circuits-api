@@ -90,11 +90,11 @@ class PdfMergeService
         }
 
         try {
-            $pdf = new Fpdi('P', 'mm', 'A4');
-            $pdf->SetAutoPageBreak(false);
+            $targetW = 216.0;
+            $targetH = 279.0;
 
-            $targetW = 210.0;
-            $targetH = 297.0;
+            $pdf = new Fpdi('P', 'mm', [$targetW, $targetH]);
+            $pdf->SetAutoPageBreak(false);
 
             foreach ($filesArray as $fileItem) {
                 $filePath = $fileItem['path'];
@@ -112,16 +112,16 @@ class PdfMergeService
                         $srcH = $targetH;
                     }
 
-                    // Calculate scale to fit inside A4 (210mm x 297mm) while maintaining aspect ratio
+                    // Calculate scale to fit inside 216mm x 279mm while maintaining aspect ratio
                     $scale = min($targetW / $srcW, $targetH / $srcH);
                     $newW = $srcW * $scale;
                     $newH = $srcH * $scale;
 
-                    // Center horizontally and vertically on A4 canvas
+                    // Center horizontally and vertically on canvas
                     $x = ($targetW - $newW) / 2.0;
                     $y = ($targetH - $newH) / 2.0;
 
-                    $pdf->AddPage('P', 'A4');
+                    $pdf->AddPage('P', [$targetW, $targetH]);
                     $pdf->useTemplate($templateId, $x, $y, $newW, $newH);
                 }
             }
