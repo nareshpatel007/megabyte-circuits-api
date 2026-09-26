@@ -352,9 +352,9 @@ class JobCardController extends Controller
 
         $jobType = $isSingleSide ? "1- SIDE" : (($layersNum > 2) ? "{$layersNum} Layers-Layer Board" : "2-Layer Board");
 
-        $createdDate = $order->created_at ? Carbon::parse($order->created_at)->format('d M Y, h:i a') : Carbon::now()->format('d M Y, h:i a');
-        $launchDate = $order->launch_date ? Carbon::parse($order->launch_date)->format('d M Y, h:i a') : $createdDate;
-        $shippingDate = $order->delivery_date ? Carbon::parse($order->delivery_date)->format('d M Y, h:i a') : Carbon::now()->addDays(7)->format('d M Y, h:i a');
+        $createdDate = $order->created_at ? Carbon::parse($order->created_at)->format('d M Y') : Carbon::now()->format('d M Y');
+        $launchDate = $order->launch_date ? Carbon::parse($order->launch_date)->format('d M Y') : $createdDate;
+        $shippingDate = $order->delivery_date ? Carbon::parse($order->delivery_date)->format('d M Y') : Carbon::now()->addDays(7)->format('d M Y');
 
         $orderQty = (string)$order->getMeta('qty', $order->getMeta('quantity', $order->order_qty ?? '120'));
         $launchedQty = (string)$order->getMeta('launched_qty', $order->getMeta('launched', $orderQty));
@@ -451,9 +451,9 @@ class JobCardController extends Controller
             'is_single_side' => $overrides['is_single_side'] ?? $isSingleSide,
             'expose' => isset($overrides['expose']) ? (bool)$overrides['expose'] : true,
             'print_and_etch' => isset($overrides['print_and_etch']) ? (bool)$overrides['print_and_etch'] : false,
-            'order_date' => $overrides['order_date'] ?? $createdDate,
-            'launch_date' => $overrides['launch_date'] ?? $launchDate,
-            'shipping_date' => $overrides['shipping_date'] ?? $shippingDate,
+            'order_date' => $this->formatDateOnly($overrides['order_date'] ?? null, $createdDate),
+            'launch_date' => $this->formatDateOnly($overrides['launch_date'] ?? null, $launchDate),
+            'shipping_date' => $this->formatDateOnly($overrides['shipping_date'] ?? null, $shippingDate),
             'order_qty' => $overrides['order_qty'] ?? $orderQty,
             'launched_qty' => $overrides['launched_qty'] ?? $launchedQty,
             'ups' => $overrides['ups'] ?? $ups,
@@ -483,5 +483,22 @@ class JobCardController extends Controller
             'why_rejected' => $overrides['why_rejected'] ?? $whyRejected,
             'processes' => $processes,
         ];
+    }
+
+    /**
+     * Helper to format any date string to 'DD MMM YYYY' without time.
+     */
+    private function formatDateOnly($val, $default = '')
+    {
+        $target = !empty($val) ? $val : $default;
+        if (empty($target)) {
+            return '';
+        }
+        try {
+            return Carbon::parse($target)->format('d M Y');
+        } catch (\Throwable $e) {
+            $cleaned = preg_replace('/,?\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm|AM|PM)?/', '', (string)$target);
+            return trim($cleaned);
+        }
     }
 }

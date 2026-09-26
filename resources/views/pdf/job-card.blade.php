@@ -3,10 +3,10 @@
 <head>
     <meta charset="utf-8">
     <title>JOB_CARD_{{ $data['job_number'] }}</title>
-    <style>
+<style>
         @page {
             size: A4 portrait;
-            margin: 4mm 5mm 4mm 5mm;
+            margin: 5mm 6mm 5mm 6mm;
         }
         body {
             font-family: Arial, Helvetica, sans-serif;
@@ -15,7 +15,7 @@
             color: #000000;
             background: #ffffff;
             font-size: 10px;
-            line-height: 1.15;
+            line-height: 1.18;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
         }
@@ -29,10 +29,11 @@
         }
         .outer-table {
             border: 2px solid #000000;
+            width: 100%;
         }
         .outer-table td, .outer-table th {
             border: 1px solid #000000;
-            padding: 3px 4px;
+            padding: 3.5px 4px;
             vertical-align: middle;
             color: #000000;
             font-size: 9.5px;
@@ -64,7 +65,7 @@
             font-weight: 900;
         }
         .text-title {
-            font-size: 16px;
+            font-size: 17px;
             font-weight: 900;
             text-align: center;
             text-decoration: underline;
@@ -81,7 +82,7 @@
             text-decoration: underline;
         }
         .type-title {
-            font-size: 13px;
+            font-size: 13.5px;
             font-weight: 900;
             text-align: right;
         }
@@ -92,20 +93,20 @@
         }
         .inner-table td {
             border: none;
-            padding: 2px 3px;
+            padding: 2.5px 3px;
             font-size: 9.5px;
         }
         .note-header {
             font-weight: 900;
             font-size: 10px;
             text-decoration: underline;
-            margin-bottom: 2px;
+            margin-bottom: 3px;
         }
         .note-body {
             font-size: 9px;
             line-height: 1.25;
             white-space: pre-wrap;
-            min-height: 30px;
+            min-height: 42px;
         }
         .proc-table {
             width: 100%;
@@ -118,16 +119,16 @@
             font-weight: 900;
             font-size: 9px;
             text-align: center;
-            padding: 3px 2px;
+            padding: 4px 2px;
             text-transform: uppercase;
             background-color: #ffffff;
         }
         .proc-table td {
             border: 1px solid #000000;
-            font-size: 8.5px;
+            font-size: 9px;
             text-align: center;
-            padding: 2.5px 2px;
-            height: 13.5px;
+            padding: 3px 2px;
+            height: 23px;
         }
         .proc-name {
             font-weight: 900;
