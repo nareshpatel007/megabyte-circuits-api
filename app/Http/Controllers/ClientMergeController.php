@@ -88,7 +88,7 @@ class ClientMergeController extends Controller
             $sourceIds = $request->input('source_client_ids', []);
             $targetId = (int)$request->input('target_client_id');
             $conflictResolutions = $request->input('conflict_resolutions', []);
-            $confirmation = (string)$request->input('confirmation', '');
+            $confirmation = (string)($request->input('confirmation') ?? $request->input('confirm_code') ?? '');
 
             if (empty($sourceIds) || !is_array($sourceIds)) {
                 return response()->json([
