@@ -956,13 +956,29 @@ class OrderImportService
     /**
      * Validate data types and constraints for an extracted row
      */
-    protected function validateRow(array $data, int $rowIndex): array
+    protected function validateRow(array $data, int $rowIndex, array $allOrderNumbersInFile = []): array
     {
         $errors = [];
 
         // Required fields check
         if (empty($data['customer_name']) || trim((string)$data['customer_name']) === '') {
             $errors['Customer name'] = 'Customer name is required.';
+        }
+
+        if (!empty($data['combo'])) {
+            $comboNos = \App\Services\ComboOrderService::parseComboString($data['combo']);
+            $mainOrderNo = trim((string)($data['tool'] ?? ''));
+            foreach ($comboNos as $cNo) {
+                if ($mainOrderNo !== '' && strcasecmp($cNo, $mainOrderNo) === 0) {
+                    continue;
+                }
+                $existsInDb = PcbOrder::where('order_number', $cNo)->orWhere('order_number', strtoupper($cNo))->exists();
+                $existsInFile = in_array(strtolower($cNo), array_map('strtolower', $allOrderNumbersInFile), true);
+                if (!$existsInDb && !$existsInFile) {
+                    $errors['Combo'] = "Combo order {$cNo} was not found.";
+                    break;
+                }
+            }
         }
 
         return [
@@ -1081,6 +1097,15 @@ class OrderImportService
         }
 
         $this->saveOrderMetas($order->id, $data);
+
+        // Sync combo orders if present
+        if (!empty($data['combo'])) {
+            $comboNos = \App\Services\ComboOrderService::parseComboString($data['combo']);
+            if (!empty($comboNos)) {
+                $err = null;
+                \App\Services\ComboOrderService::syncComboOrders($order, $comboNos, $err);
+            }
+        }
 
         // Record status history if table exists
         if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_status_histories')) {
@@ -1223,6 +1248,13 @@ class OrderImportService
         }
 
         $this->saveOrderMetas($order->id, $data);
+
+        // Sync combo orders
+        if (isset($data['combo'])) {
+            $comboNos = \App\Services\ComboOrderService::parseComboString($data['combo']);
+            $err = null;
+            \App\Services\ComboOrderService::syncComboOrders($order, $comboNos, $err);
+        }
 
         return $order;
     }

@@ -64,6 +64,23 @@ class PcbOrder extends Model
         return $this->belongsTo(GerberFile::class, 'gerber_file_id');
     }
 
+    // Combo Orders (Child orders under this parent order)
+    public function comboOrders()
+    {
+        return $this->belongsToMany(
+            PcbOrder::class,
+            'pcb_order_combos',
+            'parent_order_id',
+            'combo_order_id'
+        )->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status', 'pcb_orders.customer_name');
+    }
+
+    // Combo Parent Record
+    public function comboParentRecord()
+    {
+        return $this->hasOne(PcbOrderCombo::class, 'combo_order_id');
+    }
+
     protected $casts = [
         'unit_price'  => 'decimal:2',
         'order_value' => 'decimal:2',

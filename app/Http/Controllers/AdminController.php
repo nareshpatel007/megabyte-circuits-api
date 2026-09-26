@@ -234,6 +234,10 @@ class AdminController extends Controller
             $query = DB::table('pcb_orders')
                 ->whereNull('deleted_at');
 
+            if (empty($startDate) && empty($endDate) && $period === 'day') {
+                $query->where('created_at', '>=', now()->subDays(30)->startOfDay());
+            }
+
             if (!empty($startDate)) {
                 if ($period === 'year') {
                     $s = strlen($startDate) === 4 ? $startDate . '-01-01' : $startDate;

@@ -446,6 +446,9 @@ class OrderController extends Controller
         if (\Illuminate\Support\Facades\Schema::hasTable('users') || \Illuminate\Support\Facades\Schema::hasTable('pcb_users')) {
             $withRelations[] = 'user';
         }
+        if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_combos')) {
+            $withRelations[] = 'comboOrders';
+        }
 
         $orderQuery = PcbOrder::with($withRelations)
             ->leftJoin('user_addresses as ship', 'pcb_orders.shipping_address_id', '=', 'ship.id')
@@ -640,9 +643,27 @@ class OrderController extends Controller
                 $changesLog[] = "Q.No: '{$oldVal}' → '{$request->q_no}'";
             }
 
-            if ($request->has('combo') && (string)$order->combo !== (string)$request->combo) {
+            if ($request->has('combo_order_ids')) {
+                $comboInput = $request->input('combo_order_ids');
+                if (is_string($comboInput)) {
+                    $comboInput = \App\Services\ComboOrderService::parseComboString($comboInput);
+                } elseif (!is_array($comboInput)) {
+                    $comboInput = [];
+                }
+                $err = null;
+                \App\Services\ComboOrderService::syncComboOrders($order, $comboInput, $err);
+                if ($err) {
+                    return response()->json(['success' => false, 'message' => $err], 422);
+                }
+                $changesLog[] = "Combo Orders Updated";
+            } elseif ($request->has('combo') && (string)$order->combo !== (string)$request->combo) {
                 $oldVal = $order->combo ?? 'N/A';
-                $order->combo = $request->combo;
+                $comboInput = \App\Services\ComboOrderService::parseComboString($request->combo);
+                $err = null;
+                \App\Services\ComboOrderService::syncComboOrders($order, $comboInput, $err);
+                if ($err) {
+                    return response()->json(['success' => false, 'message' => $err], 422);
+                }
                 $changesLog[] = "Combo: '{$oldVal}' → '{$request->combo}'";
             }
 
@@ -705,6 +726,12 @@ class OrderController extends Controller
 
             // Dispatch order_status_updated email & in-app notification when status changes (previous != new)
             if ($statusChanged) {
+                // Synchronize status to child combo member orders
+                $adminId = $request->attributes->get('admin_id') ?? $request->admin_id ?? 1;
+                $adminUser = $adminId ? \Illuminate\Support\Facades\DB::table('admins')->where('id', $adminId)->first() : null;
+                $adminName = $adminUser ? $adminUser->name : 'Admin';
+                \App\Services\ComboOrderService::syncComboStatus($order, (string)$order->status, (int)$adminId, (string)$adminName);
+
                 \App\Services\EmailTemplateService::sendOrderEmail('order_status_updated', $order->id, null, [
                     'previous_order_status' => $previousStatusName,
                 ]);

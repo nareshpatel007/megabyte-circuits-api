@@ -97,6 +97,13 @@ class MobileOrderController extends Controller
 
             $query = DB::table('pcb_orders')->whereNull('deleted_at');
 
+            // Hide combo member child orders from mobile production list (show parent & normal orders only)
+            if (Schema::hasTable('pcb_order_combos')) {
+                $query->whereNotIn('pcb_orders.id', function ($subQuery) {
+                    $subQuery->select('combo_order_id')->from('pcb_order_combos');
+                });
+            }
+
             if ($search !== '') {
                 $query->where(function ($q) use ($search) {
                     $hasClause = false;
@@ -195,6 +202,7 @@ class MobileOrderController extends Controller
                     'finalQty' => $finalQty,
                     'failedQty' => $failedQty,
                     'pendingQty' => $pendingQty,
+                    'combo' => $order->combo ?? null,
                     'lastUpdate' => ($order->updated_at ?? null) ? date('h:i A', strtotime($order->updated_at)) : 'Just now'
                 ];
             });
@@ -316,6 +324,8 @@ class MobileOrderController extends Controller
                 'finalQty' => $finalQty,
                 'failedQty' => $failedQty,
                 'pendingQty' => $pendingQty,
+                'combo' => $order->combo ?? null,
+                'combo_orders' => Schema::hasTable('pcb_order_combos') ? DB::table('pcb_order_combos')->join('pcb_orders', 'pcb_order_combos.combo_order_id', '=', 'pcb_orders.id')->where('pcb_order_combos.parent_order_id', $order->id)->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status')->get() : [],
                 'lastUpdate' => ($order->updated_at ?? null) ? date('h:i A', strtotime($order->updated_at)) : 'Just now',
                 'user_email' => $order->user_email ?? '',
                 'user_mobile' => $order->user_mobile ?? '',
@@ -451,6 +461,12 @@ class MobileOrderController extends Controller
                     'remark' => "Status updated to '{$newStatus}' by {$adminName}",
                     'created_at' => date('Y-m-d H:i:s')
                 ]);
+            }
+
+            // Synchronize status to child combo member orders if this order is a parent
+            $parentPcbOrder = \App\Models\PcbOrder::find($order->id);
+            if ($parentPcbOrder) {
+                \App\Services\ComboOrderService::syncComboStatus($parentPcbOrder, $newStatus, (int)($adminId ?: 1), $adminName);
             }
 
             return response()->json([
