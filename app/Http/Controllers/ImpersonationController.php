@@ -319,7 +319,7 @@ class ImpersonationController extends Controller
                 }
             }
 
-            $adminAppUrl = env('ADMIN_APP_URL', env('NEXT_PUBLIC_ADMIN_URL', 'http://localhost:3000'));
+            $adminAppUrl = env('ADMIN_URL', env('NEXT_PUBLIC_ADMIN_URL', 'http://localhost:3000'));
             $adminAppUrl = rtrim($adminAppUrl, '/') . '/clients';
 
             return response()->json([
