@@ -70,9 +70,8 @@ class ComboOrderService
                             $targetOrderIds[] = $childOrder->id;
                         }
                     } else {
-                        $error = "Combo order {$orderNo} was not found.";
-                        DB::rollBack();
-                        return false;
+                        // If combo order is not found, ignore combo adding and continue
+                        continue;
                     }
                 }
             }

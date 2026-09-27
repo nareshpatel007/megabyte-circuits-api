@@ -965,21 +965,7 @@ class OrderImportService
             $errors['Customer name'] = 'Customer name is required.';
         }
 
-        if (!empty($data['combo'])) {
-            $comboNos = \App\Services\ComboOrderService::parseComboString($data['combo']);
-            $mainOrderNo = trim((string)($data['tool'] ?? ''));
-            foreach ($comboNos as $cNo) {
-                if ($mainOrderNo !== '' && strcasecmp($cNo, $mainOrderNo) === 0) {
-                    continue;
-                }
-                $existsInDb = PcbOrder::where('order_number', $cNo)->orWhere('order_number', strtoupper($cNo))->exists();
-                $existsInFile = in_array(strtolower($cNo), array_map('strtolower', $allOrderNumbersInFile), true);
-                if (!$existsInDb && !$existsInFile) {
-                    $errors['Combo'] = "Combo order {$cNo} was not found.";
-                    break;
-                }
-            }
-        }
+        // Note: If combo order is not found, ignore combo adding and just add order data without combo error.
 
         return [
             'valid'  => empty($errors),
