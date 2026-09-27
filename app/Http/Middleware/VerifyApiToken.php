@@ -129,7 +129,16 @@ class VerifyApiToken
                         'status' => false,
                         'success' => false,
                         'code' => 'IMPERSONATION_ENDED',
-                        'message' => 'Client impersonation session has ended.'
+                        'message' => 'Client impersonation session has ended or was switched to another client.'
+                    ], 401);
+                }
+
+                if ((int)$session->client_id !== (int)$user->id) {
+                    return response()->json([
+                        'status' => false,
+                        'success' => false,
+                        'code' => 'IMPERSONATION_MISMATCH',
+                        'message' => 'Impersonation token identity mismatch.'
                     ], 401);
                 }
 

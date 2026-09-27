@@ -42,7 +42,8 @@ class FileUploadController extends Controller
             $originalExtension = strtolower($file->getClientOriginalExtension());
             $originalName = $request->input('fileName', $file->getClientOriginalName());
             $folder = $request->input('folder', 'gerber-files');
-            $userId = $request->input('user_id', null);
+            $authUser = $request->attributes->get('authenticated_user');
+            $userId = ($authUser && isset($authUser->id)) ? (int)$authUser->id : $request->input('user_id', null);
 
             $zipFileUrl = null;
             $fileToAnalyzePath = $file->getRealPath();

@@ -4,16 +4,49 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
 
 class DashboardController extends Controller
 {
+    private function resolveUserId(Request $request): ?int
+    {
+        $authUser = $request->attributes->get('authenticated_user');
+        if ($authUser && isset($authUser->id)) {
+            return (int)$authUser->id;
+        }
+
+        $authHeader = $request->header('Authorization');
+        if ($authHeader && str_starts_with($authHeader, 'Bearer ')) {
+            $token = str_replace('Bearer ', '', $authHeader);
+            try {
+                $secret = \App\Services\CredentialService::get('auth', 'JWT_SECRET', 'JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
+                $decoded = JWT::decode($token, new Key($secret, 'HS256'));
+                if (!empty($decoded->user_id)) {
+                    if (!empty($decoded->is_impersonating) && !empty($decoded->impersonation_session_id)) {
+                        $session = DB::table('impersonation_sessions')->where('id', $decoded->impersonation_session_id)->first();
+                        if (!$session || $session->status !== 'active') {
+                            return null;
+                        }
+                    }
+                    return (int)$decoded->user_id;
+                }
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+
+        $inputUserId = $request->input('user_id');
+        return $inputUserId ? (int)$inputUserId : null;
+    }
+
     // Overview Metrics & Recent Activity
     public function overview(Request $request)
     {
         try {
-            $userId = $request->input('user_id');
+            $userId = $this->resolveUserId($request);
             if (!$userId) {
-                return response()->json(['status' => false, 'message' => 'User ID is required'], 400);
+                return response()->json(['status' => false, 'message' => 'Unauthorized user authentication'], 401);
             }
 
             $totalOrders = DB::table('pcb_orders')->where('user_id', $userId)->whereNull('deleted_at')->count();
@@ -209,9 +242,9 @@ class DashboardController extends Controller
     public function sidebarCounts(Request $request)
     {
         try {
-            $userId = $request->input('user_id');
+            $userId = $this->resolveUserId($request);
             if (!$userId) {
-                return response()->json(['status' => false, 'message' => 'User ID is required'], 400);
+                return response()->json(['status' => false, 'message' => 'Unauthorized user authentication'], 401);
             }
 
             $totalOrders = DB::table('pcb_orders')->where('user_id', $userId)->whereNull('deleted_at')->count();
@@ -235,9 +268,9 @@ class DashboardController extends Controller
     public function accountDetails(Request $request)
     {
         try {
-            $userId = $request->input('user_id');
+            $userId = $this->resolveUserId($request);
             if (!$userId) {
-                return response()->json(['status' => false, 'message' => 'User ID is required'], 400);
+                return response()->json(['status' => false, 'message' => 'Unauthorized user authentication'], 401);
             }
 
             $user = DB::table('users')->where('id', $userId)->first();
@@ -266,11 +299,11 @@ class DashboardController extends Controller
     public function updateGst(Request $request)
     {
         try {
-            $userId = $request->input('user_id');
+            $userId = $this->resolveUserId($request);
             $gstNumber = $request->input('gst_number');
 
             if (!$userId) {
-                return response()->json(['status' => false, 'message' => 'User ID is required'], 400);
+                return response()->json(['status' => false, 'message' => 'Unauthorized user authentication'], 401);
             }
 
             DB::table('users')->where('id', $userId)->update([
@@ -291,9 +324,9 @@ class DashboardController extends Controller
     public function orders(Request $request)
     {
         try {
-            $userId = $request->input('user_id');
+            $userId = $this->resolveUserId($request);
             if (!$userId) {
-                return response()->json(['status' => false, 'message' => 'User ID is required'], 400);
+                return response()->json(['status' => false, 'message' => 'Unauthorized user authentication'], 401);
             }
 
             $orders = DB::table('pcb_orders')
@@ -350,9 +383,9 @@ class DashboardController extends Controller
     public function gerberFiles(Request $request)
     {
         try {
-            $userId = $request->input('user_id');
+            $userId = $this->resolveUserId($request);
             if (!$userId) {
-                return response()->json(['status' => false, 'message' => 'User ID is required'], 400);
+                return response()->json(['status' => false, 'message' => 'Unauthorized user authentication'], 401);
             }
 
             $files = DB::table('gerber_files')
@@ -383,10 +416,10 @@ class DashboardController extends Controller
             }
 
             $id = $input['id'] ?? null;
-            $userId = $input['user_id'] ?? null;
+            $userId = $this->resolveUserId($request);
 
             if (!$id || !$userId) {
-                return response()->json(['status' => false, 'message' => 'File ID and User ID are required'], 400);
+                return response()->json(['status' => false, 'message' => 'File ID and valid User authentication are required'], 400);
             }
 
             DB::table('gerber_files')
@@ -404,9 +437,9 @@ class DashboardController extends Controller
     public function payments(Request $request)
     {
         try {
-            $userId = $request->input('user_id');
+            $userId = $this->resolveUserId($request);
             if (!$userId) {
-                return response()->json(['status' => false, 'message' => 'User ID is required'], 400);
+                return response()->json(['status' => false, 'message' => 'Unauthorized user authentication'], 401);
             }
 
             $payments = DB::table('payment_transactions')
@@ -425,11 +458,11 @@ class DashboardController extends Controller
     public function search(Request $request)
     {
         try {
-            $userId = $request->input('user_id');
+            $userId = $this->resolveUserId($request);
             $q = trim($request->input('q') ?? $request->input('search') ?? '');
 
             if (!$userId) {
-                return response()->json(['status' => false, 'message' => 'User ID is required'], 400);
+                return response()->json(['status' => false, 'message' => 'Unauthorized user authentication'], 401);
             }
 
             if (empty($q)) {

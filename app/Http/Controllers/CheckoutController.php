@@ -27,11 +27,42 @@ class CheckoutController extends Controller
         }
     }
 
+    private function resolveUserId(Request $request): ?int
+    {
+        $authUser = $request->attributes->get('authenticated_user');
+        if ($authUser && isset($authUser->id)) {
+            return (int)$authUser->id;
+        }
+
+        $authHeader = $request->header('Authorization');
+        if ($authHeader && str_starts_with($authHeader, 'Bearer ')) {
+            $token = str_replace('Bearer ', '', $authHeader);
+            try {
+                $secret = \App\Services\CredentialService::get('auth', 'JWT_SECRET', 'JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
+                $decoded = \Firebase\JWT\JWT::decode($token, new \Firebase\JWT\Key($secret, 'HS256'));
+                if (!empty($decoded->user_id)) {
+                    if (!empty($decoded->is_impersonating) && !empty($decoded->impersonation_session_id)) {
+                        $session = DB::table('impersonation_sessions')->where('id', $decoded->impersonation_session_id)->first();
+                        if (!$session || $session->status !== 'active') {
+                            return null;
+                        }
+                    }
+                    return (int)$decoded->user_id;
+                }
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+
+        $inputUserId = $request->input('user_id');
+        return $inputUserId ? (int)$inputUserId : null;
+    }
+
     // Get active (non-soft-deleted) saved addresses for user
     public function getAddresses(Request $request)
     {
         try {
-            $userId = $request->input('user_id');
+            $userId = $this->resolveUserId($request);
             if (!$userId) {
                 return response()->json(['status' => true, 'addresses' => []]);
             }
@@ -77,7 +108,7 @@ class CheckoutController extends Controller
                 $input = json_decode($request->getContent(), true) ?? [];
             }
 
-            $userId = $input['user_id'] ?? null;
+            $userId = $this->resolveUserId($request);
             $editAddressId = $input['id'] ?? null;
 
             // If updating an existing address ID, soft-delete the old record to preserve historical orders
@@ -132,10 +163,10 @@ class CheckoutController extends Controller
             }
 
             $id = $input['id'] ?? null;
-            $userId = $input['user_id'] ?? null;
+            $userId = $this->resolveUserId($request);
 
             if (!$id || !$userId) {
-                return response()->json(['status' => false, 'message' => 'Address ID and User ID are required'], 400);
+                return response()->json(['status' => false, 'message' => 'Address ID and valid User authentication are required'], 400);
             }
 
             DB::table('user_addresses')
@@ -200,8 +231,9 @@ class CheckoutController extends Controller
                 $razorpayOrder = $response->json();
 
                 // Audit log transaction initiation
+                $userId = $this->resolveUserId($request);
                 DB::table('payment_transactions')->insert([
-                    'user_id' => $input['user_id'] ?? null,
+                    'user_id' => $userId,
                     'transaction_number' => 'TXN_' . strtoupper(Str::random(10)),
                     'razorpay_order_id' => $razorpayOrder['id'],
                     'amount' => $amount,
@@ -257,7 +289,7 @@ class CheckoutController extends Controller
             $razorpayOrderId = $input['razorpay_order_id'] ?? null;
             $razorpaySignature = $input['razorpay_signature'] ?? null;
             
-            $userId = $input['user_id'] ?? null;
+            $userId = $this->resolveUserId($request);
             $shippingAddressId = $input['shipping_address_id'] ?? ($input['address_id'] ?? null);
             $billingAddressId = $input['billing_address_id'] ?? $shippingAddressId;
             $items = $input['items'] ?? [];

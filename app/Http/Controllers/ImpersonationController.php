@@ -12,17 +12,18 @@ use App\CommonHelper;
 class ImpersonationController extends Controller
 {
     /**
-     * Start impersonation of a client by an authorized admin.
+     * Start or switch impersonation of a client by an authorized admin.
      * Endpoint: POST /api/admin/clients/{id}/impersonate
      */
     public function start(Request $request, $clientId)
     {
         try {
-            // 1. Get authenticated admin ID from request (set by VerifyAdminToken)
+            // 1. Get authenticated admin ID from request
             $adminId = $request->attributes->get('admin_id');
-
             if (!$adminId) {
-                // Fallback token decoding if attribute not set
+                $adminId = $request->attributes->get('impersonation_admin_id');
+            }
+            if (!$adminId) {
                 $adminId = $this->getAdminIdFromRequest($request);
             }
 
@@ -50,15 +51,7 @@ class ImpersonationController extends Controller
                 ], 403);
             }
 
-            // 4. Ensure request is not already inside an impersonation context (prevent multi-hop)
-            if ($request->attributes->get('is_impersonating')) {
-                return response()->json([
-                    'status' => false,
-                    'message' => 'Impersonated client sessions cannot initiate another impersonation.'
-                ], 403);
-            }
-
-            // 5. Fetch target client user
+            // 4. Fetch target client user
             $client = DB::table('users')->where('id', $clientId)->first();
             if (!$client) {
                 return response()->json([
@@ -67,7 +60,7 @@ class ImpersonationController extends Controller
                 ], 404);
             }
 
-            // 6. Check Client Eligibility & Account Status
+            // 5. Check Client Eligibility & Account Status
             if (!empty($client->deleted_at)) {
                 return response()->json([
                     'status' => false,
@@ -83,21 +76,55 @@ class ImpersonationController extends Controller
                 ], 400);
             }
 
+            $now = date('Y-m-d H:i:s');
+            $reason = $request->input('reason');
+
+            // 6. Invalidate & terminate ALL existing active impersonation sessions for this Admin
+            $previousActiveSessions = DB::table('impersonation_sessions')
+                ->where('admin_id', $admin->id)
+                ->where('status', 'active')
+                ->get();
+
+            $isSwitch = false;
+            foreach ($previousActiveSessions as $prevSession) {
+                $isSwitch = true;
+                $durationMinutes = round((strtotime($now) - strtotime($prevSession->started_at)) / 60);
+
+                DB::table('impersonation_sessions')
+                    ->where('id', $prevSession->id)
+                    ->update([
+                        'status' => 'switched',
+                        'ended_at' => $now,
+                        'updated_at' => $now
+                    ]);
+
+                // Log session termination due to client switch
+                CommonHelper::logActivity(
+                    $prevSession->client_id,
+                    'admin_impersonation_switched',
+                    "Admin '{$admin->name}' (ID: {$admin->id}) ended impersonation for Client (ID: {$prevSession->client_id}) to switch to Client '{$client->name}' (ID: {$client->id}). Duration: {$durationMinutes} mins.",
+                    $request
+                );
+            }
+
+            // Invalidate any active unused handoff codes for this admin
+            DB::table('impersonation_codes')
+                ->where('admin_id', $admin->id)
+                ->where('used', false)
+                ->update(['used' => true, 'updated_at' => $now]);
+
             // 7. Session Timeout Configuration
             $timeoutSeconds = intval(env('CLIENT_IMPERSONATION_TIMEOUT', 3600));
             if ($timeoutSeconds <= 0) {
                 $timeoutSeconds = 3600;
             }
-
-            $now = date('Y-m-d H:i:s');
             $expiresAt = date('Y-m-d H:i:s', time() + $timeoutSeconds);
-            $reason = $request->input('reason');
 
-            // 8. Create Impersonation Session
+            // 8. Create NEW Impersonation Session
             $sessionId = DB::table('impersonation_sessions')->insertGetId([
                 'admin_id' => $admin->id,
                 'client_id' => $client->id,
-                'reason' => $reason ? trim((string)$reason) : null,
+                'reason' => $reason ? trim((string)$reason) : ($isSwitch ? 'Switched client impersonation' : null),
                 'status' => 'active',
                 'started_at' => $now,
                 'expires_at' => $expiresAt,
@@ -122,11 +149,16 @@ class ImpersonationController extends Controller
                 'updated_at' => $now,
             ]);
 
-            // 10. Audit Log
+            // 10. Audit Log for new session
+            $actionType = $isSwitch ? 'admin_impersonation_switched' : 'admin_impersonation_started';
+            $logMessage = $isSwitch
+                ? "Admin '{$admin->name}' (ID: {$admin->id}) switched active impersonation to Client '{$client->name}' (ID: {$client->id}, Email: {$client->email})."
+                : "Admin '{$admin->name}' (ID: {$admin->id}) initiated impersonation for Client '{$client->name}' (ID: {$client->id}, Email: {$client->email}).";
+
             CommonHelper::logActivity(
                 $client->id,
-                'admin_impersonation_started',
-                "Admin '{$admin->name}' (ID: {$admin->id}) initiated impersonation for Client '{$client->name}' (ID: {$client->id}, Email: {$client->email}).",
+                $actionType,
+                $logMessage,
                 $request
             );
 
@@ -137,7 +169,7 @@ class ImpersonationController extends Controller
 
             return response()->json([
                 'status' => true,
-                'message' => 'Impersonation session initiated successfully.',
+                'message' => $isSwitch ? 'Switched client impersonation session successfully.' : 'Impersonation session initiated successfully.',
                 'data' => [
                     'code' => $handoffCode,
                     'redirect_url' => $redirectUrl,
@@ -156,6 +188,23 @@ class ImpersonationController extends Controller
                 'message' => 'Failed to initiate impersonation: ' . $th->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Dedicated Endpoint for switching active impersonated client.
+     * Endpoint: POST /api/admin/impersonation/switch
+     */
+    public function switch(Request $request)
+    {
+        $clientId = $request->input('client_id');
+        if (empty($clientId)) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Target client_id parameter is required.'
+            ], 400);
+        }
+
+        return $this->start($request, $clientId);
     }
 
     /**

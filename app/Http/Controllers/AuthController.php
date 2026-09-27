@@ -1377,13 +1377,28 @@ class AuthController extends Controller
             }
 
             $impersonationData = null;
-            if (!empty($decoded->is_impersonating)) {
+            if (!empty($decoded->is_impersonating) && !empty($decoded->impersonation_session_id)) {
+                $impSession = DB::table('impersonation_sessions')
+                    ->where('id', $decoded->impersonation_session_id)
+                    ->first();
+
+                if (!$impSession || $impSession->status !== 'active' || (int)$impSession->client_id !== (int)$user->id) {
+                    return response()->json([
+                        'status' => false,
+                        'success' => false,
+                        'authenticated' => false,
+                        'code' => 'IMPERSONATION_ENDED',
+                        'message' => 'Client impersonation session has ended or was switched.'
+                    ], 401);
+                }
+
                 $impersonationData = [
                     'active' => true,
-                    'admin_id' => $decoded->admin_id ?? null,
+                    'admin_id' => $decoded->admin_id ?? $impSession->admin_id,
                     'admin_name' => $decoded->admin_name ?? 'Admin',
-                    'session_id' => $decoded->impersonation_session_id ?? null,
-                    'expires_at' => isset($decoded->exp) ? date('Y-m-d H:i:s', $decoded->exp) : null
+                    'client_id' => $user->id,
+                    'session_id' => $impSession->id,
+                    'expires_at' => $impSession->expires_at
                 ];
             }
 

@@ -70,6 +70,7 @@ Route::middleware('verify.admin.token')->group(function () {
 
         // Admin Client Impersonation
         Route::post('clients/{id}/impersonate', [\App\Http\Controllers\ImpersonationController::class, 'start']);
+        Route::post('impersonation/switch', [\App\Http\Controllers\ImpersonationController::class, 'switch']);
         Route::post('impersonation/stop', [\App\Http\Controllers\ImpersonationController::class, 'stop']);
 
         Route::get('users', [AdminController::class, 'users']);

@@ -57,6 +57,7 @@ Route::post('digikey/sync', [\App\Http\Controllers\DigiKeyProductsController::cl
 Route::prefix('auth/')->group(function () {
     Route::get('me', [AuthController::class, 'me']);
     Route::post('impersonate/exchange', [\App\Http\Controllers\ImpersonationController::class, 'exchange']);
+    Route::post('impersonation/switch', [\App\Http\Controllers\ImpersonationController::class, 'switch']);
     Route::post('impersonation/stop', [\App\Http\Controllers\ImpersonationController::class, 'stop']);
     Route::get('google', [GoogleController::class, 'redirect']);
     Route::get('google/callback', [GoogleController::class, 'callback']);
@@ -72,36 +73,49 @@ Route::prefix('auth/')->group(function () {
     Route::post('reset-password', [\App\Http\Controllers\PasswordResetController::class, 'clientResetPassword']);
 });
 
-// Cart Routes
-Route::prefix('cart/')->group(function () {
-    Route::post('save', [CartController::class, 'save']);
-    Route::get('get', [CartController::class, 'get']);
-});
-
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\NotificationController;
 
-// Checkout Routes
-Route::prefix('checkout/')->group(function () {
-    Route::get('addresses', [CheckoutController::class, 'getAddresses']);
-    Route::get('states', [CheckoutController::class, 'getStates']);
-    Route::post('save-address', [CheckoutController::class, 'saveAddress']);
-    Route::post('delete-address', [CheckoutController::class, 'deleteAddress']);
-    Route::post('create-razorpay-order', [CheckoutController::class, 'createRazorpayOrder']);
-    Route::post('verify-payment', [CheckoutController::class, 'verifyPaymentAndCreateOrders']);
-});
+// Protected Client Frontend API Routes
+Route::middleware('verify.api.token')->group(function () {
+    // Cart Routes
+    Route::prefix('cart/')->group(function () {
+        Route::post('save', [CartController::class, 'save']);
+        Route::get('get', [CartController::class, 'get']);
+    });
 
-// User Dashboard Routes
-Route::prefix('dashboard/')->group(function () {
-    Route::get('overview', [DashboardController::class, 'overview']);
-    Route::get('sidebar-counts', [DashboardController::class, 'sidebarCounts']);
-    Route::get('account', [DashboardController::class, 'accountDetails']);
-    Route::post('update-gst', [DashboardController::class, 'updateGst']);
-    Route::get('orders', [DashboardController::class, 'orders']);
-    Route::get('order-details', [DashboardController::class, 'orderDetails']);
-    Route::get('gerber-files', [DashboardController::class, 'gerberFiles']);
-    Route::post('delete-gerber', [DashboardController::class, 'deleteGerberFile']);
-    Route::get('payments', [DashboardController::class, 'payments']);
-    Route::get('search', [DashboardController::class, 'search']);
+    // Checkout Routes
+    Route::prefix('checkout/')->group(function () {
+        Route::get('addresses', [CheckoutController::class, 'getAddresses']);
+        Route::get('states', [CheckoutController::class, 'getStates']);
+        Route::post('save-address', [CheckoutController::class, 'saveAddress']);
+        Route::post('delete-address', [CheckoutController::class, 'deleteAddress']);
+        Route::post('create-razorpay-order', [CheckoutController::class, 'createRazorpayOrder']);
+        Route::post('verify-payment', [CheckoutController::class, 'verifyPaymentAndCreateOrders']);
+    });
+
+    // User Dashboard Routes
+    Route::prefix('dashboard/')->group(function () {
+        Route::get('overview', [DashboardController::class, 'overview']);
+        Route::get('sidebar-counts', [DashboardController::class, 'sidebarCounts']);
+        Route::get('account', [DashboardController::class, 'accountDetails']);
+        Route::post('update-gst', [DashboardController::class, 'updateGst']);
+        Route::get('orders', [DashboardController::class, 'orders']);
+        Route::get('order-details', [DashboardController::class, 'orderDetails']);
+        Route::get('gerber-files', [DashboardController::class, 'gerberFiles']);
+        Route::post('delete-gerber', [DashboardController::class, 'deleteGerberFile']);
+        Route::get('payments', [DashboardController::class, 'payments']);
+        Route::get('search', [DashboardController::class, 'search']);
+    });
+
+    // Client Notification Routes
+    Route::prefix('notifications')->group(function () {
+        Route::get('/', [NotificationController::class, 'index']);
+        Route::get('unread-count', [NotificationController::class, 'unreadCount']);
+        Route::post('{id}/read', [NotificationController::class, 'markAsRead']);
+        Route::post('read-all', [NotificationController::class, 'markAllAsRead']);
+        Route::get('stream', [NotificationController::class, 'stream']);
+    });
 });
 
 // Public Blog Routes
@@ -117,17 +131,3 @@ Route::post('blogs/{id}/view', [BlogController::class, 'incrementView']);
 Route::post('blogs/{id}/like', [BlogController::class, 'toggleLike']);
 Route::post('blogs/{id}/comments', [BlogController::class, 'submitComment']);
 
-
-use App\Http\Controllers\NotificationController;
-
-// Client Notification Routes
-Route::prefix('notifications')->group(function () {
-    Route::get('/', [NotificationController::class, 'index']);
-    Route::get('unread-count', [NotificationController::class, 'unreadCount']);
-    Route::post('{id}/read', [NotificationController::class, 'markAsRead']);
-    Route::post('read-all', [NotificationController::class, 'markAllAsRead']);
-    Route::get('stream', [NotificationController::class, 'stream']);
-});
-
-// Frontend API Routes (Protected by API token)
-Route::middleware('verify.api.token')->group(function () {});

@@ -9,10 +9,32 @@ class NotificationController extends Controller
 {
     private function getUserId(Request $request): ?int
     {
-        $userId = $request->query('user_id') ?: $request->input('user_id');
-        if (!$userId && $request->attributes->get('user_id')) {
-            $userId = $request->attributes->get('user_id');
+        $authUser = $request->attributes->get('authenticated_user');
+        if ($authUser && isset($authUser->id)) {
+            return (int)$authUser->id;
         }
+
+        $authHeader = $request->header('Authorization');
+        if ($authHeader && str_starts_with($authHeader, 'Bearer ')) {
+            $token = str_replace('Bearer ', '', $authHeader);
+            try {
+                $secret = \App\Services\CredentialService::get('auth', 'JWT_SECRET', 'JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
+                $decoded = \Firebase\JWT\JWT::decode($token, new \Firebase\JWT\Key($secret, 'HS256'));
+                if (!empty($decoded->user_id)) {
+                    if (!empty($decoded->is_impersonating) && !empty($decoded->impersonation_session_id)) {
+                        $session = \Illuminate\Support\Facades\DB::table('impersonation_sessions')->where('id', $decoded->impersonation_session_id)->first();
+                        if (!$session || $session->status !== 'active') {
+                            return null;
+                        }
+                    }
+                    return (int)$decoded->user_id;
+                }
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+
+        $userId = $request->query('user_id') ?: $request->input('user_id');
         return $userId ? (int)$userId : null;
     }
 
