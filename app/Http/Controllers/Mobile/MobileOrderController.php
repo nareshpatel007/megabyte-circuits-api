@@ -144,14 +144,41 @@ class MobileOrderController extends Controller
 
                     // Search in gerber_files table if present
                     if (Schema::hasTable('gerber_files')) {
-                        $gerberSub = function ($sub) use ($search) {
-                            $sub->select('pcb_order_id')
-                                ->from('gerber_files')
-                                ->where('original_name', 'LIKE', "%{$search}%")
-                                ->orWhere('filename', 'LIKE', "%{$search}%");
-                        };
-                        $hasClause ? $q->orWhereIn('pcb_orders.id', $gerberSub) : $q->whereIn('pcb_orders.id', $gerberSub);
-                        $hasClause = true;
+                        if (Schema::hasColumn('pcb_orders', 'gerber_file_id')) {
+                            $gerberSub = function ($sub) use ($search) {
+                                $sub->select('id')
+                                    ->from('gerber_files')
+                                    ->where(function ($gq) use ($search) {
+                                        $cols = ['original_name', 'file_name', 'filename', 'board_name'];
+                                        $first = true;
+                                        foreach ($cols as $c) {
+                                            if (Schema::hasColumn('gerber_files', $c)) {
+                                                $first ? $gq->where($c, 'LIKE', "%{$search}%") : $gq->orWhere($c, 'LIKE', "%{$search}%");
+                                                $first = false;
+                                            }
+                                        }
+                                    });
+                            };
+                            $hasClause ? $q->orWhereIn('pcb_orders.gerber_file_id', $gerberSub) : $q->whereIn('pcb_orders.gerber_file_id', $gerberSub);
+                            $hasClause = true;
+                        } elseif (Schema::hasColumn('gerber_files', 'pcb_order_id')) {
+                            $gerberSub = function ($sub) use ($search) {
+                                $sub->select('pcb_order_id')
+                                    ->from('gerber_files')
+                                    ->where(function ($gq) use ($search) {
+                                        $cols = ['original_name', 'file_name', 'filename', 'board_name'];
+                                        $first = true;
+                                        foreach ($cols as $c) {
+                                            if (Schema::hasColumn('gerber_files', $c)) {
+                                                $first ? $gq->where($c, 'LIKE', "%{$search}%") : $gq->orWhere($c, 'LIKE', "%{$search}%");
+                                                $first = false;
+                                            }
+                                        }
+                                    });
+                            };
+                            $hasClause ? $q->orWhereIn('pcb_orders.id', $gerberSub) : $q->whereIn('pcb_orders.id', $gerberSub);
+                            $hasClause = true;
+                        }
                     }
                 });
             }
