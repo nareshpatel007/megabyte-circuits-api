@@ -64,7 +64,7 @@ class JobCardDocxService
             return $str !== '' ? $str : $fallback;
         };
 
-        // 1. Header Box Table (3 Columns)
+        // 1. Header Box Table (2 Columns)
         $headerTable = $section->addTable([
             'borderSize' => 12,
             'borderColor' => '000000',
@@ -74,23 +74,12 @@ class JobCardDocxService
             'cellMarginRight' => Converter::cmToTwip(0.2),
         ]);
         $headerRow = $headerTable->addRow(Converter::cmToTwip(0.8));
-        $c1 = $headerRow->addCell(3000, ['valign' => VerticalJc::CENTER]);
-        $c1->addText('JOB NO: ' . $safeText($jobCardData['job_number'] ?? $order->order_number), ['bold' => true, 'size' => 11]);
+        $c1 = $headerRow->addCell(5000, ['valign' => VerticalJc::CENTER]);
+        $c1->addText('JOB NO: ' . $safeText($jobCardData['job_number'] ?? $order->order_number), ['bold' => true, 'size' => 14]);
 
-        $c2 = $headerRow->addCell(4500, ['valign' => VerticalJc::CENTER]);
-        $procText = '';
-        if (!empty($jobCardData['expose'])) $procText .= '[X] Expose  ';
-        if (!empty($jobCardData['print_and_etch'])) $procText .= '[X] Print & Etch';
-        if (empty($procText)) $procText = 'Standard Process';
-        $c2->addText($safeText($procText), ['size' => 10, 'bold' => true], ['alignment' => Jc::CENTER]);
+        $c2 = $headerRow->addCell(5000, ['valign' => VerticalJc::CENTER]);
+        $c2->addText($safeText($jobCardData['job_type'] ?? '1- SIDE'), ['bold' => true, 'size' => 14], ['alignment' => Jc::RIGHT]);
 
-        $c3 = $headerRow->addCell(2500, ['valign' => VerticalJc::CENTER]);
-        $c3->addText($safeText($jobCardData['job_type'] ?? 'JOB CARD'), ['bold' => true, 'size' => 11], ['alignment' => Jc::RIGHT]);
-
-        $section->addTextBreak(1);
-
-        // 2. Title Banner
-        $section->addText('JOB CARD', ['bold' => true, 'size' => 16, 'underline' => 'single'], ['alignment' => Jc::CENTER]);
         $section->addTextBreak(1);
 
         // 3. Specifications Block A: Dates & Qty Specs (3 Equal Columns)

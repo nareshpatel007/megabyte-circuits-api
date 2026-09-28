@@ -166,29 +166,14 @@
 <body>
     <table class="outer-table">
         <tbody>
-            <!-- Header Row 1: JOB NO & Checkboxes -->
-            <tr>
+            <!-- Header Row: JOB NO & Board Type -->
+            <tr class="b-bottom-2">
                 <td colspan="2" class="b-right-2" style="width: 50%; padding: 5px 8px;">
                     <span class="job-no-title">JOB NO:</span>
                     <span class="job-no-value">{{ $data['job_number'] }}</span>
                 </td>
-                <td class="text-right" style="width: 50%; padding: 5px 10px;">
-                    <span style="font-size: 13pt; font-weight: bold;">
-                        Expose <span class="checkbox-sq">@if(!empty($data['expose']))✓@endif</span>
-                    </span>
-                    <span style="font-size: 13pt; font-weight: bold; margin-left: 18px;">
-                        Print & Etch <span class="checkbox-sq">@if(!empty($data['print_and_etch']))✓@endif</span>
-                    </span>
-                </td>
-            </tr>
-
-            <!-- Header Row 2: Board Type & JOB CARD Title -->
-            <tr class="b-bottom-2">
-                <td class="b-right-2 type-title" style="width: 25%; padding: 5px 8px;">
+                <td class="text-right type-title" style="width: 50%; padding: 5px 10px;">
                     {{ $data['job_type'] }}
-                </td>
-                <td colspan="2" class="text-title" style="width: 75%; padding: 5px;">
-                    JOB CARD
                 </td>
             </tr>
 

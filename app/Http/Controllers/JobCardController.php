@@ -68,7 +68,21 @@ class JobCardController extends Controller
                 ['meta_value' => json_encode($jobCardData)]
             );
 
-            // Sync main fields back to order metas where applicable
+            // Sync quantities & main fields back to order columns & metas
+            if (isset($jobCardData['order_qty']) && is_numeric($jobCardData['order_qty'])) {
+                $order->order_qty = (int)$jobCardData['order_qty'];
+            }
+            if (isset($jobCardData['launched_qty']) && is_numeric($jobCardData['launched_qty'])) {
+                $order->launch_qty = (int)$jobCardData['launched_qty'];
+            }
+            if (isset($jobCardData['ups']) && is_numeric($jobCardData['ups'])) {
+                $order->ups_qty = (int)$jobCardData['ups'];
+            }
+            if (isset($jobCardData['panels']) && is_numeric($jobCardData['panels'])) {
+                $order->panel_qty = (int)$jobCardData['panels'];
+            }
+            $order->save();
+
             $metaKeys = [
                 'production_note', 'customer_note', 'cutting_size',
                 'final_panel_qty', 'final_board_qty', 'rejected_board_qty', 'why_rejected'
@@ -392,10 +406,61 @@ class JobCardController extends Controller
         $launchDate = $order->launch_date ? Carbon::parse($order->launch_date)->format('d M Y') : $createdDate;
         $shippingDate = $order->delivery_date ? Carbon::parse($order->delivery_date)->format('d M Y') : Carbon::now()->addDays(7)->format('d M Y');
 
-        $orderQty = (string)$order->getMeta('qty', $order->getMeta('quantity', $order->order_qty ?? '120'));
-        $launchedQty = (string)$order->getMeta('launched_qty', $order->getMeta('launched', $orderQty));
-        $ups = (string)$order->getMeta('ups', '1');
-        $panels = (string)$order->getMeta('panels', '1');
+        // 1. Order Qty: check DB column order_qty, metas, or snapshot
+        $rawOrderQty = null;
+        if (!empty($order->order_qty)) {
+            $rawOrderQty = $order->order_qty;
+        } else {
+            $rawOrderQty = $order->getMeta('order_qty', $order->getMeta('qty', $order->getMeta('quantity', $order->getMeta('pcb_qty'))));
+            if (empty($rawOrderQty) && !empty($order->jlcpcb_quotation_snapshot['pcb_qty'])) {
+                $rawOrderQty = $order->jlcpcb_quotation_snapshot['pcb_qty'];
+            }
+        }
+        $orderQty = (!empty($rawOrderQty) && (int)$rawOrderQty > 0) ? (string)$rawOrderQty : '0';
+
+        // 2. Launched Qty: check DB column launch_qty, metas, or fallback to orderQty
+        $rawLaunchQty = null;
+        if (!empty($order->launch_qty)) {
+            $rawLaunchQty = $order->launch_qty;
+        } else {
+            $rawLaunchQty = $order->getMeta('launch_qty', $order->getMeta('launched_qty', $order->getMeta('launched')));
+        }
+        $launchedQty = (!empty($rawLaunchQty) && (int)$rawLaunchQty > 0) ? (string)$rawLaunchQty : $orderQty;
+
+        // 3. UPS: check DB column ups_qty, metas, or snapshot
+        $rawUps = null;
+        if (!empty($order->ups_qty)) {
+            $rawUps = $order->ups_qty;
+        } else {
+            $rawUps = $order->getMeta('ups_qty', $order->getMeta('ups', $order->getMeta('array_ups')));
+            if (empty($rawUps) && !empty($order->jlcpcb_quotation_snapshot['array_ups'])) {
+                $rawUps = $order->jlcpcb_quotation_snapshot['array_ups'];
+            }
+        }
+        $ups = (!empty($rawUps) && (int)$rawUps > 0) ? (string)$rawUps : '1';
+
+        // 4. Panels: check DB column panel_qty, metas, snapshot, or calculate ceil(launchedQty / ups)
+        $rawPanels = null;
+        if (!empty($order->panel_qty)) {
+            $rawPanels = $order->panel_qty;
+        } else {
+            $rawPanels = $order->getMeta('panel_qty', $order->getMeta('panels_qty', $order->getMeta('panels')));
+            if (empty($rawPanels) && !empty($order->jlcpcb_quotation_snapshot['panel_qty'])) {
+                $rawPanels = $order->jlcpcb_quotation_snapshot['panel_qty'];
+            }
+        }
+        if (!empty($rawPanels) && (int)$rawPanels > 0) {
+            $panels = (string)$rawPanels;
+        } else {
+            $numLaunch = (int)$launchedQty;
+            $numUps = (int)$ups;
+            if ($numLaunch > 0 && $numUps > 0) {
+                $panels = (string)ceil($numLaunch / $numUps);
+            } else {
+                $panels = '1';
+            }
+        }
+
         $minHole = (string)$order->getMeta('min_hole', $order->getMeta('min_hole_size', '0.8 MM'));
 
         $panelSize = (string)$order->getMeta('panel_size', $order->getMeta('dimensions', ''));
@@ -490,10 +555,10 @@ class JobCardController extends Controller
             'order_date' => $this->formatDateOnly($overrides['order_date'] ?? null, $createdDate),
             'launch_date' => $this->formatDateOnly($overrides['launch_date'] ?? null, $launchDate),
             'shipping_date' => $this->formatDateOnly($overrides['shipping_date'] ?? null, $shippingDate),
-            'order_qty' => $overrides['order_qty'] ?? $orderQty,
-            'launched_qty' => $overrides['launched_qty'] ?? $launchedQty,
-            'ups' => $overrides['ups'] ?? $ups,
-            'panels' => $overrides['panels'] ?? $panels,
+            'order_qty' => (isset($overrides['order_qty']) && (string)$overrides['order_qty'] !== '') ? (string)$overrides['order_qty'] : $orderQty,
+            'launched_qty' => (isset($overrides['launched_qty']) && (string)$overrides['launched_qty'] !== '') ? (string)$overrides['launched_qty'] : $launchedQty,
+            'ups' => (isset($overrides['ups']) && (string)$overrides['ups'] !== '') ? (string)$overrides['ups'] : $ups,
+            'panels' => (isset($overrides['panels']) && (string)$overrides['panels'] !== '') ? (string)$overrides['panels'] : $panels,
             'min_hole' => $overrides['min_hole'] ?? $minHole,
             'panel_size' => $overrides['panel_size'] ?? $panelSize,
             'cutting_size' => $overrides['cutting_size'] ?? $cuttingSize,
