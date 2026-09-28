@@ -96,6 +96,12 @@ class AdminController extends Controller
             $secret = env('JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
             $jwt_token = JWT::encode($payload, $secret, 'HS256');
 
+            $avatarUrl = !empty($admin->profile_picture)
+                ? (str_starts_with($admin->profile_picture, 'http')
+                    ? $admin->profile_picture
+                    : url(Storage::url($admin->profile_picture)))
+                : null;
+
             $responseData = [
                 'status' => true,
                 'message' => 'Logged in successfully as Admin',
@@ -106,6 +112,9 @@ class AdminController extends Controller
                     'name' => $admin->name,
                     'username' => $admin->username ?? strtok($admin->email, '@'),
                     'email' => $admin->email,
+                    'mobile' => $admin->mobile ?? null,
+                    'profile_picture' => $admin->profile_picture ?? null,
+                    'avatar_url' => $avatarUrl,
                     'role' => $role ?? 'Admin',
                     'permissions' => $permissions,
                     'is_admin' => true

@@ -480,6 +480,7 @@ class CheckoutController extends Controller
                     'shipping_address_id' => $shippingAddressId,
                     'billing_address_id' => $billingAddressId,
                     'status_id' => $statusId, // Links to Pending in pcb_order_statuses
+                    'status' => 'Pending',
                     'gerber_file_id' => $gerberFileId, // Links to gerber_files record
                     'c_g' => $cgStatus,
                     'unit_price' => $unitPrice,

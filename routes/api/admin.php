@@ -6,6 +6,7 @@ use App\Http\Controllers\BlogController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\StatusController;
 use App\Http\Controllers\OrderController;
+use App\Http\Controllers\Admin\AdminProfileController;
 
 // Public Admin Routes (No Token Required)
 Route::prefix('admin')->group(function () {
@@ -23,6 +24,13 @@ Route::middleware('verify.admin.token')->group(function () {
         // Dashboard Stats & Analytics
         Route::get('stats', [AdminController::class, 'stats']);
         Route::get('revenue-trend', [AdminController::class, 'revenueTrend']);
+
+        // Profile Management
+        Route::get('profile', [AdminProfileController::class, 'show']);
+        Route::put('profile', [AdminProfileController::class, 'update']);
+        Route::post('profile/picture', [AdminProfileController::class, 'uploadPicture']);
+        Route::delete('profile/picture', [AdminProfileController::class, 'deletePicture']);
+        Route::put('profile/password', [AdminProfileController::class, 'changePassword']);
 
         // Order Management
         Route::get('orders', [OrderController::class, 'index']);

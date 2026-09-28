@@ -101,6 +101,7 @@ class GoogleController extends Controller
                     'last_name' => $lastName,
                     'email' => $email,
                     'google_id' => $googleId,
+                    'google_avatar' => $avatar,
                     'avatar' => $avatar,
                     'api_key' => Str::random(32),
                     'referral_code' => $referralCode,
@@ -114,13 +115,17 @@ class GoogleController extends Controller
                 // Send Client Welcome Email
                 \App\Services\RegisterService::sendWelcomeEmail($user->id, $user->name ?: $email, $email);
             } else {
-                // Update user details
+                // Update user details without touching custom_avatar
                 $updateData = [
                     'google_id' => $googleId,
-                    'avatar' => $avatar ?? $user->avatar,
+                    'google_avatar' => $avatar ?? $user->google_avatar ?? $user->avatar,
                     'last_login_at' => now(),
                     'last_login_ip' => $request->ip(),
                 ];
+
+                if (empty($user->custom_avatar) && empty($user->avatar)) {
+                    $updateData['avatar'] = $avatar;
+                }
 
                 if (empty($user->name)) {
                     $updateData['name'] = $name;
@@ -132,6 +137,8 @@ class GoogleController extends Controller
                 $user->update($updateData);
             }
 
+            $avatarInfo = \App\Services\UserAvatarService::resolveAvatarInfo($user);
+
             // Generate JWT Access Token
             $payload = [
                 'user_id' => $user->id,
@@ -139,7 +146,9 @@ class GoogleController extends Controller
                 'name' => $user->name,
                 'email' => $user->email,
                 'credits' => $user->available_credits ?? 50,
-                'avatar' => $user->avatar,
+                'avatar' => $avatarInfo['avatar_url'],
+                'avatar_url' => $avatarInfo['avatar_url'],
+                'avatar_source' => $avatarInfo['avatar_source'],
                 'iat' => time(),
                 'exp' => time() + (86400 * 30), // 30 days
             ];

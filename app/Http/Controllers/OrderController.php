@@ -1419,6 +1419,37 @@ namespace App\Http\Controllers;
                 $newOrder = $originalOrder->replicate(['created_at', 'updated_at', 'deleted_at']);
                 $newOrder->order_number = $newOrderNumber;
                 $newOrder->status = 'Pending';
+
+                // Find and assign Pending status_id
+                $statusId = null;
+                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses')) {
+                    $st = \Illuminate\Support\Facades\DB::table('pcb_order_statuses')->where('name', 'Pending')->first();
+                    if ($st) {
+                        $statusId = $st->id;
+                    }
+                } elseif (\Illuminate\Support\Facades\Schema::hasTable('pcb_statuses')) {
+                    $st = \Illuminate\Support\Facades\DB::table('pcb_statuses')->where('name', 'Pending')->first();
+                    if ($st) {
+                        $statusId = $st->id;
+                    }
+                } elseif (\Illuminate\Support\Facades\Schema::hasTable('statuses')) {
+                    $st = \Illuminate\Support\Facades\DB::table('statuses')->where('name', 'Pending')->first();
+                    if ($st) {
+                        $statusId = $st->id;
+                    }
+                }
+                $newOrder->status_id = $statusId;
+
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'is_reorder')) {
+                    $newOrder->is_reorder = true;
+                }
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'source_order_number')) {
+                    $newOrder->source_order_number = $originalOrder->order_number;
+                }
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'source_order_id')) {
+                    $newOrder->source_order_id = $originalOrder->id;
+                }
+
                 $newOrder->completed_qty = 0;
                 $newOrder->failed_qty = 0;
                 $newOrder->launch_qty = 0;
@@ -1466,9 +1497,10 @@ namespace App\Http\Controllers;
                 $newOrder->updated_at = now();
                 $newOrder->save();
 
-                // Replicate metadata with updated quantity, delivery_date and order_value
+                // Replicate metadata with updated quantity, delivery_date, order_value, and status = Pending
                 $hasQtyMeta = false;
                 $hasDeliveryDateMeta = false;
+                $hasStatusMeta = false;
 
                 foreach ($originalOrder->metas as $meta) {
                     // Skip film datetime if any, or retain original specifications
@@ -1477,7 +1509,10 @@ namespace App\Http\Controllers;
                     }
 
                     $metaValue = $meta->meta_value;
-                    if ($meta->meta_key === 'quantity') {
+                    if (in_array($meta->meta_key, ['status', 'order_status', 'pcb_status'])) {
+                        $hasStatusMeta = true;
+                        $metaValue = 'Pending';
+                    } elseif ($meta->meta_key === 'quantity') {
                         $hasQtyMeta = true;
                         $metaValue = (string) $newOrder->order_qty;
                     } elseif ($meta->meta_key === 'delivery_date') {
@@ -1495,6 +1530,14 @@ namespace App\Http\Controllers;
                         'pcb_order_id' => $newOrder->id,
                         'meta_key' => $meta->meta_key,
                         'meta_value' => $metaValue,
+                    ]);
+                }
+
+                if (!$hasStatusMeta) {
+                    PcbOrderMeta::create([
+                        'pcb_order_id' => $newOrder->id,
+                        'meta_key' => 'status',
+                        'meta_value' => 'Pending',
                     ]);
                 }
 
