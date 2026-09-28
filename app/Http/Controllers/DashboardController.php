@@ -408,6 +408,84 @@ class DashboardController extends Controller
         }
     }
 
+    // Update User Profile Details API (name, email, phone_number, company_name, gst_number, country)
+    public function updateAccountDetails(Request $request)
+    {
+        try {
+            $userId = $this->resolveUserId($request);
+            if (!$userId) {
+                return response()->json(['status' => false, 'message' => 'Unauthorized user authentication'], 401);
+            }
+
+            $user = DB::table('users')->where('id', $userId)->first();
+            if (!$user) {
+                return response()->json(['status' => false, 'message' => 'User not found'], 404);
+            }
+
+            $validator = \Illuminate\Support\Facades\Validator::make($request->all(), [
+                'name' => 'nullable|string|max:255',
+                'first_name' => 'nullable|string|max:255',
+                'last_name' => 'nullable|string|max:255',
+                'email' => 'nullable|email|max:255|unique:users,email,' . $userId,
+                'phone_number' => 'nullable|string|max:50',
+                'company_name' => 'nullable|string|max:255',
+                'gst_number' => 'nullable|string|max:50',
+                'country' => 'nullable|string|max:100',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'status' => false,
+                    'message' => $validator->errors()->first(),
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            $updateData = [];
+
+            if ($request->has('name')) {
+                $updateData['name'] = trim((string)$request->input('name'));
+            }
+            if ($request->has('first_name')) {
+                $updateData['first_name'] = trim((string)$request->input('first_name'));
+            }
+            if ($request->has('last_name')) {
+                $updateData['last_name'] = trim((string)$request->input('last_name'));
+            }
+            if ($request->has('email') && !empty($request->input('email'))) {
+                $updateData['email'] = trim((string)$request->input('email'));
+            }
+            if ($request->has('phone_number')) {
+                $updateData['phone_number'] = trim((string)$request->input('phone_number'));
+            }
+            if ($request->has('company_name')) {
+                $updateData['company_name'] = trim((string)$request->input('company_name'));
+            }
+            if ($request->has('gst_number')) {
+                $updateData['gst_number'] = trim((string)$request->input('gst_number'));
+            }
+            if ($request->has('country')) {
+                $updateData['country'] = trim((string)$request->input('country'));
+            }
+
+            if (!empty($updateData)) {
+                $updateData['updated_at'] = date('Y-m-d H:i:s');
+                DB::table('users')->where('id', $userId)->update($updateData);
+            }
+
+            $updatedUser = DB::table('users')->where('id', $userId)->first();
+            $formattedUser = \App\Services\UserAvatarService::formatUserData($updatedUser);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Account details updated successfully.',
+                'user' => $formattedUser
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
     // Update User GST Number API
     public function updateGst(Request $request)
     {
