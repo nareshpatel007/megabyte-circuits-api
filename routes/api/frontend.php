@@ -99,6 +99,8 @@ Route::middleware('verify.api.token')->group(function () {
         Route::get('overview', [DashboardController::class, 'overview']);
         Route::get('sidebar-counts', [DashboardController::class, 'sidebarCounts']);
         Route::get('account', [DashboardController::class, 'accountDetails']);
+        Route::post('profile-picture', [DashboardController::class, 'uploadProfilePicture']);
+        Route::delete('profile-picture', [DashboardController::class, 'removeProfilePicture']);
         Route::post('update-gst', [DashboardController::class, 'updateGst']);
         Route::get('orders', [DashboardController::class, 'orders']);
         Route::get('order-details', [DashboardController::class, 'orderDetails']);

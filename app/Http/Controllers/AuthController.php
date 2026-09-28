@@ -1402,24 +1402,15 @@ class AuthController extends Controller
                 ];
             }
 
+            $formattedUser = \App\Services\UserAvatarService::formatUserData($user);
+
             return response()->json([
                 'status' => true,
                 'success' => true,
                 'authenticated' => true,
-                'user' => [
-                    'id' => $user->id,
-                    'uuid' => $user->uuid ?? null,
-                    'name' => $user->name ?? (($user->first_name ?? '') . ' ' . ($user->last_name ?? '')),
-                    'first_name' => $user->first_name ?? '',
-                    'last_name' => $user->last_name ?? '',
-                    'email' => $user->email,
+                'user' => array_merge($formattedUser, [
                     'status' => $status,
-                    'company_name' => $user->company_name ?? '',
-                    'phone_number' => $user->phone_number ?? '',
-                    'avatar' => $user->avatar ?? null,
-                    'available_credits' => intval($user->available_credits ?? 0),
-                    'total_bonus_credits' => intval($user->total_bonus_credits ?? 0),
-                ],
+                ]),
                 'impersonation' => $impersonationData
             ]);
 

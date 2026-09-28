@@ -278,17 +278,130 @@ class DashboardController extends Controller
                 return response()->json(['status' => false, 'message' => 'User not found'], 404);
             }
 
+            $formattedUser = \App\Services\UserAvatarService::formatUserData($user);
+
             return response()->json([
                 'status' => true,
-                'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'company_name' => $user->company_name ?? null,
-                    'country' => $user->country ?? null,
-                    'gst_number' => $user->gst_number ?? null,
-                    'created_at' => $user->created_at ?? null
-                ]
+                'user' => $formattedUser
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    // Upload Custom Profile Picture API
+    public function uploadProfilePicture(Request $request)
+    {
+        try {
+            $userId = $this->resolveUserId($request);
+            if (!$userId) {
+                return response()->json(['status' => false, 'message' => 'Unauthorized user authentication'], 401);
+            }
+
+            $user = DB::table('users')->where('id', $userId)->first();
+            if (!$user) {
+                return response()->json(['status' => false, 'message' => 'User not found'], 404);
+            }
+
+            $file = $request->file('picture')
+                ?: $request->file('profile_picture')
+                ?: $request->file('avatar')
+                ?: $request->file('image')
+                ?: $request->file('file');
+
+            if (!$file || !$file->isValid()) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Please select a valid image file.'
+                ], 400);
+            }
+
+            $validator = \Illuminate\Support\Facades\Validator::make(['file' => $file], [
+                'file' => 'required|image|mimes:jpeg,jpg,png,webp|max:5120'
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'status' => false,
+                    'message' => 'Invalid image file. Supported formats: JPG, PNG, WEBP (Max: 5MB).',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Remove old custom_avatar file if present
+            if (!empty($user->custom_avatar)) {
+                $oldPath = $user->custom_avatar;
+                if (!str_starts_with($oldPath, 'http://') && !str_starts_with($oldPath, 'https://')) {
+                    $cleanOld = str_replace('/storage/', '', ltrim($oldPath, '/'));
+                    if (\Illuminate\Support\Facades\Storage::disk('public')->exists($cleanOld)) {
+                        \Illuminate\Support\Facades\Storage::disk('public')->delete($cleanOld);
+                    }
+                }
+            }
+
+            $ext = strtolower($file->getClientOriginalExtension()) ?: 'jpg';
+            $filename = 'client_avatar_' . $userId . '_' . time() . '_' . \Illuminate\Support\Str::random(6) . '.' . $ext;
+            $savedPath = $file->storeAs('avatars', $filename, 'public');
+
+            $now = date('Y-m-d H:i:s');
+            DB::table('users')->where('id', $userId)->update([
+                'custom_avatar' => $savedPath,
+                'avatar' => $savedPath,
+                'updated_at' => $now
+            ]);
+
+            $updatedUser = DB::table('users')->where('id', $userId)->first();
+            $formattedUser = \App\Services\UserAvatarService::formatUserData($updatedUser);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Profile picture updated successfully.',
+                'user' => $formattedUser
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    // Remove Custom Profile Picture API (Restores Google avatar if present, else default)
+    public function removeProfilePicture(Request $request)
+    {
+        try {
+            $userId = $this->resolveUserId($request);
+            if (!$userId) {
+                return response()->json(['status' => false, 'message' => 'Unauthorized user authentication'], 401);
+            }
+
+            $user = DB::table('users')->where('id', $userId)->first();
+            if (!$user) {
+                return response()->json(['status' => false, 'message' => 'User not found'], 404);
+            }
+
+            if (!empty($user->custom_avatar)) {
+                $oldPath = $user->custom_avatar;
+                if (!str_starts_with($oldPath, 'http://') && !str_starts_with($oldPath, 'https://')) {
+                    $cleanOld = str_replace('/storage/', '', ltrim($oldPath, '/'));
+                    if (\Illuminate\Support\Facades\Storage::disk('public')->exists($cleanOld)) {
+                        \Illuminate\Support\Facades\Storage::disk('public')->delete($cleanOld);
+                    }
+                }
+            }
+
+            $now = date('Y-m-d H:i:s');
+            $fallbackAvatar = $user->google_avatar ?? null;
+            DB::table('users')->where('id', $userId)->update([
+                'custom_avatar' => null,
+                'avatar' => $fallbackAvatar,
+                'updated_at' => $now
+            ]);
+
+            $updatedUser = DB::table('users')->where('id', $userId)->first();
+            $formattedUser = \App\Services\UserAvatarService::formatUserData($updatedUser);
+
+            return response()->json([
+                'status' => true,
+                'message' => 'Profile picture removed successfully.',
+                'user' => $formattedUser
             ]);
         } catch (\Throwable $th) {
             return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
