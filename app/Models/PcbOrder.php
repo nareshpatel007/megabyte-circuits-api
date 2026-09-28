@@ -45,6 +45,7 @@ class PcbOrder extends Model
         'delivery_date',
         'bill_number',
         'film_applied',
+        'created_at',
     ];
 
     // Status relationship

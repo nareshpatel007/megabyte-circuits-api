@@ -143,7 +143,7 @@ class OrderImportService
         try {
             $spreadsheet = $this->loadSpreadsheetFast($filePath);
             $sheet = $spreadsheet->getActiveSheet();
-            $allRows = $sheet->toArray(null, true, true, false);
+            $allRows = $sheet->toArray(null, true, false, false);
 
             if (empty($allRows) || count($allRows) < 1) {
                 return [
@@ -258,7 +258,7 @@ class OrderImportService
 
         $spreadsheet = $this->loadSpreadsheetFast($fullPath);
         $sheet = $spreadsheet->getActiveSheet();
-        $allRows = $sheet->toArray(null, true, true, false);
+        $allRows = $sheet->toArray(null, true, false, false);
 
         if (empty($allRows) || count($allRows) < 1) {
             $import->update([
@@ -552,7 +552,7 @@ class OrderImportService
     {
         $spreadsheet = $this->loadSpreadsheetFast($filePath);
         $sheet = $spreadsheet->getActiveSheet();
-        $allRows = $sheet->toArray(null, true, true, false);
+        $allRows = $sheet->toArray(null, true, false, false);
 
         if (empty($allRows) || count($allRows) < 1) {
             return [
@@ -695,7 +695,7 @@ class OrderImportService
     {
         $spreadsheet = $this->loadSpreadsheetFast($filePath);
         $sheet = $spreadsheet->getActiveSheet();
-        $allRows = $sheet->toArray(null, true, true, false);
+        $allRows = $sheet->toArray(null, true, false, false);
 
         if (empty($allRows) || count($allRows) < 1) {
             return [
@@ -1067,6 +1067,11 @@ class OrderImportService
 
         $order = PcbOrder::create($orderPayload);
 
+        if ($orderDate) {
+            $order->created_at = Carbon::parse($orderDate);
+            $order->save();
+        }
+
         // Production noted logic -> pcb_order_notes table
         $prodNote = trim((string)($data['production_noted'] ?? ''));
         if ($prodNote !== '') {
@@ -1349,11 +1354,11 @@ class OrderImportService
     }
 
     /**
-     * Parse and auto-correct date input into standard YYYY-MM-DD
+     * Parse and auto-correct date input into standard YYYY-MM-DD (Default format: DD-MM-YYYY)
      */
     protected function parseDate($val): ?string
     {
-        if (empty($val)) return null;
+        if ($val === null || $val === '') return null;
 
         if ($val instanceof \DateTimeInterface) {
             return $val->format('Y-m-d');
@@ -1362,7 +1367,7 @@ class OrderImportService
         $str = trim((string)$val);
         if ($str === '' || $str === '-' || strtolower($str) === 'n/a' || strtolower($str) === 'null') return null;
 
-        // 1. Excel numeric timestamp
+        // 1. Excel numeric timestamp (e.g. 46277 = 2026-09-12)
         if (is_numeric($str) && (float)$str > 10000 && (float)$str < 100000) {
             try {
                 $dt = ExcelDate::excelToDateTimeObject((float)$str);
@@ -1371,10 +1376,10 @@ class OrderImportService
             }
         }
 
-        // Clean up common separators: replace slashes, dots, underscores, spaces with dash
-        $normalized = preg_replace('/[\/\._\s]+/', '-', $str);
-        $normalized = preg_replace('/[^\d\-]/', '', $normalized);
-        $parts = array_values(array_filter(explode('-', $normalized), fn($p) => $p !== ''));
+        // 2. Parse by splitting string into 3 numeric components (prioritizing DD-MM-YYYY)
+        $cleanStr = preg_replace('/[\/\._\s]+/', '-', $str);
+        $cleanStr = preg_replace('/[^\d\-]/', '', $cleanStr);
+        $parts = array_values(array_filter(explode('-', $cleanStr), fn($p) => $p !== ''));
 
         if (count($parts) === 3 && is_numeric($parts[0]) && is_numeric($parts[1]) && is_numeric($parts[2])) {
             $p1 = (int)$parts[0];
@@ -1386,7 +1391,7 @@ class OrderImportService
             $day = null;
 
             if ($p1 > 1000) {
-                // Year at start (e.g. 2026-06-02 or 2026-6-26)
+                // Year at start: YYYY-MM-DD or YYYY-DD-MM
                 $year = $p1;
                 if ($p2 > 12 && $p3 <= 12) {
                     $day = $p2;
@@ -1396,7 +1401,7 @@ class OrderImportService
                     $day = $p3;
                 }
             } else {
-                // Year at end (e.g. 02-06-2026, 6-26-2026, 26-6-26)
+                // Year at end: DD-MM-YYYY or MM-DD-YYYY or DD-MM-YY
                 if ($p3 >= 1000) {
                     $year = $p3;
                 } elseif ($p3 >= 0 && $p3 < 100) {
@@ -1406,15 +1411,16 @@ class OrderImportService
                 }
 
                 if ($p1 > 12 && $p2 <= 12) {
-                    // Day first: 26-06-2026 or 26-6-26
+                    // p1 is Day (> 12), p2 is Month (e.g. 14-09-2026 or 30-09-2026)
                     $day = $p1;
                     $month = $p2;
                 } elseif ($p2 > 12 && $p1 <= 12) {
-                    // Month first: 6-26-2026
+                    // p2 is Day (> 12), p1 is Month (e.g. 09-25-2026)
                     $month = $p1;
                     $day = $p2;
                 } else {
-                    // Default to Day-Month-Year (e.g., 02-06-2026 -> Day 02, Month 06)
+                    // Both p1 and p2 <= 12 (e.g. 12-09-2026 or 09-12-2026)
+                    // DEFAULT FORMAT IS DD-MM-YYYY: p1 is Day, p2 is Month
                     $day = $p1;
                     $month = $p2;
                 }
@@ -1427,7 +1433,36 @@ class OrderImportService
             }
         }
 
-        // 3. Fallback Carbon parse without falling back to today's date
+        // 3. Strict format fallback using DateTime::createFromFormat with DD-MM-YYYY formats prioritized
+        $strictFormats = [
+            'd-m-Y',
+            'd/m/Y',
+            'd.m.Y',
+            'j-n-Y',
+            'j/n/Y',
+            'j.n.Y',
+            'd-m-y',
+            'd/m/y',
+            'j-n-y',
+            'j/n/y',
+            'Y-m-d',
+            'Y/m/d',
+            'Y.m.d',
+            'Y-m-d H:i:s',
+            'd-m-Y H:i:s',
+            'd/m/Y H:i:s',
+        ];
+        foreach ($strictFormats as $fmt) {
+            $dt = \DateTime::createFromFormat("!{$fmt}", $str);
+            if ($dt) {
+                $formattedCheck = $dt->format($fmt);
+                if (strtolower($formattedCheck) === strtolower($str)) {
+                    return $dt->format('Y-m-d');
+                }
+            }
+        }
+
+        // 4. Carbon fallback for text dates like "12 Sep 2026"
         try {
             $c = Carbon::parse($str);
             if ($c && $c->year >= 1970 && $c->year <= 2100) {
@@ -1475,7 +1510,7 @@ class OrderImportService
 
         $spreadsheet = $this->loadSpreadsheetFast($filePath);
         $sheet = $spreadsheet->getActiveSheet();
-        $allRows = $sheet->toArray(null, true, true, false);
+        $allRows = $sheet->toArray(null, true, false, false);
 
         if (empty($allRows) || count($allRows) < 1) {
             throw new \Exception('Spreadsheet is empty.');
