@@ -406,9 +406,9 @@ class CheckoutController extends Controller
                     }
                 }
                 $orderType = ($quotationSource === 'jlcpcb') ? 'jlcpcb' : 'normal';
-                $series = ($orderType === 'jlcpcb') ? 'J' : 'M';
+                $series = ($orderType === 'jlcpcb') ? 'JL' : 'M';
 
-                // Always generate next clean sequential Order Number (e.g. J00016 or M00002) via atomic OrderNumberService
+                // Always generate next clean sequential Order Number (e.g. JL0001 or M00002) via atomic OrderNumberService
                 $orderNumber = \App\Services\OrderNumberService::generateOrderNumber($series);
 
                 $sourceOrderId = $item['source_order_id'] ?? null;

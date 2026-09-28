@@ -76,7 +76,7 @@ namespace App\Http\Controllers;
                     $reqSource = ($layersNum > 2 || $request->filled('jlcpcb_file_key')) ? 'jlcpcb' : 'internal';
                 }
                 $reqOrderType = ($reqSource === 'jlcpcb') ? 'jlcpcb' : 'normal';
-                $series = ($reqOrderType === 'jlcpcb') ? 'J' : 'M';
+                $series = ($reqOrderType === 'jlcpcb') ? 'JL' : 'M';
                 $orderNumber = \App\Services\OrderNumberService::generateOrderNumber($series);
 
                 // Handle file upload
@@ -1224,7 +1224,7 @@ namespace App\Http\Controllers;
                     $reqSource = ($layersNum > 2 || $request->filled('jlcpcb_file_key')) ? 'jlcpcb' : 'internal';
                 }
                 $reqOrderType = ($reqSource === 'jlcpcb') ? 'jlcpcb' : 'normal';
-                $series = ($reqOrderType === 'jlcpcb') ? 'J' : 'M';
+                $series = ($reqOrderType === 'jlcpcb') ? 'JL' : 'M';
                 $orderNumber = \App\Services\OrderNumberService::generateOrderNumber($series);
 
                 // Handle Gerber file upload

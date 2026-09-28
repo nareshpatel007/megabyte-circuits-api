@@ -8,20 +8,28 @@ use Exception;
 class OrderNumberService
 {
     /**
-     * Generate a unique, atomic, sequential order number for a given series ('M' or 'J').
+     * Generate a unique, atomic, sequential order number for a given series ('M' or 'JL').
      *
-     * Series M: M00001, M00002, M00003... (Normal / Internal PCB orders)
-     * Series J: J00001, J00002, J00003... (JLCPCB PCB orders)
+     * Series M: M00001, M00002, M00003... (Normal / Internal PCB orders, 5-digit padding)
+     * Series JL: JL0001, JL0002, JL0003... (JLCPCB PCB orders, 4-digit padding)
      *
-     * @param string $series 'M' or 'J'
-     * @param int $paddingLength Default 5
-     * @return string Formatted order number (e.g. M00001 or J00001)
+     * @param string $series 'M' or 'JL' (or legacy 'J')
+     * @param int|null $paddingLength Custom padding length (Defaults: 5 for 'M', 4 for 'JL')
+     * @return string Formatted order number (e.g. M00001 or JL0001)
      */
-    public static function generateOrderNumber(string $series = 'M', int $paddingLength = 5): string
+    public static function generateOrderNumber(string $series = 'M', ?int $paddingLength = null): string
     {
         $series = strtoupper(trim($series));
-        if (!in_array($series, ['M', 'J'])) {
+        if ($series === 'J' || $series === 'JL') {
+            $series = 'JL';
+            if ($paddingLength === null) {
+                $paddingLength = 4;
+            }
+        } else {
             $series = 'M';
+            if ($paddingLength === null) {
+                $paddingLength = 5;
+            }
         }
 
         return DB::transaction(function () use ($series, $paddingLength) {
@@ -48,9 +56,9 @@ class OrderNumberService
                     } else {
                         $initialNumber = DB::table('pcb_orders')->max('id') ?? 0;
                     }
-                } else if ($series === 'J') {
+                } else if ($series === 'JL') {
                     $lastOrder = DB::table('pcb_orders')
-                        ->where('order_number', 'LIKE', 'J%')
+                        ->where('order_number', 'LIKE', 'JL%')
                         ->where('order_number', 'NOT LIKE', '%-%')
                         ->orderBy('id', 'desc')
                         ->first();
@@ -108,7 +116,7 @@ class OrderNumberService
     }
 
     /**
-     * Determine sequence series ('M' or 'J') and generate order number for given order type.
+     * Determine sequence series ('M' or 'JL') and generate order number for given order type.
      *
      * @param string|null $orderType 'jlcpcb' / 'normal' or quotation_source 'jlcpcb' / 'internal'
      * @return string
@@ -116,7 +124,8 @@ class OrderNumberService
     public static function generateForType(?string $orderType): string
     {
         $normalizedType = strtolower(trim((string)$orderType));
-        $series = ($normalizedType === 'jlcpcb') ? 'J' : 'M';
+        $series = ($normalizedType === 'jlcpcb') ? 'JL' : 'M';
         return self::generateOrderNumber($series);
     }
 }
+

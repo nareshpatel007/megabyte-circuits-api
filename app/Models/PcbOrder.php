@@ -129,6 +129,7 @@ class PcbOrder extends Model
     {
         return $query->where('order_type', 'jlcpcb')
             ->orWhere('quotation_source', 'jlcpcb')
+            ->orWhere('order_number', 'LIKE', 'JL%')
             ->orWhere('order_number', 'LIKE', 'J%');
     }
 
