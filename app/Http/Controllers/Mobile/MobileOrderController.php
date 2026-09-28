@@ -108,32 +108,49 @@ class MobileOrderController extends Controller
                 $query->where(function ($q) use ($search) {
                     $hasClause = false;
 
-                    if (Schema::hasColumn('pcb_orders', 'order_number')) {
-                        $q->where('order_number', 'LIKE', "%{$search}%");
+                    $columnsToCheck = [
+                        'order_number',
+                        'tool',
+                        'part_number',
+                        'board_name',
+                        'gerber_file_name',
+                        'gerber_filename',
+                        'gerber_file',
+                        'file_name',
+                        'gerber_name',
+                        'user_email',
+                        'customer_name',
+                        'status',
+                        'bill_number',
+                    ];
+
+                    foreach ($columnsToCheck as $col) {
+                        if (Schema::hasColumn('pcb_orders', $col)) {
+                            $hasClause ? $q->orWhere($col, 'LIKE', "%{$search}%") : $q->where($col, 'LIKE', "%{$search}%");
+                            $hasClause = true;
+                        }
+                    }
+
+                    // Search in pcb_order_meta table for gerber file names, board names, and other metadata
+                    if (Schema::hasTable('pcb_order_meta')) {
+                        $metaSub = function ($sub) use ($search) {
+                            $sub->select('pcb_order_id')
+                                ->from('pcb_order_meta')
+                                ->where('meta_value', 'LIKE', "%{$search}%");
+                        };
+                        $hasClause ? $q->orWhereIn('pcb_orders.id', $metaSub) : $q->whereIn('pcb_orders.id', $metaSub);
                         $hasClause = true;
                     }
-                    if (Schema::hasColumn('pcb_orders', 'tool')) {
-                        $hasClause ? $q->orWhere('tool', 'LIKE', "%{$search}%") : $q->where('tool', 'LIKE', "%{$search}%");
-                        $hasClause = true;
-                    }
-                    if (Schema::hasColumn('pcb_orders', 'part_number')) {
-                        $hasClause ? $q->orWhere('part_number', 'LIKE', "%{$search}%") : $q->where('part_number', 'LIKE', "%{$search}%");
-                        $hasClause = true;
-                    }
-                    if (Schema::hasColumn('pcb_orders', 'board_name')) {
-                        $hasClause ? $q->orWhere('board_name', 'LIKE', "%{$search}%") : $q->where('board_name', 'LIKE', "%{$search}%");
-                        $hasClause = true;
-                    }
-                    if (Schema::hasColumn('pcb_orders', 'user_email')) {
-                        $hasClause ? $q->orWhere('user_email', 'LIKE', "%{$search}%") : $q->where('user_email', 'LIKE', "%{$search}%");
-                        $hasClause = true;
-                    }
-                    if (Schema::hasColumn('pcb_orders', 'customer_name')) {
-                        $hasClause ? $q->orWhere('customer_name', 'LIKE', "%{$search}%") : $q->where('customer_name', 'LIKE', "%{$search}%");
-                        $hasClause = true;
-                    }
-                    if (Schema::hasColumn('pcb_orders', 'status')) {
-                        $hasClause ? $q->orWhere('status', 'LIKE', "%{$search}%") : $q->where('status', 'LIKE', "%{$search}%");
+
+                    // Search in gerber_files table if present
+                    if (Schema::hasTable('gerber_files')) {
+                        $gerberSub = function ($sub) use ($search) {
+                            $sub->select('pcb_order_id')
+                                ->from('gerber_files')
+                                ->where('original_name', 'LIKE', "%{$search}%")
+                                ->orWhere('filename', 'LIKE', "%{$search}%");
+                        };
+                        $hasClause ? $q->orWhereIn('pcb_orders.id', $gerberSub) : $q->whereIn('pcb_orders.id', $gerberSub);
                         $hasClause = true;
                     }
                 });
@@ -180,6 +197,18 @@ class MobileOrderController extends Controller
                 $failedQty = (int) ($order->failed_qty ?? $metaMap['failed_qty'] ?? 0);
                 $pendingQty = (int) ($order->pending_qty ?? $metaMap['pending_qty'] ?? max(0, $launchQty - $finalQty - $failedQty));
 
+                $gerberFileName = $order->board_name
+                    ?? $order->gerber_file_name
+                    ?? $order->gerber_filename
+                    ?? $order->gerber_file
+                    ?? $order->file_name
+                    ?? $metaMap['gerber_file_name']
+                    ?? $metaMap['gerber_filename']
+                    ?? $metaMap['gerber_file']
+                    ?? $metaMap['board_name']
+                    ?? $metaMap['file_name']
+                    ?? null;
+
                 return [
                     'id' => (string) $order->id,
                     'tool' => $order->order_number ?? ('M' . $order->id),
@@ -188,6 +217,8 @@ class MobileOrderController extends Controller
                     'film_applied' => isset($order->film_applied) ? (bool)$order->film_applied : (isset($metaMap['film_applied']) ? (bool)$metaMap['film_applied'] : false),
                     'orderNumber' => $metaMap['order_number'] ?? (string)$order->id,
                     'client' => ($order->customer_name ?? null) ?: ($metaMap['client'] ?? 'Apex Controls'),
+                    'gerber_file_name' => $gerberFileName,
+                    'board_name' => $order->board_name ?? $metaMap['board_name'] ?? $gerberFileName,
                     'department' => $metaMap['department'] ?? 'Production',
                     'priority' => $metaMap['priority'] ?? 'Normal',
                     'orderDate' => ($order->created_at ?? null) ? date('d M Y', strtotime($order->created_at)) : date('d M Y'),

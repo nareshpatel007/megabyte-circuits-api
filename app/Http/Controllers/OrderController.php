@@ -717,10 +717,18 @@ namespace App\Http\Controllers;
                     $order->launch_date = $request->launch_date;
                 }
 
-                if ($request->has('delivery_date') && $order->delivery_date !== $request->delivery_date) {
-                    $oldVal = $order->delivery_date ?? 'N/A';
-                    $order->delivery_date = $request->delivery_date;
-                    $changesLog[] = "Delivery Date: '{$oldVal}' → '{$request->delivery_date}'";
+                if ($request->has('delivery_date')) {
+                    $rawReqDate = $request->input('delivery_date');
+                    if ($rawReqDate !== null && $rawReqDate !== '') {
+                        $normReqDate = date('Y-m-d', strtotime($rawReqDate));
+                        $normOldDate = !empty($order->delivery_date) ? date('Y-m-d', strtotime($order->delivery_date)) : null;
+                        if ($normReqDate !== $normOldDate) {
+                            $oldValStr = !empty($normOldDate) ? date('d M Y', strtotime($normOldDate)) : 'N/A';
+                            $newValStr = !empty($normReqDate) ? date('d M Y', strtotime($normReqDate)) : 'N/A';
+                            $order->delivery_date = $normReqDate;
+                            $changesLog[] = "Delivery Date: '{$oldValStr}' → '{$newValStr}'";
+                        }
+                    }
                 }
 
                 if ($request->has('bill_number')) {
