@@ -120,8 +120,8 @@ class PcbOrder extends Model
         'ups_qty'     => 'integer',
         'final_qty'   => 'integer',
         'failed_qty'  => 'integer',
-        'launch_date' => 'date',
-        'delivery_date' => 'date',
+        'launch_date' => 'date:Y-m-d',
+        'delivery_date' => 'date:Y-m-d',
         'film_applied' => 'boolean',
         'jlcpcb_quotation_snapshot' => 'array',
     ];
