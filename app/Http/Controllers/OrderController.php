@@ -563,6 +563,28 @@ namespace App\Http\Controllers;
                 $order->bill_number = $order->getMeta('bill_number');
             }
 
+            if (empty($order->order_qty)) {
+                $order->order_qty = (int)($order->getMeta('order_qty') ?: $order->getMeta('qty') ?: $order->getMeta('quantity') ?: 0);
+            }
+            if (empty($order->launch_qty)) {
+                $order->launch_qty = (int)($order->getMeta('launch_qty') ?: $order->getMeta('launch') ?: $order->getMeta('launched_qty') ?: 0);
+            }
+            if (empty($order->panel_qty)) {
+                $order->panel_qty = (int)($order->getMeta('panel_qty') ?: $order->getMeta('panel') ?: 0);
+            }
+            if (empty($order->ups_qty)) {
+                $order->ups_qty = (int)($order->getMeta('ups_qty') ?: $order->getMeta('ups') ?: 0);
+            }
+            if (empty($order->final_qty)) {
+                $order->final_qty = (int)($order->getMeta('final_qty') ?: $order->getMeta('completed_qty') ?: $order->getMeta('final') ?: 0);
+            }
+            if (empty($order->completed_qty)) {
+                $order->completed_qty = (int)($order->getMeta('completed_qty') ?: $order->getMeta('final_qty') ?: $order->final_qty ?: 0);
+            }
+            if (empty($order->failed_qty)) {
+                $order->failed_qty = (int)($order->getMeta('failed_qty') ?: $order->getMeta('failed') ?: 0);
+            }
+
             return response()->json([
                 'status' => true,
                 'data' => $order
