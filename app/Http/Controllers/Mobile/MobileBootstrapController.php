@@ -71,6 +71,27 @@ class MobileBootstrapController extends Controller
                         $query->where('read', 0);
                     }
 
+                    // Exclude disabled events in notification_settings
+                    if (\Illuminate\Support\Facades\Schema::hasTable('notification_settings')) {
+                        $disabledEvents = DB::table('notification_settings')->where('admin_enabled', false)->pluck('event_key')->toArray();
+                        if (!empty($disabledEvents)) {
+                            $query->whereNotIn('event_key', $disabledEvents);
+                        }
+                    }
+
+                    // Filter by employee permissions
+                    if (!$isSuperAdmin) {
+                        $disallowed = [];
+                        if (!in_array('orders.view', $permissions)) $disallowed[] = 'order';
+                        if (!in_array('inventory.view', $permissions)) $disallowed[] = 'inventory';
+                        if (!in_array('payments.view', $permissions)) $disallowed[] = 'payment';
+                        if (!in_array('gerber.view', $permissions) && !in_array('orders.view_gerber', $permissions)) $disallowed[] = 'gerber';
+                        if (!in_array('staff.view', $permissions) && !in_array('users.manage', $permissions)) $disallowed[] = 'staff';
+                        if (!empty($disallowed)) {
+                            $query->whereNotIn('category', $disallowed);
+                        }
+                    }
+
                     $unreadNotificationsCount = $query->count();
                 }
             } catch (\Throwable $notifEx) {

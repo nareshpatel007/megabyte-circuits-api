@@ -16,6 +16,46 @@ class AdminNotificationController extends Controller
         return $adminId ? (int)$adminId : null;
     }
 
+    private function applyAdminAllowedFilters($query, ?int $adminId)
+    {
+        // 1. Exclude notifications where event is disabled for admin in notification_settings
+        if (\Illuminate\Support\Facades\Schema::hasTable('notification_settings')) {
+            $disabledEventKeys = NotificationSetting::where('admin_enabled', false)->pluck('event_key')->toArray();
+            if (!empty($disabledEventKeys)) {
+                $query->whereNotIn('event_key', $disabledEventKeys);
+            }
+        }
+
+        // 2. Filter by admin permissions if admin is logged in
+        if ($adminId) {
+            $admin = DB::table('admins')->where('id', $adminId)->first();
+            $permissions = $admin ? \App\Http\Controllers\Mobile\MobileAuthController::fetchPermissionsForAdmin($admin) : ['*'];
+            $isSuperAdmin = in_array('*', $permissions);
+
+            if (!$isSuperAdmin) {
+                $disallowedCategories = [];
+                if (!in_array('orders.view', $permissions)) {
+                    $disallowedCategories[] = 'order';
+                }
+                if (!in_array('inventory.view', $permissions)) {
+                    $disallowedCategories[] = 'inventory';
+                }
+                if (!in_array('payments.view', $permissions)) {
+                    $disallowedCategories[] = 'payment';
+                }
+                if (!in_array('gerber.view', $permissions) && !in_array('orders.view_gerber', $permissions)) {
+                    $disallowedCategories[] = 'gerber';
+                }
+                if (!in_array('staff.view', $permissions) && !in_array('users.manage', $permissions)) {
+                    $disallowedCategories[] = 'staff';
+                }
+                if (!empty($disallowedCategories)) {
+                    $query->whereNotIn('category', $disallowedCategories);
+                }
+            }
+        }
+    }
+
     /**
      * Get paginated notifications for Admin panel.
      */
@@ -32,6 +72,8 @@ class AdminNotificationController extends Controller
                         $q->whereNull('recipient_id');
                     }
                 });
+
+            $this->applyAdminAllowedFilters($query, $adminId);
 
             if ($request->filled('category') && $request->query('category') !== 'all') {
                 $query->where('category', $request->query('category'));
@@ -52,7 +94,7 @@ class AdminNotificationController extends Controller
             $perPage = min(max((int)$request->query('per_page', 15), 1), 100);
             $notifications = $query->orderBy('created_at', 'desc')->paginate($perPage);
 
-            $unreadCount = Notification::where('recipient_type', 'admin')
+            $unreadQuery = Notification::where('recipient_type', 'admin')
                 ->where(function ($q) use ($adminId) {
                     if ($adminId) {
                         $q->where('recipient_id', $adminId)->orWhereNull('recipient_id');
@@ -60,8 +102,9 @@ class AdminNotificationController extends Controller
                         $q->whereNull('recipient_id');
                     }
                 })
-                ->where('is_read', false)
-                ->count();
+                ->where('is_read', false);
+            $this->applyAdminAllowedFilters($unreadQuery, $adminId);
+            $unreadCount = $unreadQuery->count();
 
             return response()->json([
                 'status' => true,
@@ -87,7 +130,7 @@ class AdminNotificationController extends Controller
         try {
             $adminId = $this->getAdminId($request);
 
-            $count = Notification::where('recipient_type', 'admin')
+            $query = Notification::where('recipient_type', 'admin')
                 ->where(function ($q) use ($adminId) {
                     if ($adminId) {
                         $q->where('recipient_id', $adminId)->orWhereNull('recipient_id');
@@ -95,8 +138,10 @@ class AdminNotificationController extends Controller
                         $q->whereNull('recipient_id');
                     }
                 })
-                ->where('is_read', false)
-                ->count();
+                ->where('is_read', false);
+
+            $this->applyAdminAllowedFilters($query, $adminId);
+            $count = $query->count();
 
             return response()->json(['status' => true, 'count' => $count]);
         } catch (\Throwable $th) {
@@ -257,14 +302,16 @@ class AdminNotificationController extends Controller
         $adminId = $this->getAdminId($request);
 
         return response()->stream(function () use ($adminId) {
-            $initialMax = Notification::where('recipient_type', 'admin')
+            $initialQuery = Notification::where('recipient_type', 'admin')
                 ->where(function ($q) use ($adminId) {
                     if ($adminId) {
                         $q->where('recipient_id', $adminId)->orWhereNull('recipient_id');
                     } else {
                         $q->whereNull('recipient_id');
                     }
-                })->max('id');
+                });
+            $this->applyAdminAllowedFilters($initialQuery, $adminId);
+            $initialMax = $initialQuery->max('id');
             $lastId = $initialMax ? (int) $initialMax : 0;
             $start = time();
 
@@ -277,6 +324,8 @@ class AdminNotificationController extends Controller
                             $q->whereNull('recipient_id');
                         }
                     });
+
+                $this->applyAdminAllowedFilters($query, $adminId);
 
                 if ($lastId > 0) {
                     $query->where('id', '>', $lastId);

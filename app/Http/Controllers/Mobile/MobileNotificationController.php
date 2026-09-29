@@ -34,6 +34,41 @@ class MobileNotificationController extends Controller
                     $query->where('user_id', $adminId);
                 }
 
+                // 1. Exclude disabled events in notification_settings
+                if (Schema::hasTable('notification_settings')) {
+                    try {
+                        $disabledEvents = DB::table('notification_settings')
+                            ->where('admin_enabled', false)
+                            ->pluck('event_key')
+                            ->toArray();
+                        if (!empty($disabledEvents)) {
+                            $query->whereNotIn('event_key', $disabledEvents);
+                        }
+                    } catch (\Throwable $e) {}
+                }
+
+                // 2. Filter by employee permissions
+                if ($adminId) {
+                    try {
+                        $admin = DB::table('admins')->where('id', $adminId)->first();
+                        $permissions = $admin ? \App\Http\Controllers\Mobile\MobileAuthController::fetchPermissionsForAdmin($admin) : ['*'];
+                        $isSuperAdmin = in_array('*', $permissions);
+
+                        if (!$isSuperAdmin) {
+                            $disallowedCategories = [];
+                            if (!in_array('orders.view', $permissions)) $disallowedCategories[] = 'order';
+                            if (!in_array('inventory.view', $permissions)) $disallowedCategories[] = 'inventory';
+                            if (!in_array('payments.view', $permissions)) $disallowedCategories[] = 'payment';
+                            if (!in_array('gerber.view', $permissions) && !in_array('orders.view_gerber', $permissions)) $disallowedCategories[] = 'gerber';
+                            if (!in_array('staff.view', $permissions) && !in_array('users.manage', $permissions)) $disallowedCategories[] = 'staff';
+
+                            if (!empty($disallowedCategories)) {
+                                $query->whereNotIn('category', $disallowedCategories);
+                            }
+                        }
+                    } catch (\Throwable $e) {}
+                }
+
                 $notifications = $query
                     ->orderBy('created_at', 'desc')
                     ->limit(50)
@@ -49,16 +84,23 @@ class MobileNotificationController extends Controller
                         return [
                             'id' => (string)$n->id,
                             'type' => $n->type ?? $n->category ?? 'assignment',
+                            'category' => $n->category ?? 'system',
+                            'event_key' => $n->event_key ?? null,
                             'title' => $n->title ?? 'Production Notice',
                             'detail' => $n->detail ?? $n->message ?? '',
                             'time' => !empty($n->created_at) ? date('h:i A', strtotime($n->created_at)) : 'Just now',
+                            'created_at' => $n->created_at ?? null,
+                            'action_url' => $n->action_url ?? null,
                             'unread' => $isUnread
                         ];
                     });
 
+                $unreadCount = $notifications->where('unread', true)->count();
+
                 return response()->json([
                     'success' => true,
-                    'data' => $notifications
+                    'data' => $notifications->values(),
+                    'unread_count' => $unreadCount
                 ]);
             }
 
