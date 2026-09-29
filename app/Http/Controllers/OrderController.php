@@ -467,6 +467,14 @@ namespace App\Http\Controllers;
                     } else if (empty($order->status)) {
                         $order->status = 'Pending';
                     }
+                    if (empty($order->pn_number)) {
+                        $order->pn_number = $order->getMeta('p_n')
+                            ?: $order->getMeta('part_number')
+                            ?: $order->getMeta('gerber_file_name')
+                            ?: $order->getMeta('gerber_name')
+                            ?: $order->getMeta('board_name')
+                            ?: ($order->gerberFile ? ($order->gerberFile->original_name ?: $order->gerberFile->file_name) : null);
+                    }
                     return $order;
                 });
 
@@ -599,6 +607,52 @@ namespace App\Http\Controllers;
                 $gf = \Illuminate\Support\Facades\DB::table('gerber_files')->where('id', $order->gerber_file_id)->first();
                 if ($gf && !empty($gf->preview_data)) {
                     $order->gerber_preview_data = $gf->preview_data;
+                }
+            }
+
+            // Verify if actual physical Gerber file exists on disk or valid URL
+            $hasActualGerber = false;
+            $gerberFileObj = $order->gerberFile;
+            if ($gerberFileObj) {
+                $filePath = $gerberFileObj->file_path;
+                $fileUrl = $gerberFileObj->file_url;
+                if (!empty($filePath) && (
+                    \Illuminate\Support\Facades\Storage::disk('public')->exists($filePath) ||
+                    \Illuminate\Support\Facades\Storage::disk('local')->exists($filePath) ||
+                    file_exists(storage_path('app/' . $filePath)) ||
+                    file_exists(storage_path('app/public/' . $filePath)) ||
+                    file_exists(public_path($filePath))
+                )) {
+                    $hasActualGerber = true;
+                } elseif (!empty($fileUrl) && (
+                    str_starts_with($fileUrl, 'http://') ||
+                    str_starts_with($fileUrl, 'https://') ||
+                    file_exists(public_path(ltrim($fileUrl, '/\\')))
+                )) {
+                    $hasActualGerber = true;
+                }
+            } else {
+                $rawUrl = $order->getMeta('gerber_file_url') ?: $order->getMeta('gerber_url') ?: $order->getMeta('gerber_path');
+                if ($rawUrl && !str_contains($rawUrl, 'null') && $rawUrl !== 'N/A') {
+                    if (str_starts_with($rawUrl, 'http://') || str_starts_with($rawUrl, 'https://')) {
+                        $hasActualGerber = true;
+                    } elseif (file_exists(public_path(ltrim($rawUrl, '/\\'))) || file_exists(storage_path('app/public/' . ltrim($rawUrl, '/\\')))) {
+                        $hasActualGerber = true;
+                    }
+                }
+            }
+            $order->has_actual_gerber = $hasActualGerber;
+
+            // Pre-fill / default P/N number from Gerber file name or board name if empty
+            if (empty($order->pn_number)) {
+                $defaultPn = $order->getMeta('p_n')
+                    ?: $order->getMeta('part_number')
+                    ?: $order->getMeta('gerber_file_name')
+                    ?: $order->getMeta('gerber_name')
+                    ?: $order->getMeta('board_name')
+                    ?: ($gerberFileObj ? ($gerberFileObj->original_name ?: $gerberFileObj->file_name) : null);
+                if (!empty($defaultPn)) {
+                    $order->pn_number = $defaultPn;
                 }
             }
 
@@ -1168,10 +1222,14 @@ namespace App\Http\Controllers;
 
                 \Illuminate\Support\Facades\DB::commit();
 
+                $withRels = ['metas', 'statusDetails', 'statusHistories'];
+                if (\Illuminate\Support\Facades\Schema::hasTable('gerber_files')) {
+                    $withRels[] = 'gerberFile';
+                }
                 return response()->json([
                     'status' => true,
                     'message' => 'Order updated successfully',
-                    'data' => $order->load(['metas', 'statusDetails', 'statusHistories'])
+                    'data' => $order->load($withRels)
                 ]);
             } catch (\Throwable $e) {
                 \Illuminate\Support\Facades\DB::rollBack();
