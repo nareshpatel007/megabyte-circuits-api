@@ -139,8 +139,11 @@ class OrderExportService
         if (!empty($filters['p_n'])) {
             $pn = trim($filters['p_n']);
             $query->where(function ($q) use ($pn) {
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'pn_number')) {
+                    $q->where('pn_number', 'LIKE', "%{$pn}%");
+                }
                 if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'board_name')) {
-                    $q->where('board_name', 'LIKE', "%{$pn}%");
+                    $q->orWhere('board_name', 'LIKE', "%{$pn}%");
                 }
                 $q->orWhereHas('metas', function ($mq) use ($pn) {
                     $mq->whereIn('meta_key', ['p_n', 'part_number', 'board_name'])
@@ -172,6 +175,9 @@ class OrderExportService
             $search = trim($filters['search']);
             $query->where(function ($q) use ($search) {
                 $q->where('order_number', 'LIKE', "%{$search}%");
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'pn_number')) {
+                    $q->orWhere('pn_number', 'LIKE', "%{$search}%");
+                }
                 if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'customer_name')) {
                     $q->orWhere('customer_name', 'LIKE', "%{$search}%");
                 }
@@ -231,7 +237,7 @@ class OrderExportService
                 'customer_name'     => $order->customer_name ?: $getMeta('customer_name', 'N/A'),
                 'layer'             => $getMeta('layer', $getMeta('layers', '1')),
                 'mask'              => $getMeta('solder_mask', $getMeta('mask', $getMeta('pcb_color', 'Green'))),
-                'board_name'        => $order->board_name ?: $getMeta('part_number', $getMeta('p_n', 'N/A')),
+                'board_name'        => $order->pn_number ?: ($order->board_name ?: $getMeta('part_number', $getMeta('p_n', 'N/A'))),
                 'production_noted'  => $getMeta('production_noted', '-'),
                 'qty'               => is_numeric($getMeta('qty')) ? (int)$getMeta('qty') : (int)$getMeta('quantity', 0),
                 'launch_qty'        => is_numeric($getMeta('launch_qty')) ? (int)$getMeta('launch_qty') : 0,
@@ -389,7 +395,7 @@ class OrderExportService
             $order->customer_name ?: $getMeta('customer_name', ''),              // Col H: Customer name
             $getMeta('layer', $getMeta('layers', '1')),                        // Col I: Layer
             $getMeta('solder_mask', $getMeta('mask', $getMeta('pcb_color', 'Green'))), // Col J: Mask
-            $order->board_name ?: $getMeta('part_number', $getMeta('p_n', '')),  // Col K: P/N
+            $order->pn_number ?: ($order->board_name ?: $getMeta('part_number', $getMeta('p_n', ''))),  // Col K: P/N
             $getMeta('production_noted', ''),                                  // Col L: Production noted
             is_numeric($getMeta('qty')) ? (int)$getMeta('qty') : (int)$getMeta('quantity', 0), // Col M: Qty
             is_numeric($getMeta('launch_qty')) ? (int)$getMeta('launch_qty') : 0,               // Col N: Launch

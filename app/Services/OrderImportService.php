@@ -28,7 +28,7 @@ class OrderImportService
         'customer_name'     => ['customer name', 'customer', 'client name'],
         'layer'             => ['layer', 'layers'],
         'mask'              => ['mask', 'solder mask', 'pcb color'],
-        'p_n'               => ['p/n', 'pn', 'part number', 'board name'],
+        'p_n'               => ['p/n', 'pn', 'part number', 'part no', 'part #', 'board name'],
         'production_noted'  => ['production noted', 'production note', 'production notes', 'notes'],
         'qty'               => ['qty', 'quantity', 'order qty'],
         'launch_qty'        => ['launch', 'launch qty', 'launched qty'],
@@ -999,31 +999,10 @@ class OrderImportService
         $status = (empty($rawStatus) || strtolower($rawStatus) === 'move') ? 'Completed' : $rawStatus;
         $billNumber = !empty($data['bill_number']) ? (string)$data['bill_number'] : null;
 
-        // P/N Resolution -> gerber_files table
-        $gerberFileId = null;
+        // P/N Resolution -> pcb_orders.pn_number (Gerber file is NOT created for P/N)
         $pnVal = trim((string)($data['p_n'] ?? ''));
-        if ($pnVal !== '') {
-            if (\Illuminate\Support\Facades\Schema::hasTable('gerber_files')) {
-                $gf = \Illuminate\Support\Facades\DB::table('gerber_files')
-                    ->where('original_name', $pnVal)
-                    ->when($userId, fn($q) => $q->where('user_id', $userId))
-                    ->whereNull('deleted_at')
-                    ->first();
-
-                if ($gf) {
-                    $gerberFileId = $gf->id;
-                } else {
-                    $gerberFileId = \Illuminate\Support\Facades\DB::table('gerber_files')->insertGetId([
-                        'user_id'       => $userId,
-                        'original_name' => $pnVal,
-                        'file_name'      => $pnVal,
-                        'board_name'     => $pnVal,
-                        'created_at'    => now(),
-                        'updated_at'    => now(),
-                    ]);
-                }
-            }
-        }
+        $pnNumber = $pnVal !== '' ? $pnVal : null;
+        $gerberFileId = null;
 
         $layers = !empty($data['layer']) ? (string)$data['layer'] : null;
         $mask = !empty($data['mask']) ? (string)$data['mask'] : null;
@@ -1044,12 +1023,13 @@ class OrderImportService
         $orderPayload = [
             'user_id'        => $userId,
             'order_number'   => $orderNumber,
+            'pn_number'      => $pnNumber,
             'q_no'           => !empty($data['quote_number']) ? (string)$data['quote_number'] : (!empty($data['q_no']) ? (string)$data['q_no'] : null),
             'c_g'            => $cgValue,
             'combo'          => !empty($data['combo']) ? (string)$data['combo'] : null,
             'layers'         => $layers,
             'mask'           => $mask,
-            'gerber_file_id' => $gerberFileId,
+            'gerber_file_id' => null,
             'status'         => $status,
             'completed_qty'  => $completedQty,
             'order_qty'      => $orderQty,
@@ -1196,29 +1176,10 @@ class OrderImportService
             $order->user_id = $userId;
         }
 
-        // P/N Resolution -> gerber_files table
+        // P/N Resolution -> pcb_orders.pn_number (Gerber file is NOT created for P/N)
         $pnVal = trim((string)($data['p_n'] ?? ''));
         if ($pnVal !== '') {
-            if (\Illuminate\Support\Facades\Schema::hasTable('gerber_files')) {
-                $gf = \Illuminate\Support\Facades\DB::table('gerber_files')
-                    ->where('original_name', $pnVal)
-                    ->when($order->user_id, fn($q) => $q->where('user_id', $order->user_id))
-                    ->whereNull('deleted_at')
-                    ->first();
-
-                if ($gf) {
-                    $order->gerber_file_id = $gf->id;
-                } else {
-                    $order->gerber_file_id = \Illuminate\Support\Facades\DB::table('gerber_files')->insertGetId([
-                        'user_id'       => $order->user_id,
-                        'original_name' => $pnVal,
-                        'file_name'      => $pnVal,
-                        'board_name'     => $pnVal,
-                        'created_at'    => now(),
-                        'updated_at'    => now(),
-                    ]);
-                }
-            }
+            $order->pn_number = $pnVal;
         }
 
         $order->save();

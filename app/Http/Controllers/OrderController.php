@@ -19,7 +19,8 @@ namespace App\Http\Controllers;
             // Validate the request
             $validator = Validator::make($request->all(), [
                 'user_id' => 'nullable|integer',
-                'board_name' => 'required|string|max:200',
+                'board_name' => 'nullable|string|max:200',
+                'pn_number' => 'nullable|string|max:255',
                 'user_mobile' => 'required|string',
                 'user_email' => 'required|email|max:200',
                 'customer_name' => 'nullable|string|max:200',
@@ -111,11 +112,14 @@ namespace App\Http\Controllers;
 
                 $cgStatus = (!empty($customerGst) && strtolower($customerGst) !== 'null' && strtolower($customerGst) !== 'undefined') ? 'GST' : 'Cash';
 
+                $pnNumber = $request->filled('pn_number') ? trim($request->input('pn_number')) : ($gerberFileName ?: null);
+
                 // Create the main compact order record
                 $order = PcbOrder::create([
                     'user_id' => $userId,
                     'order_number' => $orderNumber,
-                    'board_name' => $request->board_name,
+                    'board_name' => $request->board_name ?: ($pnNumber ?: 'Standard PCB'),
+                    'pn_number' => $pnNumber,
                     'customer_name' => $request->customer_name,
                     'user_email' => $request->user_email,
                     'user_mobile' => $request->user_mobile,
@@ -128,7 +132,7 @@ namespace App\Http\Controllers;
 
                 // Save all additional specification attributes into pcb_order_meta
                 $metaData = $request->except([
-                    'user_id', 'order_number', 'board_name', 'customer_name', 'user_email', 'user_mobile',
+                    'user_id', 'order_number', 'board_name', 'pn_number', 'customer_name', 'user_email', 'user_mobile',
                     'status', 'unit_price', 'order_value', 'delivery_date', 'gerber_file'
                 ]);
 
@@ -275,6 +279,9 @@ namespace App\Http\Controllers;
                 if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_old_orders')) {
                     $withRelations[] = 'oldOrders';
                 }
+                if (\Illuminate\Support\Facades\Schema::hasTable('gerber_files')) {
+                    $withRelations[] = 'gerberFile';
+                }
 
                 $query = PcbOrder::with($withRelations);
 
@@ -343,6 +350,7 @@ namespace App\Http\Controllers;
                     ) {
                         $q->where('order_number', 'LIKE', "%{$search}%");
                         $q->orWhere('bill_number', 'LIKE', "%{$search}%");
+                        $q->orWhere('pcb_orders.pn_number', 'LIKE', "%{$search}%");
                         if ($hasUserEmailCol) {
                             $q->orWhere('user_email', 'LIKE', "%{$search}%");
                         }
@@ -354,6 +362,12 @@ namespace App\Http\Controllers;
                         }
                         if ($hasBoardNameCol) {
                             $q->orWhere('board_name', 'LIKE', "%{$search}%");
+                        }
+                        if (\Illuminate\Support\Facades\Schema::hasTable('gerber_files')) {
+                            $q->orWhereHas('gerberFile', function ($gq) use ($search) {
+                                $gq->where('original_name', 'LIKE', "%{$search}%")
+                                   ->orWhere('file_name', 'LIKE', "%{$search}%");
+                            });
                         }
                         $q->orWhereHas('user', function ($uq) use (
                             $search,
@@ -498,6 +512,9 @@ namespace App\Http\Controllers;
             }
             if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_old_orders')) {
                 $withRelations[] = 'oldOrders';
+            }
+            if (\Illuminate\Support\Facades\Schema::hasTable('gerber_files')) {
+                $withRelations[] = 'gerberFile';
             }
 
             $orderQuery = PcbOrder::with($withRelations)
@@ -698,6 +715,16 @@ namespace App\Http\Controllers;
                         $oldOrderNo = $order->order_number ?? 'N/A';
                         $order->order_number = $cleanOrderNumber;
                         $changesLog[] = "Order Number: '{$oldOrderNo}' → '{$cleanOrderNumber}'";
+                    }
+                }
+
+                if ($request->has('pn_number')) {
+                    $newPn = trim((string)$request->input('pn_number'));
+                    $currentPn = (string)($order->pn_number ?? '');
+                    if ($currentPn !== $newPn) {
+                        $oldPn = $order->pn_number ?? 'N/A';
+                        $order->pn_number = $newPn !== '' ? $newPn : null;
+                        $changesLog[] = "P/N Number: '{$oldPn}' → '" . ($newPn !== '' ? $newPn : 'Empty') . "'";
                     }
                 }
 
@@ -1255,7 +1282,8 @@ namespace App\Http\Controllers;
         {
             try {
                 $validator = Validator::make($request->all(), [
-                    'board_name' => 'required|string|max:200',
+                    'board_name' => 'nullable|string|max:200',
+                    'pn_number' => 'nullable|string|max:255',
                     'user_id' => 'nullable|integer',
                     'customer_name' => 'nullable|string|max:200',
                     'user_email' => 'nullable|email|max:200',
@@ -1373,10 +1401,13 @@ namespace App\Http\Controllers;
                         }
                     }
 
+                    $pnNumber = $request->filled('pn_number') ? trim($request->input('pn_number')) : ($gerberFileName ?: null);
+
                     // Create Order Record
                     $orderData = [
                         'user_id' => $userId,
                         'order_number' => $orderNumber,
+                        'pn_number' => $pnNumber,
                         'status_id' => $statusId,
                         'gerber_file_id' => $gerberFileId,
                         'transaction_id' => $transactionId,
@@ -1388,7 +1419,7 @@ namespace App\Http\Controllers;
                     ];
 
                     if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'board_name')) {
-                        $orderData['board_name'] = $request->input('board_name');
+                        $orderData['board_name'] = $request->input('board_name') ?: ($pnNumber ?: 'Standard PCB');
                     }
                     if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'customer_name')) {
                         $orderData['customer_name'] = $request->input('customer_name');
@@ -1405,6 +1436,7 @@ namespace App\Http\Controllers;
                     // Store Metadata
                     $allParams = $request->all();
                     unset($allParams['gerber_file']);
+                    unset($allParams['pn_number']);
 
                     if ($gerberFileUrl) {
                         $allParams['gerber_file_url'] = $gerberFileUrl;
@@ -1438,6 +1470,7 @@ namespace App\Http\Controllers;
                         'data' => [
                             'id' => $orderId,
                             'order_number' => $orderNumber,
+                            'pn_number' => $pnNumber,
                             'order_value' => $pricing['total_amount'],
                             'transaction_id' => $transactionId
                         ]

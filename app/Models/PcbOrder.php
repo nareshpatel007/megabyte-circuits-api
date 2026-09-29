@@ -17,6 +17,7 @@ class PcbOrder extends Model
         'status_id',
         'gerber_file_id',
         'order_number',
+        'pn_number',
         'order_type',
         'quotation_source',
         'jlcpcb_file_key',

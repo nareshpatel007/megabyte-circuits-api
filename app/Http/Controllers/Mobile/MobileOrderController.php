@@ -125,6 +125,7 @@ class MobileOrderController extends Controller
 
                     $columnsToCheck = [
                         'order_number',
+                        'pn_number',
                         'tool',
                         'combo',
                         'part_number',
@@ -406,6 +407,7 @@ class MobileOrderController extends Controller
                     'film' => isset($metaMap['film']) ? (bool)$metaMap['film'] : false,
                     'film_applied' => isset($order->film_applied) ? (bool)$order->film_applied : (isset($metaMap['film_applied']) ? (bool)$metaMap['film_applied'] : false),
                     'orderNumber' => $metaMap['order_number'] ?? (string)$order->id,
+                    'pn_number' => $order->pn_number ?? $metaMap['pn_number'] ?? $metaMap['p_n'] ?? $metaMap['part_number'] ?? null,
                     'client' => ($order->customer_name ?? null) ?: ($metaMap['client'] ?? 'Apex Controls'),
                     'gerber_file_name' => $gerberFileName,
                     'board_name' => $order->board_name ?? $metaMap['board_name'] ?? $gerberFileName,
@@ -537,6 +539,19 @@ class MobileOrderController extends Controller
                 ? $order->dynamic_status_name
                 : (!empty($order->status) ? $order->status : 'Pending');
 
+            $actualGerber = null;
+            if (!empty($order->gerber_file_id) && Schema::hasTable('gerber_files')) {
+                $gf = DB::table('gerber_files')->where('id', $order->gerber_file_id)->first();
+                if ($gf) {
+                    $actualGerber = [
+                        'id' => $gf->id,
+                        'original_name' => $gf->original_name,
+                        'file_name' => $gf->file_name ?? $gf->original_name,
+                        'file_url' => $gf->file_url ?? null,
+                    ];
+                }
+            }
+
             $data = [
                 'id' => (string) $order->id,
                 'tool' => $order->order_number ?? ('M' . $order->id),
@@ -544,6 +559,9 @@ class MobileOrderController extends Controller
                 'film' => isset($metaMap['film']) ? (bool)$metaMap['film'] : false,
                 'film_applied' => isset($order->film_applied) ? (bool)$order->film_applied : (isset($metaMap['film_applied']) ? (bool)$metaMap['film_applied'] : false),
                 'orderNumber' => $metaMap['order_number'] ?? (string)$order->id,
+                'pn_number' => $order->pn_number ?? $metaMap['pn_number'] ?? $metaMap['p_n'] ?? $metaMap['part_number'] ?? null,
+                'gerber_file' => $actualGerber,
+                'has_gerber' => $actualGerber !== null,
                 'client' => ($order->customer_name ?? null) ?: ($metaMap['client'] ?? 'Apex Controls'),
                 'department' => $metaMap['department'] ?? 'Production',
                 'priority' => $metaMap['priority'] ?? 'Normal',
@@ -1079,6 +1097,7 @@ class MobileOrderController extends Controller
             $updateData = ['updated_at' => date('Y-m-d H:i:s')];
             if ($request->has('customer_name')) $updateData['customer_name'] = trim($request->input('customer_name'));
             if ($request->has('board_name')) $updateData['board_name'] = trim($request->input('board_name'));
+            if ($request->has('pn_number')) $updateData['pn_number'] = trim($request->input('pn_number')) ?: null;
             if ($request->has('quantity')) {
                 $qty = (int)$request->input('quantity');
                 $updateData['order_qty'] = $qty;

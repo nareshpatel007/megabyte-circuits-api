@@ -419,29 +419,21 @@ class CheckoutController extends Controller
                 $itemQty = $item['qty'] ?? 1;
                 $unitPrice = $itemQty > 0 ? round($itemPrice / $itemQty, 2) : $itemPrice;
 
-                // Resolve or Create Gerber File Entry
+                $pnNumber = !empty($item['pn_number']) 
+                    ? trim($item['pn_number']) 
+                    : (!empty($item['part_number']) 
+                        ? trim($item['part_number']) 
+                        : (!empty($item['gerberFileName']) 
+                            ? trim($item['gerberFileName']) 
+                            : (!empty($item['boardName']) && $item['boardName'] !== 'Standard PCB' && $item['boardName'] !== 'SMT Stencil' 
+                                ? trim($item['boardName']) 
+                                : null)));
+
+                // Resolve Gerber File Entry (only link if real gerber file was uploaded)
                 $gerberFileId = $item['gerber_file_id'] ?? null;
                 $previewData = $item['gerberPreview'] ?? $item['preview_data'] ?? null;
 
-                if (!$gerberFileId && !empty($boardName)) {
-                    $existingGerber = DB::table('gerber_files')->where('original_name', $boardName)->latest()->first();
-                    if ($existingGerber) {
-                        $gerberFileId = $existingGerber->id;
-                        if ($previewData && empty($existingGerber->preview_data)) {
-                            DB::table('gerber_files')->where('id', $gerberFileId)->update(['preview_data' => $previewData]);
-                        }
-                    } else {
-                        $gerberFileId = DB::table('gerber_files')->insertGetId([
-                            'user_id' => $userId,
-                            'original_name' => $boardName,
-                            'file_name' => $boardName,
-                            'board_name' => pathinfo($boardName, PATHINFO_FILENAME),
-                            'preview_data' => $previewData,
-                            'created_at' => date('Y-m-d H:i:s'),
-                            'updated_at' => date('Y-m-d H:i:s')
-                        ]);
-                    }
-                } else if ($gerberFileId && $previewData) {
+                if ($gerberFileId && $previewData) {
                     DB::table('gerber_files')->where('id', $gerberFileId)->whereNull('preview_data')->update(['preview_data' => $previewData]);
                 }
 
@@ -456,7 +448,7 @@ class CheckoutController extends Controller
                         ->update($updateData);
                 }
 
-                // Insert into pcb_orders storing ONLY foreign ID references (No board_name, status_id = Pending)
+                // Insert into pcb_orders storing ONLY foreign ID references (No fake gerber, status_id = Pending)
                 $itemDeliveryDate = $item['delivery_date'] ?? $item['deliveryDate'] ?? null;
                 $resolvedDeliveryDate = $itemDeliveryDate
                     ? \Carbon\Carbon::parse($itemDeliveryDate)->format('Y-m-d')
@@ -466,7 +458,7 @@ class CheckoutController extends Controller
                 $rawSnapshot = $item['jlcpcb_quote'] ?? $item['jlcpcb_quotation_snapshot'] ?? $item['jlcpcbQuote'] ?? null;
                 $jlcSnapshotJson = $rawSnapshot ? (is_array($rawSnapshot) || is_object($rawSnapshot) ? json_encode($rawSnapshot) : (string)$rawSnapshot) : null;
 
-                $orderId = DB::table('pcb_orders')->insertGetId([
+                $orderData = [
                     'order_number' => $orderNumber,
                     'order_type' => $orderType,
                     'quotation_source' => $quotationSource,
@@ -481,14 +473,21 @@ class CheckoutController extends Controller
                     'billing_address_id' => $billingAddressId,
                     'status_id' => $statusId, // Links to Pending in pcb_order_statuses
                     'status' => 'Pending',
-                    'gerber_file_id' => $gerberFileId, // Links to gerber_files record
+                    'pn_number' => $pnNumber,
+                    'gerber_file_id' => $gerberFileId, // Links to real gerber_files record if uploaded
                     'c_g' => $cgStatus,
                     'unit_price' => $unitPrice,
                     'order_value' => $itemPrice,
                     'delivery_date' => $resolvedDeliveryDate,
                     'created_at' => date('Y-m-d H:i:s'),
                     'updated_at' => date('Y-m-d H:i:s')
-                ]);
+                ];
+
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'board_name')) {
+                    $orderData['board_name'] = $boardName;
+                }
+
+                $orderId = DB::table('pcb_orders')->insertGetId($orderData);
 
                 // Store specifications in pcb_order_meta
                 $productType = $item['productType'] ?? 'pcb';
