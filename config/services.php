@@ -64,5 +64,10 @@ return [
         'secret_key' => env('JLCPCB_SECRET_KEY'),
         'base_url' => env('JLCPCB_BASE_URL', 'https://open.jlcpcb.com'),
     ],
+    'recaptcha' => [
+        'enabled' => env('RECAPTCHA_ENABLED', false),
+        'site_key' => env('RECAPTCHA_SITE_KEY'),
+        'secret_key' => env('RECAPTCHA_SECRET_KEY'),
+    ],
 ];
 

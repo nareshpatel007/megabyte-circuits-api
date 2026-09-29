@@ -43,7 +43,8 @@ Route::prefix('orders/')->group(function () {
     Route::post('{id}/repeat', [OrderController::class, 'repeat']);
 });
 
-// Contact Form Submission
+// Contact Form Submission & reCAPTCHA Config
+Route::get('recaptcha-config', [ContactController::class, 'getRecaptchaConfig']);
 Route::post('contact', [ContactController::class, 'submitContact']);
 
 // DigiKey Products & Categories API (DB stored)

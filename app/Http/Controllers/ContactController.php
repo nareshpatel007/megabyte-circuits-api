@@ -6,8 +6,28 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use App\MailHelper;
 
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use App\Services\CredentialService;
+
 class ContactController extends Controller
 {
+    /**
+     * Get public reCAPTCHA configuration for frontend.
+     */
+    public function getRecaptchaConfig()
+    {
+        $enabledRaw = CredentialService::get('recaptcha', 'RECAPTCHA_ENABLED', 'RECAPTCHA_ENABLED', 'false');
+        $enabled = filter_var($enabledRaw, FILTER_VALIDATE_BOOLEAN);
+        $siteKey = (string)CredentialService::get('recaptcha', 'RECAPTCHA_SITE_KEY', 'RECAPTCHA_SITE_KEY', '');
+
+        return response()->json([
+            'success' => true,
+            'enabled' => $enabled && !empty($siteKey),
+            'site_key' => $siteKey,
+        ]);
+    }
+
     public function submitContact(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -17,6 +37,8 @@ class ContactController extends Controller
             'company' => 'nullable|string|max:200',
             'serviceType' => 'required|string|max:100',
             'message' => 'required|string|min:10',
+            'recaptcha_token' => 'nullable|string',
+            'recaptchaToken' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
@@ -25,6 +47,52 @@ class ContactController extends Controller
                 'message' => 'Validation error',
                 'errors' => $validator->errors()
             ], 422);
+        }
+
+        // Verify Google reCAPTCHA if enabled
+        $recaptchaEnabledRaw = CredentialService::get('recaptcha', 'RECAPTCHA_ENABLED', 'RECAPTCHA_ENABLED', 'false');
+        $recaptchaEnabled = filter_var($recaptchaEnabledRaw, FILTER_VALIDATE_BOOLEAN);
+        $secretKey = (string)CredentialService::get('recaptcha', 'RECAPTCHA_SECRET_KEY', 'RECAPTCHA_SECRET_KEY', '');
+
+        if ($recaptchaEnabled && !empty($secretKey)) {
+            $token = $request->input('recaptcha_token')
+                ?? $request->input('recaptchaToken')
+                ?? $request->input('g-recaptcha-response');
+
+            if (empty($token)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Please complete the Google reCAPTCHA verification.',
+                    'errors' => ['recaptcha' => ['Please complete the Google reCAPTCHA verification.']]
+                ], 422);
+            }
+
+            try {
+                $verifyResponse = Http::asForm()->timeout(10)->post('https://www.google.com/recaptcha/api/siteverify', [
+                    'secret' => $secretKey,
+                    'response' => $token,
+                    'remoteip' => $request->ip(),
+                ]);
+
+                $resData = $verifyResponse->json();
+                if (!($resData['success'] ?? false)) {
+                    Log::warning('reCAPTCHA verification failed', [
+                        'response' => $resData,
+                        'ip' => $request->ip()
+                    ]);
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Google reCAPTCHA verification failed. Please try again.',
+                        'errors' => ['recaptcha' => ['Google reCAPTCHA verification failed.']]
+                    ], 422);
+                }
+            } catch (\Throwable $e) {
+                Log::error('reCAPTCHA connection error: ' . $e->getMessage());
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Could not verify reCAPTCHA with Google servers. Please try again later.',
+                ], 500);
+            }
         }
 
         $validated = $validator->validated();

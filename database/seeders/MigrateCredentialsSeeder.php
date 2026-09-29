@@ -54,6 +54,11 @@ class MigrateCredentialsSeeder extends Seeder
                 'IMAGEKIT_PUBLIC_KEY' => env('IMAGEKIT_PUBLIC_KEY', ''),
                 'IMAGEKIT_PRIVATE_KEY' => env('IMAGEKIT_PRIVATE_KEY', ''),
                 'IMAGEKIT_URL_ENDPOINT' => env('IMAGEKIT_URL_ENDPOINT', 'https://ik.imagekit.io/8xe0dth2o'),
+            ],
+            'recaptcha' => [
+                'RECAPTCHA_ENABLED' => env('RECAPTCHA_ENABLED', 'false'),
+                'RECAPTCHA_SITE_KEY' => env('RECAPTCHA_SITE_KEY', ''),
+                'RECAPTCHA_SECRET_KEY' => env('RECAPTCHA_SECRET_KEY', ''),
             ]
         ];
 
