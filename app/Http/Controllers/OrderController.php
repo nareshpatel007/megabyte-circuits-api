@@ -886,6 +886,14 @@ namespace App\Http\Controllers;
                     $oldVal = intval($order->order_qty);
                     $order->order_qty = intval($request->order_qty);
                     $changesLog[] = "Order Qty: {$oldVal} → {$order->order_qty} Pcs";
+                    \App\Models\PcbOrderMeta::updateOrCreate(
+                        ['pcb_order_id' => $order->id, 'meta_key' => 'order_qty'],
+                        ['meta_value' => (string)$order->order_qty]
+                    );
+                    \App\Models\PcbOrderMeta::updateOrCreate(
+                        ['pcb_order_id' => $order->id, 'meta_key' => 'qty'],
+                        ['meta_value' => (string)$order->order_qty]
+                    );
                 }
 
                 if ($request->has('launch_qty') && intval($order->launch_qty) !== intval($request->launch_qty)) {
