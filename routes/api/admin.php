@@ -53,6 +53,7 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::post('orders/{id}/reorder', [OrderController::class, 'reorder']);
         Route::get('orders/{id}', [OrderController::class, 'show']);
         Route::put('orders/{id}', [OrderController::class, 'update']);
+        Route::delete('orders/{id}', [OrderController::class, 'destroy']);
         Route::get('orders/{id}/logs', [OrderController::class, 'getLogs']);
         Route::get('orders/{id}/notes', [OrderController::class, 'getNotes']);
         Route::post('orders/{id}/notes', [OrderController::class, 'addNote']);

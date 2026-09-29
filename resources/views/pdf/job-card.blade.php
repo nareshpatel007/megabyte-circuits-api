@@ -33,10 +33,10 @@
         }
         .outer-table td, .outer-table th {
             border: 1px solid #000000;
-            padding: 4px 5px;
+            padding: 3px 4px;
             vertical-align: middle;
             color: #000000;
-            font-size: 10.5pt;
+            font-size: 10pt;
             overflow: hidden;
             word-wrap: break-word;
         }
@@ -61,26 +61,19 @@
         .font-bold {
             font-weight: bold;
         }
-        .text-title {
-            font-size: 22pt;
-            font-weight: bold;
-            text-align: center;
-            letter-spacing: 0.5px;
-            font-family: "Times New Roman", Times, serif;
-        }
         .job-no-title {
-            font-size: 18pt;
+            font-size: 16pt;
             font-weight: bold;
             font-family: "Times New Roman", Times, serif;
         }
         .job-no-value {
-            font-size: 18pt;
+            font-size: 16pt;
             font-weight: bold;
             text-decoration: underline;
             margin-left: 4px;
         }
         .type-title {
-            font-size: 18pt;
+            font-size: 16pt;
             font-weight: bold;
             font-family: "Times New Roman", Times, serif;
         }
@@ -91,20 +84,20 @@
         }
         .inner-table td {
             border: none;
-            padding: 4px 5px;
-            font-size: 10.5pt;
+            padding: 3px 4px;
+            font-size: 10pt;
         }
         .note-header {
             font-weight: bold;
-            font-size: 11.5pt;
+            font-size: 11pt;
             text-decoration: underline;
-            margin-bottom: 5px;
+            margin-bottom: 3px;
         }
         .note-body {
-            font-size: 10.5pt;
-            line-height: 1.35;
+            font-size: 10pt;
+            line-height: 1.3;
             white-space: pre-wrap;
-            min-height: 80px;
+            min-height: 70px;
         }
         .proc-table {
             width: 100%;
@@ -115,31 +108,31 @@
             border: 1px solid #000000;
             border-bottom: 2px solid #000000;
             font-weight: bold;
-            font-size: 11pt;
+            font-size: 10pt;
             text-align: center;
-            padding: 6px 2px;
+            padding: 5px 2px;
             text-transform: uppercase;
             background-color: #ffffff;
             font-family: "Times New Roman", Times, serif;
         }
         .proc-table td {
             border: 1px solid #000000;
-            font-size: 10.5pt;
+            font-size: 10pt;
             text-align: center;
-            padding: 4px 2px;
+            padding: 3px 2px;
         }
         .proc-single td {
-            height: 33px;
-            line-height: 25px;
+            height: 31px;
+            line-height: 23px;
         }
         .proc-multi td {
-            height: 27px;
-            line-height: 21px;
+            height: 25px;
+            line-height: 19px;
         }
         .proc-name {
             font-weight: bold;
             text-align: left !important;
-            padding-left: 8px !important;
+            padding-left: 6px !important;
         }
         .checkbox-sq {
             display: inline-block;
@@ -150,7 +143,7 @@
             line-height: 12px;
             font-size: 11pt;
             font-weight: bold;
-            margin-left: 4px;
+            margin-left: 3px;
             vertical-align: middle;
             font-family: DejaVu Sans, Arial, sans-serif;
         }
@@ -168,16 +161,34 @@
         <tbody>
             <!-- Header Row: JOB NO & Board Type -->
             <tr class="b-bottom-2">
-                <td colspan="2" class="b-right-2" style="width: 50%; padding: 5px 8px;">
-                    <span class="job-no-title">JOB NO:</span>
-                    <span class="job-no-value">{{ $data['job_number'] }}</span>
-                </td>
-                <td class="text-right type-title" style="width: 50%; padding: 5px 10px;">
-                    {{ $data['job_type'] }}
-                </td>
+                @if(!empty($data['is_single_side']))
+                    <td class="b-right-2" style="width: 40%; padding: 4px 6px;">
+                        <span class="job-no-title">JOB NO:</span>
+                        <span class="job-no-value">{{ $data['job_number'] }}</span>
+                    </td>
+                    <td class="b-right-2 text-center" style="width: 38%; padding: 4px 6px;">
+                        <span style="font-size: 11pt; font-weight: bold;">Expose</span>
+                        <span class="checkbox-sq">{{ !empty($data['expose']) ? '✓' : '' }}</span>
+                        &nbsp;&nbsp;&nbsp;
+                        <span style="font-size: 11pt; font-weight: bold;">Print &amp; Etch</span>
+                        <span class="checkbox-sq">{{ !empty($data['print_and_etch']) ? '✓' : '' }}</span>
+                    </td>
+                    <td class="text-right type-title" style="width: 22%; padding: 4px 6px;">
+                        1- SIDE<br><span style="font-size: 12pt; font-weight: bold;">JOB CARD</span>
+                    </td>
+                @else
+                    <td colspan="2" class="b-right-2" style="width: 55%; padding: 4px 6px;">
+                        <span class="job-no-title">JOB NO:</span>
+                        <span class="job-no-value">{{ $data['job_number'] }}</span>
+                        <span style="font-size: 16pt; font-weight: bold; margin-left: 25px;">JOB CARD</span>
+                    </td>
+                    <td class="text-right type-title" style="width: 45%; padding: 4px 8px;">
+                        {{ $data['job_type'] }}
+                    </td>
+                @endif
             </tr>
 
-            <!-- Row 3: Dates -->
+            <!-- Row 2: Dates -->
             <tr>
                 <td colspan="3" class="p-0 b-bottom-2">
                     <table class="inner-table" style="width: 100%; border-collapse: collapse;">
@@ -193,7 +204,7 @@
                 </td>
             </tr>
 
-            <!-- Row 4: Quantities & Min Hole -->
+            <!-- Row 3: Quantities & Min Hole -->
             <tr>
                 <td colspan="3" class="p-0 b-bottom-2">
                     <table class="inner-table" style="width: 100%; border-collapse: collapse;">
@@ -213,7 +224,7 @@
                 </td>
             </tr>
 
-            <!-- Row 5: Panel & Cutting Size -->
+            <!-- Row 4: Panel & Cutting Size -->
             <tr>
                 <td colspan="3" class="p-0 b-bottom-2">
                     <table class="inner-table" style="width: 100%; border-collapse: collapse;">
@@ -227,7 +238,7 @@
                 </td>
             </tr>
 
-            <!-- Row 6: Material, Thickness, Copper, Finish -->
+            <!-- Row 5: Material, Thickness, Copper, Finish -->
             <tr>
                 <td colspan="3" class="p-0 b-bottom-2">
                     <table class="inner-table" style="width: 100%; border-collapse: collapse;">
@@ -245,7 +256,7 @@
                 </td>
             </tr>
 
-            <!-- Row 7: Mask Colour, LP Color, LP Side -->
+            <!-- Row 6: Mask Colour, LP Color, LP Side -->
             <tr>
                 <td colspan="3" class="p-0 b-bottom-2">
                     <table class="inner-table" style="width: 100%; border-collapse: collapse;">
@@ -261,7 +272,7 @@
                 </td>
             </tr>
 
-            <!-- Row 8: Routing / V-Cut / Shearing / Cutouts -->
+            <!-- Row 7: Routing & Fabrication Options -->
             <tr>
                 <td colspan="3" class="p-0 b-bottom-2">
                     @if(!empty($data['is_single_side']))
@@ -279,47 +290,53 @@
                         </table>
                     @else
                         <table class="inner-table" style="width: 100%; border-collapse: collapse;">
-                            <tr>
-                                <td class="label-bold b-right-2" style="width: 10%; border-right: 1px solid #000;">Route:</td>
-                                <td class="b-right-2" style="width: 20%; border-right: 1px solid #000;">{{ $data['route'] }}</td>
-                                <td class="label-bold b-right-2" style="width: 10%; border-right: 1px solid #000;">V-Cut:</td>
+                            <tr style="border-bottom: 1px solid #000;">
+                                <td class="label-bold b-right-2" style="width: 9%; border-right: 1px solid #000;">Route:</td>
+                                <td class="b-right-2" style="width: 18%; border-right: 1px solid #000;">{{ $data['route'] }}</td>
+                                <td class="label-bold b-right-2" style="width: 8%; border-right: 1px solid #000;">V-Cut:</td>
                                 <td class="b-right-2" style="width: 10%; border-right: 1px solid #000;">{{ $data['v_cut'] }}</td>
-                                <td class="label-bold b-right-2" style="width: 12%; border-right: 1px solid #000;">FPT Program:</td>
-                                <td class="b-right-2" style="width: 10%; border-right: 1px solid #000;">{{ $data['fpt_program'] }}</td>
-                                <td class="label-bold b-right-2" style="width: 14%; border-right: 1px solid #000;">2<sup>nd</sup> stage reqd.?</td>
-                                <td style="width: 14%;">{{ $data['second_stage'] }}</td>
+                                <td class="label-bold b-right-2" style="width: 15%; border-right: 1px solid #000;">FPT Program:</td>
+                                <td class="b-right-2" style="width: 15%; border-right: 1px solid #000;">{{ $data['fpt_program'] }}</td>
+                                <td class="label-bold b-right-2" style="width: 17%; border-right: 1px solid #000;">2<sup>nd</sup> stage reqd.?</td>
+                                <td style="width: 8%;">{{ $data['second_stage'] }}</td>
+                            </tr>
+                            <tr>
+                                <td class="label-bold b-right-2" style="width: 14%; border-right: 1px solid #000;">Copper Area:</td>
+                                <td class="b-right-2" style="width: 25%; border-right: 1px solid #000;">{{ $data['copper_area'] ? (str_contains(strtoupper($data['copper_area']), 'AMP') ? $data['copper_area'] : $data['copper_area'] . ' Amp') : 'Amp' }}</td>
+                                <td class="label-bold b-right-2" style="width: 25%; border-right: 1px solid #000;">Internal Cutouts Reqd.?</td>
+                                <td colspan="5" style="width: 36%;">{{ $data['internal_cutouts'] }}</td>
                             </tr>
                         </table>
                     @endif
                 </td>
             </tr>
 
-            <!-- Row 9: Notes Section (Increased height) -->
+            <!-- Row 8: Notes Section -->
             <tr>
-                <td colspan="2" class="b-right-2 b-bottom-2" style="vertical-align: top; height: 85px; width: 60%;">
+                <td colspan="2" class="b-right-2 b-bottom-2" style="vertical-align: top; height: 75px; width: 60%;">
                     <div class="note-header">Production Note:</div>
                     <div class="note-body">{{ $data['production_note'] ?: "• \n• " }}</div>
                 </td>
-                <td class="b-bottom-2" style="vertical-align: top; height: 85px; width: 40%;">
+                <td class="b-bottom-2" style="vertical-align: top; height: 75px; width: 40%;">
                     <div class="note-header">Customer Special Note:</div>
                     <div class="note-body">{{ $data['customer_note'] ?: '' }}</div>
                 </td>
             </tr>
 
-            <!-- Row 10: Final Quantities Header & Values -->
+            <!-- Row 9: Final Quantities Header & Values -->
             <tr>
                 <td colspan="3" class="p-0 b-bottom-2">
                     <table class="inner-table text-center" style="table-layout: fixed; width: 100%;">
                         <thead>
                             <tr style="border-bottom: 1px solid #000000; font-weight: bold;">
-                                <th style="width: 25%; border-right: 1px solid #000000; padding: 5px 2px; font-size: 10.5pt; font-weight: bold;">Final Panel Qty.</th>
-                                <th style="width: 25%; border-right: 1px solid #000000; padding: 5px 2px; font-size: 10.5pt; font-weight: bold;">Final Board Qty.</th>
-                                <th style="width: 25%; border-right: 1px solid #000000; padding: 5px 2px; font-size: 10.5pt; font-weight: bold;">Rejected Board Qty.</th>
-                                <th style="width: 25%; padding: 5px 2px; font-size: 10.5pt; font-weight: bold;">Why Rejected?</th>
+                                <th style="width: 25%; border-right: 1px solid #000000; padding: 4px 2px; font-size: 10pt; font-weight: bold;">Final Panel Qty.</th>
+                                <th style="width: 25%; border-right: 1px solid #000000; padding: 4px 2px; font-size: 10pt; font-weight: bold;">Final Board Qty.</th>
+                                <th style="width: 25%; border-right: 1px solid #000000; padding: 4px 2px; font-size: 10pt; font-weight: bold;">Rejected Board Qty.</th>
+                                <th style="width: 25%; padding: 4px 2px; font-size: 10pt; font-weight: bold;">Why Rejected?</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <tr style="height: 25px;">
+                            <tr style="height: 22px;">
                                 <td style="border-right: 1px solid #000000; font-weight: bold;">{{ $data['final_panel_qty'] }}</td>
                                 <td style="border-right: 1px solid #000000; font-weight: bold;">{{ $data['final_board_qty'] }}</td>
                                 <td style="border-right: 1px solid #000000; font-weight: bold;">{{ $data['rejected_board_qty'] }}</td>
@@ -330,12 +347,12 @@
                 </td>
             </tr>
 
-            <!-- Row 11: Manufacturing Process Table -->
+            <!-- Row 10: Manufacturing Process Table -->
             <tr>
                 <td colspan="3" class="p-0">
                     <table class="proc-table {{ !empty($data['is_single_side']) ? 'proc-single' : 'proc-multi' }}">
                         <thead>
-                            <tr style="height: 25px;">
+                            <tr style="height: 22px;">
                                 <th style="width: 24%; text-align: center;">PROCESS</th>
                                 <th style="width: 8%;">IN</th>
                                 <th style="width: 14%;">PANEL QTY</th>
@@ -348,7 +365,7 @@
                         </thead>
                         <tbody>
                             @php
-                                $rowHNum = !empty($data['is_single_side']) ? '33' : '27';
+                                $rowHNum = !empty($data['is_single_side']) ? '31' : '25';
                             @endphp
                             @foreach($data['processes'] as $proc)
                                 <tr height="{{ $rowHNum }}">
@@ -363,15 +380,15 @@
                                 </tr>
                             @endforeach
                             <!-- Extra Summary Row matching reference PDF -->
-                            <tr height="28">
-                                <td class="proc-name" height="28">&nbsp;</td>
-                                <td height="28">&nbsp;</td>
-                                <td height="28">&nbsp;</td>
-                                <td height="28">&nbsp;</td>
-                                <td height="28">&nbsp;</td>
-                                <td height="28">&nbsp;</td>
-                                <td height="28">&nbsp;</td>
-                                <td height="28">&nbsp;</td>
+                            <tr height="25">
+                                <td class="proc-name" height="25">&nbsp;</td>
+                                <td height="25">&nbsp;</td>
+                                <td height="25">&nbsp;</td>
+                                <td height="25">&nbsp;</td>
+                                <td height="25">&nbsp;</td>
+                                <td height="25">&nbsp;</td>
+                                <td height="25">&nbsp;</td>
+                                <td height="25">&nbsp;</td>
                             </tr>
                         </tbody>
                     </table>

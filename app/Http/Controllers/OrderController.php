@@ -278,15 +278,41 @@ namespace App\Http\Controllers;
 
                 $query = PcbOrder::with($withRelations);
 
-                // Status Filter
+                // Status Filter (Main order status only)
                 if ($request->filled('status')) {
                     $statusParam = trim($request->input('status'));
                     if (strtolower($statusParam) === 'in production') {
                         $excluded = ['pending', 'completed', 'shipped', 'delivered', 'cancelled', 'canceled'];
-                        $query->whereNotIn('status', $excluded);
+                        $query->where(function ($q) use ($excluded) {
+                            $q->where(function ($sq) use ($excluded) {
+                                $sq->whereNotIn(\Illuminate\Support\Facades\DB::raw('LOWER(TRIM(pcb_orders.status))'), $excluded);
+                                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses') || \Illuminate\Support\Facades\Schema::hasTable('pcb_statuses')) {
+                                    $sq->whereDoesntHave('statusDetails');
+                                }
+                            });
+                            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses') || \Illuminate\Support\Facades\Schema::hasTable('pcb_statuses')) {
+                                $q->orWhereHas('statusDetails', function ($stq) use ($excluded) {
+                                    $stq->whereNotIn(\Illuminate\Support\Facades\DB::raw('LOWER(TRIM(name))'), $excluded)
+                                        ->whereNotIn(\Illuminate\Support\Facades\DB::raw('LOWER(TRIM(slug))'), $excluded);
+                                });
+                            }
+                        });
                     } else if (strtolower($statusParam) !== 'all') {
                         $statusLower = strtolower($statusParam);
-                        $query->whereRaw('LOWER(TRIM(status)) = ?', [$statusLower]);
+                        $query->where(function ($q) use ($statusLower) {
+                            $q->where(function ($sq) use ($statusLower) {
+                                $sq->whereRaw('LOWER(TRIM(pcb_orders.status)) = ?', [$statusLower]);
+                                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses') || \Illuminate\Support\Facades\Schema::hasTable('pcb_statuses')) {
+                                    $sq->whereDoesntHave('statusDetails');
+                                }
+                            });
+                            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses') || \Illuminate\Support\Facades\Schema::hasTable('pcb_statuses')) {
+                                $q->orWhereHas('statusDetails', function ($stq) use ($statusLower) {
+                                    $stq->whereRaw('LOWER(TRIM(name)) = ?', [$statusLower])
+                                        ->orWhereRaw('LOWER(TRIM(slug)) = ?', [$statusLower]);
+                                });
+                            }
+                        });
                     }
                 }
 
@@ -2412,6 +2438,67 @@ namespace App\Http\Controllers;
                 return response()->json([
                     'success' => false,
                     'message' => 'Failed to repeat order: ' . $th->getMessage()
+                ], 500);
+            }
+        }
+
+        public function destroy(Request $request, $id)
+        {
+            $adminId = $request->attributes->get('admin_id');
+            $admin = $adminId ? (\Illuminate\Support\Facades\DB::table('admins')->where('id', $adminId)->first() ?: \Illuminate\Support\Facades\DB::table('users')->where('id', $adminId)->first()) : null;
+            $permissions = $admin ? \App\Http\Controllers\Mobile\MobileAuthController::fetchPermissionsForAdmin($admin) : ['*'];
+
+            if (!in_array('*', $permissions) && !in_array('orders.delete', $permissions) && !in_array('orders.manage', $permissions)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized access: You do not have permission to delete orders.'
+                ], 403);
+            }
+
+            try {
+                $order = PcbOrder::where(function ($q) use ($id) {
+                    if (is_numeric($id)) {
+                        $q->where('id', $id)->orWhere('order_number', $id);
+                    } else {
+                        $q->where('order_number', $id);
+                    }
+                })->first();
+
+                if (!$order) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Order not found.'
+                    ], 404);
+                }
+
+                $orderNumber = $order->order_number;
+                $orderId = $order->id;
+
+                // Execute Soft Delete (Laravel SoftDeletes)
+                $order->delete();
+
+                // Audit Log if pcb_order_logs table exists
+                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_logs')) {
+                    \Illuminate\Support\Facades\DB::table('pcb_order_logs')->insert([
+                        'pcb_order_id' => $orderId,
+                        'order_number' => $orderNumber,
+                        'admin_id'     => $adminId,
+                        'action'       => 'Order Soft Deleted',
+                        'description'  => "Order #{$orderNumber} was moved to deleted state by admin/user ID {$adminId}",
+                        'created_at'   => date('Y-m-d H:i:s'),
+                        'updated_at'   => date('Y-m-d H:i:s'),
+                    ]);
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Order deleted successfully.'
+                ]);
+
+            } catch (\Throwable $th) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Error deleting order: ' . $th->getMessage()
                 ], 500);
             }
         }

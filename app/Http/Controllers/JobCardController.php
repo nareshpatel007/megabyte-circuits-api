@@ -85,13 +85,16 @@ class JobCardController extends Controller
 
             $metaKeys = [
                 'production_note', 'customer_note', 'cutting_size',
-                'final_panel_qty', 'final_board_qty', 'rejected_board_qty', 'why_rejected'
+                'final_panel_qty', 'final_board_qty', 'rejected_board_qty', 'why_rejected',
+                'expose', 'print_and_etch', 'fpt_program', 'second_stage', 'copper_area',
+                'shearing_cut', 'internal_cutouts', 'min_hole', 'panel_size', 'material',
+                'thickness', 'copper_thickness', 'finish', 'mask_colour', 'lp_color', 'lp_side', 'route', 'v_cut'
             ];
             foreach ($metaKeys as $key) {
                 if (isset($jobCardData[$key])) {
                     PcbOrderMeta::updateOrCreate(
                         ['pcb_order_id' => $order->id, 'meta_key' => $key],
-                        ['meta_value' => (string)$jobCardData[$key]]
+                        ['meta_value' => is_bool($jobCardData[$key]) ? ($jobCardData[$key] ? '1' : '0') : (string)$jobCardData[$key]]
                     );
                 }
             }
@@ -547,6 +550,7 @@ class JobCardController extends Controller
 
         return [
             'order_id' => $order->id,
+            'job_card_type' => $isSingleSide ? '1_SIDE' : '2_SIDE',
             'job_number' => $overrides['job_number'] ?? $order->order_number,
             'job_type' => $overrides['job_type'] ?? $jobType,
             'is_single_side' => $overrides['is_single_side'] ?? $isSingleSide,
