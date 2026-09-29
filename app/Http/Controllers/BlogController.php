@@ -649,6 +649,14 @@ class BlogController extends Controller
         $offset = ($page - 1) * $perPage;
         $items  = $query->orderBy('blogs.published_at', 'desc')->skip($offset)->take($perPage)->get();
 
+        // Strip oversized raw base64 data URLs from list to prevent multi-megabyte responses
+        $items->transform(function ($item) {
+            if (isset($item->featured_image) && is_string($item->featured_image) && str_starts_with($item->featured_image, 'data:image/') && strlen($item->featured_image) > 500) {
+                $item->featured_image = null;
+            }
+            return $item;
+        });
+
         return response()->json([
             'status' => true,
             'blogs'  => [
@@ -741,6 +749,14 @@ class BlogController extends Controller
                 ->get(['id', 'title', 'slug', 'excerpt', 'featured_image', 'published_at', 'category', 'reading_time']);
             $related = $related->merge($extra);
         }
+
+        // Clean oversized raw base64 thumbnails from related articles to prevent 3MB payload
+        $related->transform(function ($item) {
+            if (isset($item->featured_image) && is_string($item->featured_image) && str_starts_with($item->featured_image, 'data:image/') && strlen($item->featured_image) > 500) {
+                $item->featured_image = null;
+            }
+            return $item;
+        });
 
         return response()->json([
             'status'      => true,
