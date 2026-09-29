@@ -260,10 +260,13 @@ class AdminProfileController extends Controller
                 ->select('admins.*', 'roles.name as role_name')
                 ->first();
 
+            $formatted = $this->formatAdminData($updatedAdmin);
             return response()->json([
                 'status' => true,
                 'message' => 'Profile picture updated successfully.',
-                'data' => $this->formatAdminData($updatedAdmin)
+                'avatar_url' => $formatted['avatar_url'] ?? null,
+                'profile_picture' => $formatted['profile_picture'] ?? null,
+                'data' => $formatted
             ]);
 
         } catch (\Throwable $th) {
@@ -306,10 +309,13 @@ class AdminProfileController extends Controller
                 ->select('admins.*', 'roles.name as role_name')
                 ->first();
 
+            $formatted = $this->formatAdminData($updatedAdmin);
             return response()->json([
                 'status' => true,
                 'message' => 'Profile picture removed successfully.',
-                'data' => $this->formatAdminData($updatedAdmin)
+                'avatar_url' => null,
+                'profile_picture' => null,
+                'data' => $formatted
             ]);
 
         } catch (\Throwable $th) {
