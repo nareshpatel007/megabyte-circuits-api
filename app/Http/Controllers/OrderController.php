@@ -725,6 +725,19 @@ namespace App\Http\Controllers;
                         $oldPn = $order->pn_number ?? 'N/A';
                         $order->pn_number = $newPn !== '' ? $newPn : null;
                         $changesLog[] = "P/N Number: '{$oldPn}' → '" . ($newPn !== '' ? $newPn : 'Empty') . "'";
+
+                        if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_meta')) {
+                            \Illuminate\Support\Facades\DB::table('pcb_order_meta')
+                                ->where('pcb_order_id', $order->id)
+                                ->where(function ($mq) use ($oldPn) {
+                                    $mq->whereIn('meta_key', ['pn_number', 'p_n', 'part_number'])
+                                       ->orWhere(function ($bmq) use ($oldPn) {
+                                           $bmq->where('meta_key', 'board_name')
+                                               ->where('meta_value', $oldPn);
+                                       });
+                                })
+                                ->update(['meta_value' => $newPn !== '' ? $newPn : '']);
+                        }
                     }
                 }
 

@@ -464,9 +464,6 @@ class CheckoutController extends Controller
                     'quotation_source' => $quotationSource,
                     'jlcpcb_file_key' => $jlcFileKey,
                     'jlcpcb_quotation_snapshot' => $jlcSnapshotJson,
-                    'source_order_id' => $sourceOrderId,
-                    'source_order_number' => $parentOrderNumber,
-                    'is_reorder' => $isReorder,
                     'user_id' => $userId,
                     'transaction_id' => $transactionId,
                     'shipping_address_id' => $shippingAddressId,
@@ -482,6 +479,16 @@ class CheckoutController extends Controller
                     'created_at' => date('Y-m-d H:i:s'),
                     'updated_at' => date('Y-m-d H:i:s')
                 ];
+
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'source_order_id')) {
+                    $orderData['source_order_id'] = $sourceOrderId;
+                }
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'source_order_number')) {
+                    $orderData['source_order_number'] = $parentOrderNumber;
+                }
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'is_reorder')) {
+                    $orderData['is_reorder'] = $isReorder;
+                }
 
                 if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'board_name')) {
                     $orderData['board_name'] = $boardName;
@@ -534,6 +541,7 @@ class CheckoutController extends Controller
                         'parent_order_number' => $parentOrderNumber,
                     ];
                 } else {
+                    $baseMat = $item['baseMaterial'] ?? ($item['material'] ?? 'FR-4');
                     $metaFields = [
                         'board_name' => $boardName,
                         'order_type' => $orderType,
@@ -542,8 +550,8 @@ class CheckoutController extends Controller
                         'jlcpcb_price' => $item['jlcpcb_price'] ?? null,
                         'jlcpcb_quotation_snapshot' => $jlcSnapshotJson,
                         'product_type' => $productType,
-                        'base_material' => $item['baseMaterial'] ?? ($item['material'] ?? 'FR-4'),
-                        'material_type' => $item['materialType'] ?? ($item['baseMaterial'] === "Flex" ? "Polyimide (PI)" : ($item['baseMaterial'] === "Rogers" ? "RO4350B(Dk=3.48,Df=0.0037)" : ($item['baseMaterial'] === "PTFE Teflon" ? "ZYF300CA-P(Dk=3.0,Df=0.0016)" : "FR4-TG135"))),
+                        'base_material' => $baseMat,
+                        'material_type' => $item['materialType'] ?? ($baseMat === "Flex" ? "Polyimide (PI)" : ($baseMat === "Rogers" ? "RO4350B(Dk=3.48,Df=0.0037)" : ($baseMat === "PTFE Teflon" ? "ZYF300CA-P(Dk=3.0,Df=0.0016)" : "FR4-TG135"))),
                         'substrate_type' => $item['substrateType'] ?? '',
                         'copper_type' => $item['copperType'] ?? '',
                         'coverlay_color' => $item['coverlayColor'] ?? '',

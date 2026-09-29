@@ -1227,7 +1227,6 @@ class OrderImportService
             'customer_name'    => 'customer_name',
             'layer'            => 'layer',
             'mask'             => 'solder_mask',
-            'p_n'              => 'part_number',
             'production_noted' => 'production_noted',
             'qty'              => 'qty',
             'launch_qty'       => 'launch_qty',
@@ -1278,21 +1277,6 @@ class OrderImportService
             ];
         }
 
-        // Additional aliases for seamless frontend compatibility
-        if (!empty($data['p_n'])) {
-            foreach (['board_name', 'p_n'] as $aliasKey) {
-                if (!isset($addedKeys[$aliasKey])) {
-                    $addedKeys[$aliasKey] = true;
-                    $metaRows[] = [
-                        'pcb_order_id' => $orderId,
-                        'meta_key'     => $aliasKey,
-                        'meta_value'   => (string)$data['p_n'],
-                        'created_at'   => $now,
-                        'updated_at'   => $now,
-                    ];
-                }
-            }
-        }
         if (!empty($data['mask'])) {
             foreach (['mask', 'pcb_color'] as $aliasKey) {
                 if (!isset($addedKeys[$aliasKey])) {

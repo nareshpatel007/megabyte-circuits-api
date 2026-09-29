@@ -52,16 +52,20 @@ class DeliveryCalendarService
     {
         $dateStr = $date instanceof Carbon ? $date->format('Y-m-d') : Carbon::parse($date)->format('Y-m-d');
 
-        if ($holidays === null) {
-            return Holiday::where('is_active', true)
-                ->where('date', $dateStr)
-                ->first();
-        }
+        try {
+            if ($holidays === null) {
+                return Holiday::where('is_active', true)
+                    ->where('date', $dateStr)
+                    ->first();
+            }
 
-        return $holidays->first(function ($holiday) use ($dateStr) {
-            $hDate = $holiday->date instanceof Carbon ? $holiday->date->format('Y-m-d') : (string)$holiday->date;
-            return $hDate === $dateStr;
-        });
+            return $holidays->first(function ($holiday) use ($dateStr) {
+                $hDate = $holiday->date instanceof Carbon ? $holiday->date->format('Y-m-d') : (string)$holiday->date;
+                return $hDate === $dateStr;
+            });
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     /**

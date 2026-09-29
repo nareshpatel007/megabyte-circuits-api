@@ -403,6 +403,7 @@ class MobileOrderController extends Controller
                 return [
                     'id' => (string) $order->id,
                     'tool' => $order->order_number ?? ('M' . $order->id),
+                    'order_number' => $order->order_number ?? ('M' . $order->id),
                     'status' => ucfirst($displayStatus),
                     'film' => isset($metaMap['film']) ? (bool)$metaMap['film'] : false,
                     'film_applied' => isset($order->film_applied) ? (bool)$order->film_applied : (isset($metaMap['film_applied']) ? (bool)$metaMap['film_applied'] : false),

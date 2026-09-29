@@ -81,7 +81,7 @@ class PcbOrder extends Model
             'pcb_order_combos',
             'parent_order_id',
             'combo_order_id'
-        )->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status', 'pcb_orders.customer_name');
+        )->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status', 'pcb_orders.pn_number');
     }
 
     // Combo Parent Record
@@ -98,7 +98,7 @@ class PcbOrder extends Model
             'pcb_order_old_orders',
             'order_id',
             'old_order_id'
-        )->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status', 'pcb_orders.customer_name');
+        )->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status', 'pcb_orders.pn_number');
     }
 
     // Reverse relationship (Orders that reference this order as their old order)
@@ -109,7 +109,7 @@ class PcbOrder extends Model
             'pcb_order_old_orders',
             'old_order_id',
             'order_id'
-        )->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status', 'pcb_orders.customer_name');
+        )->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status', 'pcb_orders.pn_number');
     }
 
     protected $casts = [
