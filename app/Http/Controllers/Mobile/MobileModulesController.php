@@ -74,38 +74,106 @@ class MobileModulesController extends Controller
                 ]);
             }
 
-            $query = DB::table('payment_transactions')
-                ->leftJoin('users', 'payment_transactions.user_id', '=', 'users.id')
-                ->select([
-                    'payment_transactions.id',
-                    'payment_transactions.transaction_number',
-                    'payment_transactions.amount',
-                    'payment_transactions.currency',
-                    'payment_transactions.status',
-                    'payment_transactions.payment_method',
-                    'payment_transactions.created_at',
-                    'users.name as client_name',
-                    'users.email as client_email',
-                ]);
+            $userTable = Schema::hasTable('pcb_users') ? 'pcb_users' : 'users';
+            $ordersTable = Schema::hasTable('pcb_orders') ? 'pcb_orders' : (Schema::hasTable('orders') ? 'orders' : null);
 
-            if ($search = $request->input('search')) {
-                $query->where(function ($q) use ($search) {
+            $query = DB::table('payment_transactions');
+
+            if ($ordersTable) {
+                $query->leftJoin($ordersTable, 'payment_transactions.id', '=', "{$ordersTable}.transaction_id")
+                    ->leftJoin($userTable, function ($join) use ($userTable, $ordersTable) {
+                        $join->on(DB::raw("COALESCE(payment_transactions.user_id, {$ordersTable}.user_id)"), '=', "{$userTable}.id");
+                    })
+                    ->select([
+                        'payment_transactions.*',
+                        "{$userTable}.name as client_name",
+                        "{$userTable}.email as client_email",
+                        "{$ordersTable}.id as order_id",
+                        "{$ordersTable}.order_number as order_number",
+                        "{$ordersTable}.order_value as order_value",
+                    ]);
+            } else {
+                $query->leftJoin($userTable, 'payment_transactions.user_id', '=', "{$userTable}.id")
+                    ->select([
+                        'payment_transactions.*',
+                        "{$userTable}.name as client_name",
+                        "{$userTable}.email as client_email",
+                    ]);
+            }
+
+            if ($search = trim($request->input('search', ''))) {
+                $query->where(function ($q) use ($search, $userTable, $ordersTable) {
                     $q->where('payment_transactions.transaction_number', 'like', "%{$search}%")
-                        ->orWhere('users.name', 'like', "%{$search}%")
-                        ->orWhere('users.email', 'like', "%{$search}%");
+                        ->orWhere('payment_transactions.razorpay_payment_id', 'like', "%{$search}%")
+                        ->orWhere('payment_transactions.razorpay_order_id', 'like', "%{$search}%")
+                        ->orWhere("{$userTable}.name", 'like', "%{$search}%")
+                        ->orWhere("{$userTable}.email", 'like', "%{$search}%");
+                    if ($ordersTable) {
+                        $q->orWhere("{$ordersTable}.order_number", 'like', "%{$search}%");
+                    }
                 });
             }
 
-            if ($status = $request->input('status')) {
-                $query->where('payment_transactions.status', $status);
+            if ($status = trim($request->input('status', ''))) {
+                $statusLower = strtolower($status);
+                if (in_array($statusLower, ['completed', 'paid', 'success'])) {
+                    $query->whereIn(DB::raw('LOWER(payment_transactions.status)'), ['success', 'paid', 'completed']);
+                } elseif (in_array($statusLower, ['failed', 'failure', 'fail'])) {
+                    $query->whereIn(DB::raw('LOWER(payment_transactions.status)'), ['failed', 'failure', 'fail']);
+                } elseif ($statusLower === 'pending') {
+                    $query->whereIn(DB::raw('LOWER(payment_transactions.status)'), ['pending', 'initiated', 'processing']);
+                } else {
+                    $query->where('payment_transactions.status', $status);
+                }
             }
 
             $perPage = (int) $request->input('per_page', 20);
             $payments = $query->orderBy('payment_transactions.id', 'desc')->paginate($perPage);
 
+            $transformedData = collect($payments->items())->map(function ($p) {
+                $payloadData = [];
+                if (!empty($p->payload)) {
+                    $payloadData = is_string($p->payload) ? json_decode($p->payload, true) : (array)$p->payload;
+                }
+
+                $rawStatus = strtolower($p->status ?? 'pending');
+                $normalizedStatus = 'Pending';
+                if (in_array($rawStatus, ['success', 'paid', 'completed'])) {
+                    $normalizedStatus = 'Completed';
+                } elseif (in_array($rawStatus, ['failed', 'failure', 'fail'])) {
+                    $normalizedStatus = 'Failed';
+                }
+
+                $orderNumber = $p->order_number ?? ($payloadData['order_number'] ?? null);
+                $clientName = $p->client_name ?? ($payloadData['customer_name'] ?? ($payloadData['name'] ?? null));
+                $clientEmail = $p->client_email ?? ($payloadData['customer_email'] ?? ($payloadData['email'] ?? null));
+
+                return [
+                    'id' => $p->id,
+                    'transaction_number' => $p->transaction_number,
+                    'razorpay_payment_id' => $p->razorpay_payment_id ?? null,
+                    'razorpay_order_id' => $p->razorpay_order_id ?? null,
+                    'amount' => (float)$p->amount,
+                    'total_amount' => (float)($p->amount ?? ($p->order_value ?? 0)),
+                    'order_value' => isset($p->order_value) ? (float)$p->order_value : (float)$p->amount,
+                    'advance_payment' => (float)$p->amount,
+                    'currency' => $p->currency ?? 'INR',
+                    'status' => $p->status,
+                    'payment_status' => $normalizedStatus,
+                    'payment_method' => $p->payment_method ?? 'Online',
+                    'order_id' => $p->order_id ?? null,
+                    'order_number' => $orderNumber,
+                    'client_name' => $clientName ?: 'Direct Client',
+                    'client_email' => $clientEmail,
+                    'user_name' => $clientName ?: 'Direct Client',
+                    'user_email' => $clientEmail,
+                    'created_at' => $p->created_at,
+                ];
+            });
+
             return response()->json([
                 'success' => true,
-                'data' => $payments->items(),
+                'data' => $transformedData,
                 'meta' => [
                     'current_page' => $payments->currentPage(),
                     'last_page' => $payments->lastPage(),

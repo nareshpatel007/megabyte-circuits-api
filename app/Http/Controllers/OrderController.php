@@ -453,11 +453,16 @@ namespace App\Http\Controllers;
                 $page = max(1, intval($request->input('page', 1)));
                 $perPageInput = $request->input('per_page', $request->input('limit', 10));
 
-                if ($perPageInput === 'all' || (is_numeric($perPageInput) && intval($perPageInput) <= 0)) {
-                    $perPage = $totalFiltered > 0 ? $totalFiltered : 10;
-                    $orders = $query->get();
+                if ($perPageInput === 'all' && $request->boolean('allow_all', false)) {
+                    $perPage = min(500, max(1, $totalFiltered));
+                    $orders = $query->take($perPage)->get();
                 } else {
-                    $perPage = max(1, intval($perPageInput));
+                    $perPageVal = intval($perPageInput);
+                    if ($perPageVal <= 0) {
+                        $perPageVal = 10;
+                    }
+                    // Cap per page items to a maximum of 100 to ensure fast paginated delivery
+                    $perPage = min(100, max(5, $perPageVal));
                     $orders = $query->skip(($page - 1) * $perPage)->take($perPage)->get();
                 }
 
