@@ -134,19 +134,6 @@
             text-align: left !important;
             padding-left: 6px !important;
         }
-        .checkbox-sq {
-            display: inline-block;
-            width: 14px;
-            height: 14px;
-            border: 1.5px solid #000000;
-            text-align: center;
-            line-height: 12px;
-            font-size: 11pt;
-            font-weight: bold;
-            margin-left: 3px;
-            vertical-align: middle;
-            font-family: DejaVu Sans, Arial, sans-serif;
-        }
         .val {
             font-weight: normal;
             margin-left: 3px;
@@ -162,18 +149,11 @@
             <!-- Header Row: JOB NO & Board Type -->
             <tr class="b-bottom-2">
                 @if(!empty($data['is_single_side']))
-                    <td class="b-right-2" style="width: 40%; padding: 4px 6px;">
+                    <td colspan="2" class="b-right-2" style="width: 70%; padding: 4px 6px;">
                         <span class="job-no-title">JOB NO:</span>
                         <span class="job-no-value">{{ $data['job_number'] }}</span>
                     </td>
-                    <td class="b-right-2 text-center" style="width: 38%; padding: 4px 6px;">
-                        <span style="font-size: 11pt; font-weight: bold;">Expose</span>
-                        <span class="checkbox-sq">{{ !empty($data['expose']) ? '✓' : '' }}</span>
-                        &nbsp;&nbsp;&nbsp;
-                        <span style="font-size: 11pt; font-weight: bold;">Print &amp; Etch</span>
-                        <span class="checkbox-sq">{{ !empty($data['print_and_etch']) ? '✓' : '' }}</span>
-                    </td>
-                    <td class="text-right type-title" style="width: 22%; padding: 4px 6px;">
+                    <td class="text-right type-title" style="width: 30%; padding: 4px 6px;">
                         1- SIDE<br><span style="font-size: 12pt; font-weight: bold;">JOB CARD</span>
                     </td>
                 @else

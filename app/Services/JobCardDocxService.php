@@ -60,22 +60,26 @@ class JobCardDocxService
 
         $headerBg = '000000';
 
-        // Helper function for safe non-empty text
+        // Helper function for safe non-empty text (strips invalid XML control characters)
         $safeText = function ($text, $fallback = '') {
-            $str = trim((string)$text);
-            return $str !== '' ? $str : $fallback;
+            if ($text === null) return $fallback;
+            $str = (string)$text;
+            // Strip XML control characters (0x00-0x08, 0x0B-0x0C, 0x0E-0x1F, 0x7F)
+            $clean = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $str);
+            $clean = trim($clean);
+            return $clean !== '' ? $clean : $fallback;
         };
 
         // Format dimension units (MM)
-        $formatMm = function ($val) {
-            $v = trim((string)$val);
+        $formatMm = function ($val) use ($safeText) {
+            $v = $safeText($val);
             if ($v === '') return '';
             return str_contains(strtoupper($v), 'MM') ? $v : $v . ' MM';
         };
 
         // Format copper thickness units (Micron / oz)
-        $formatCopper = function ($val) {
-            $v = trim((string)$val);
+        $formatCopper = function ($val) use ($safeText) {
+            $v = $safeText($val);
             if ($v === '') return '';
             $u = strtoupper($v);
             if (str_contains($u, 'MICRON') || str_contains($u, 'OZ') || str_contains($u, 'µM')) {
@@ -161,14 +165,14 @@ class JobCardDocxService
         $cNotes1->addText('Production Note:', ['bold' => true, 'size' => 8.5, 'underline' => 'single']);
         $prodNotes = $safeText($jobCardData['production_note'] ?? "• \n• ");
         foreach (explode("\n", $prodNotes) as $nLine) {
-            $cNotes1->addText($nLine, ['size' => 8.0]);
+            $cNotes1->addText($safeText($nLine), ['size' => 8.0]);
         }
 
         $cNotes2 = $notesRow->addCell(4400, ['valign' => VerticalJc::TOP]);
         $cNotes2->addText('Customer Special Note:', ['bold' => true, 'size' => 8.5, 'underline' => 'single']);
         $custNotes = $safeText($jobCardData['customer_note'] ?? '');
         foreach (explode("\n", $custNotes) as $cLine) {
-            $cNotes2->addText($cLine, ['size' => 8.0]);
+            $cNotes2->addText($safeText($cLine), ['size' => 8.0]);
         }
 
         // 9. Final Qty & Rejection Summary Table (4 Columns)
@@ -262,11 +266,16 @@ class JobCardDocxService
                             $section->addTextBreak(1);
 
                             try {
-                                $attachedPhpWord = IOFactory::load($docPath);
-                                foreach ($attachedPhpWord->getSections() as $attachedSec) {
-                                    foreach ($attachedSec->getElements() as $element) {
-                                        $this->appendElementToSection($section, $element);
+                                $docxText = $this->extractTextFromDocx($docPath);
+                                if (!empty($docxText)) {
+                                    foreach (explode("\n", $docxText) as $line) {
+                                        $cleanLine = $safeText($line);
+                                        if ($cleanLine !== '') {
+                                            $section->addText($cleanLine, ['size' => 9.0]);
+                                        }
                                     }
+                                } else {
+                                    $section->addText('[ Attached Word Document: ' . $safeText($doc->original_name) . ' ]', ['bold' => true, 'size' => 10]);
                                 }
                             } catch (\Throwable $e) {
                                 $section->addText('[ Attached Word Document: ' . $safeText($doc->original_name) . ' ]', ['bold' => true, 'size' => 10]);
@@ -299,9 +308,9 @@ class JobCardDocxService
                                     if (!empty($text)) {
                                         $lines = explode("\n", $text);
                                         foreach ($lines as $line) {
-                                            $line = trim($line);
-                                            if ($line !== '') {
-                                                $section->addText($line, ['size' => 9.0]);
+                                            $cleanLine = $safeText($line);
+                                            if ($cleanLine !== '') {
+                                                $section->addText($cleanLine, ['size' => 9.0]);
                                             }
                                         }
                                     } else {
@@ -329,6 +338,27 @@ class JobCardDocxService
         @unlink($tempPath);
 
         return $content;
+    }
+
+    /**
+     * Safely extract plain text from an attached DOCX file without corrupting XML relationships.
+     */
+    private function extractTextFromDocx(string $docxPath): string
+    {
+        try {
+            $zip = new \ZipArchive();
+            if ($zip->open($docxPath) === true) {
+                if (($index = $zip->locateName('word/document.xml')) !== false) {
+                    $data = $zip->getFromIndex($index);
+                    $zip->close();
+                    $text = strip_tags($data);
+                    return preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', (string)$text);
+                }
+                $zip->close();
+            }
+        } catch (\Throwable $e) {
+        }
+        return '';
     }
 
     /**

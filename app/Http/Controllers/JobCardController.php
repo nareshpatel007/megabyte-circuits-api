@@ -86,7 +86,7 @@ class JobCardController extends Controller
             $metaKeys = [
                 'production_note', 'customer_note', 'cutting_size',
                 'final_panel_qty', 'final_board_qty', 'rejected_board_qty', 'why_rejected',
-                'expose', 'print_and_etch', 'fpt_program', 'second_stage', 'copper_area',
+                'fpt_program', 'second_stage', 'copper_area',
                 'shearing_cut', 'internal_cutouts', 'min_hole', 'panel_size', 'material',
                 'thickness', 'copper_thickness', 'finish', 'mask_colour', 'lp_color', 'lp_side', 'route', 'v_cut'
             ];
@@ -554,8 +554,6 @@ class JobCardController extends Controller
             'job_number' => $overrides['job_number'] ?? $order->order_number,
             'job_type' => $overrides['job_type'] ?? $jobType,
             'is_single_side' => $overrides['is_single_side'] ?? $isSingleSide,
-            'expose' => isset($overrides['expose']) ? (bool)$overrides['expose'] : true,
-            'print_and_etch' => isset($overrides['print_and_etch']) ? (bool)$overrides['print_and_etch'] : false,
             'order_date' => $this->formatDateOnly($overrides['order_date'] ?? null, $createdDate),
             'launch_date' => $this->formatDateOnly($overrides['launch_date'] ?? null, $launchDate),
             'shipping_date' => $this->formatDateOnly($overrides['shipping_date'] ?? null, $shippingDate),

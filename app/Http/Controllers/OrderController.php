@@ -2446,7 +2446,15 @@ namespace App\Http\Controllers;
         {
             $adminId = $request->attributes->get('admin_id');
             $admin = $adminId ? (\Illuminate\Support\Facades\DB::table('admins')->where('id', $adminId)->first() ?: \Illuminate\Support\Facades\DB::table('users')->where('id', $adminId)->first()) : null;
-            $permissions = $admin ? \App\Http\Controllers\Mobile\MobileAuthController::fetchPermissionsForAdmin($admin) : ['*'];
+
+            if (!$admin) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthenticated or invalid admin session.'
+                ], 401);
+            }
+
+            $permissions = \App\Http\Controllers\Mobile\MobileAuthController::fetchPermissionsForAdmin($admin);
 
             if (!in_array('*', $permissions) && !in_array('orders.delete', $permissions) && !in_array('orders.manage', $permissions)) {
                 return response()->json([
@@ -2456,7 +2464,7 @@ namespace App\Http\Controllers;
             }
 
             try {
-                $order = PcbOrder::where(function ($q) use ($id) {
+                $order = PcbOrder::withTrashed()->where(function ($q) use ($id) {
                     if (is_numeric($id)) {
                         $q->where('id', $id)->orWhere('order_number', $id);
                     } else {
@@ -2471,20 +2479,28 @@ namespace App\Http\Controllers;
                     ], 404);
                 }
 
+                if ($order->trashed()) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Order is already deleted.'
+                    ], 404);
+                }
+
                 $orderNumber = $order->order_number;
                 $orderId = $order->id;
 
-                // Execute Soft Delete (Laravel SoftDeletes)
+                // Execute Soft Delete only (Laravel SoftDeletes)
                 $order->delete();
 
-                // Audit Log if pcb_order_logs table exists
+                // Audit Log in pcb_order_logs table
                 if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_logs')) {
+                    $adminName = $request->attributes->get('admin_name') ?: ($admin->name ?? "Admin #{$adminId}");
                     \Illuminate\Support\Facades\DB::table('pcb_order_logs')->insert([
                         'pcb_order_id' => $orderId,
                         'order_number' => $orderNumber,
                         'admin_id'     => $adminId,
                         'action'       => 'Order Soft Deleted',
-                        'description'  => "Order #{$orderNumber} was moved to deleted state by admin/user ID {$adminId}",
+                        'description'  => "Order #{$orderNumber} was soft deleted by {$adminName}",
                         'created_at'   => date('Y-m-d H:i:s'),
                         'updated_at'   => date('Y-m-d H:i:s'),
                     ]);
@@ -2492,7 +2508,7 @@ namespace App\Http\Controllers;
 
                 return response()->json([
                     'success' => true,
-                    'message' => 'Order deleted successfully.'
+                    'message' => "Order #{$orderNumber} deleted successfully."
                 ]);
 
             } catch (\Throwable $th) {
