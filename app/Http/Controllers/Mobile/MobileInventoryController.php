@@ -206,4 +206,128 @@ class MobileInventoryController extends Controller
             return response()->json(['success' => false, 'message' => $th->getMessage()], 500);
         }
     }
+
+    public function store(Request $request)
+    {
+        $adminId = $request->attributes->get('admin_id');
+        $admin = $adminId ? (DB::table('admins')->where('id', $adminId)->first() ?: DB::table('users')->where('id', $adminId)->first()) : null;
+        $permissions = $admin ? MobileAuthController::fetchPermissionsForAdmin($admin) : [];
+
+        if (!in_array('*', $permissions) && !in_array('inventory.create', $permissions) && !in_array('inventory.manage', $permissions)) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to create inventory items.'], 403);
+        }
+
+        try {
+            $name = trim($request->input('name', ''));
+            if (empty($name)) {
+                return response()->json(['success' => false, 'message' => 'Item name is required.'], 422);
+            }
+
+            $sku = trim($request->input('sku', 'SKU-' . time()));
+            $category = trim($request->input('category', 'General'));
+            $supplier = trim($request->input('supplier', 'Default Vendor'));
+            $qty = (int) $request->input('quantity', 0);
+            $threshold = (int) $request->input('threshold', 50);
+            $maxStock = (int) $request->input('maxStock', $threshold * 4);
+            $unitPrice = (float) $request->input('unitPrice', 0.0);
+            $location = trim($request->input('location', 'Warehouse A'));
+
+            $id = DB::table('inventory_items')->insertGetId([
+                'sku' => $sku,
+                'name' => $name,
+                'category' => $category,
+                'supplier' => $supplier,
+                'available_quantity' => $qty,
+                'low_stock_threshold' => $threshold,
+                'max_stock' => $maxStock,
+                'unit_price' => $unitPrice,
+                'location' => $location,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s')
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Inventory item created successfully.',
+                'data' => [
+                    'id' => (string)$id,
+                    'sku' => $sku,
+                    'name' => $name,
+                    'category' => $category,
+                    'supplier' => $supplier,
+                    'quantity' => $qty,
+                    'threshold' => $threshold,
+                    'maxStock' => $maxStock,
+                    'unitPrice' => $unitPrice,
+                    'location' => $location,
+                ]
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['success' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function update(Request $request, $id)
+    {
+        $adminId = $request->attributes->get('admin_id');
+        $admin = $adminId ? (DB::table('admins')->where('id', $adminId)->first() ?: DB::table('users')->where('id', $adminId)->first()) : null;
+        $permissions = $admin ? MobileAuthController::fetchPermissionsForAdmin($admin) : [];
+
+        if (!in_array('*', $permissions) && !in_array('inventory.edit', $permissions) && !in_array('inventory.manage', $permissions)) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to edit inventory items.'], 403);
+        }
+
+        try {
+            $item = DB::table('inventory_items')->where('id', $id)->first();
+            if (!$item) {
+                return response()->json(['success' => false, 'message' => 'Inventory item not found.'], 404);
+            }
+
+            $updateData = ['updated_at' => date('Y-m-d H:i:s')];
+            if ($request->has('name')) $updateData['name'] = trim($request->input('name'));
+            if ($request->has('sku')) $updateData['sku'] = trim($request->input('sku'));
+            if ($request->has('category')) $updateData['category'] = trim($request->input('category'));
+            if ($request->has('supplier')) $updateData['supplier'] = trim($request->input('supplier'));
+            if ($request->has('quantity')) $updateData['available_quantity'] = (int)$request->input('quantity');
+            if ($request->has('threshold')) $updateData['low_stock_threshold'] = (int)$request->input('threshold');
+            if ($request->has('unitPrice')) $updateData['unit_price'] = (float)$request->input('unitPrice');
+            if ($request->has('location')) $updateData['location'] = trim($request->input('location'));
+
+            DB::table('inventory_items')->where('id', $id)->update($updateData);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Inventory item updated successfully.'
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['success' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function destroy(Request $request, $id)
+    {
+        $adminId = $request->attributes->get('admin_id');
+        $admin = $adminId ? (DB::table('admins')->where('id', $adminId)->first() ?: DB::table('users')->where('id', $adminId)->first()) : null;
+        $permissions = $admin ? MobileAuthController::fetchPermissionsForAdmin($admin) : [];
+
+        if (!in_array('*', $permissions) && !in_array('inventory.delete', $permissions) && !in_array('inventory.manage', $permissions)) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to delete inventory items.'], 403);
+        }
+
+        try {
+            $item = DB::table('inventory_items')->where('id', $id)->first();
+            if (!$item) {
+                return response()->json(['success' => false, 'message' => 'Inventory item not found.'], 404);
+            }
+
+            DB::table('inventory_items')->where('id', $id)->update(['deleted_at' => date('Y-m-d H:i:s')]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Inventory item deleted successfully.'
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['success' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
 }

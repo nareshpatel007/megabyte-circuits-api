@@ -825,4 +825,114 @@ class MobileOrderController extends Controller
         $raw = $order->mask ?? $metaMap['mask_color'] ?? $metaMap['pcb_color'] ?? $metaMap['solder_mask'] ?? $metaMap['mask'] ?? $metaMap['coverlay_color'] ?? null;
         return ($raw !== null && trim((string)$raw) !== '') ? (string)$raw : 'Green';
     }
+
+    public function store(Request $request)
+    {
+        $adminId = $request->attributes->get('admin_id');
+        $admin = $adminId ? (DB::table('admins')->where('id', $adminId)->first() ?: DB::table('users')->where('id', $adminId)->first()) : null;
+        $permissions = $admin ? MobileAuthController::fetchPermissionsForAdmin($admin) : [];
+
+        if (!in_array('*', $permissions) && !in_array('orders.create', $permissions) && !in_array('orders.manage', $permissions)) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to create orders.'], 403);
+        }
+
+        try {
+            $customerName = trim($request->input('customer_name', $request->input('client', 'Apex Controls')));
+            $boardName = trim($request->input('board_name', $request->input('boardName', 'PCB Design')));
+            $quantity = (int) $request->input('quantity', 100);
+            $status = trim($request->input('status', 'In Production'));
+
+            $orderId = DB::table('pcb_orders')->insertGetId([
+                'customer_name' => $customerName,
+                'board_name' => $boardName,
+                'order_qty' => $quantity,
+                'launch_qty' => $quantity,
+                'status' => $status,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s')
+            ]);
+
+            $orderNumber = 'M' . str_pad($orderId, 4, '0', STR_PAD_LEFT);
+            DB::table('pcb_orders')->where('id', $orderId)->update(['order_number' => $orderNumber]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Order created successfully',
+                'data' => [
+                    'id' => (string)$orderId,
+                    'order_number' => $orderNumber,
+                    'customer_name' => $customerName,
+                    'board_name' => $boardName,
+                    'quantity' => $quantity,
+                    'status' => $status
+                ]
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['success' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function update(Request $request, $id)
+    {
+        $adminId = $request->attributes->get('admin_id');
+        $admin = $adminId ? (DB::table('admins')->where('id', $adminId)->first() ?: DB::table('users')->where('id', $adminId)->first()) : null;
+        $permissions = $admin ? MobileAuthController::fetchPermissionsForAdmin($admin) : [];
+
+        if (!in_array('*', $permissions) && !in_array('orders.edit', $permissions) && !in_array('orders.manage', $permissions)) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to edit orders.'], 403);
+        }
+
+        try {
+            $order = DB::table('pcb_orders')->where('id', $id)->first();
+            if (!$order) {
+                return response()->json(['success' => false, 'message' => 'Order not found.'], 404);
+            }
+
+            $updateData = ['updated_at' => date('Y-m-d H:i:s')];
+            if ($request->has('customer_name')) $updateData['customer_name'] = trim($request->input('customer_name'));
+            if ($request->has('board_name')) $updateData['board_name'] = trim($request->input('board_name'));
+            if ($request->has('quantity')) {
+                $qty = (int)$request->input('quantity');
+                $updateData['order_qty'] = $qty;
+                $updateData['launch_qty'] = $qty;
+            }
+            if ($request->has('status')) $updateData['status'] = trim($request->input('status'));
+
+            DB::table('pcb_orders')->where('id', $id)->update($updateData);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Order updated successfully'
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['success' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function destroy(Request $request, $id)
+    {
+        $adminId = $request->attributes->get('admin_id');
+        $admin = $adminId ? (DB::table('admins')->where('id', $adminId)->first() ?: DB::table('users')->where('id', $adminId)->first()) : null;
+        $permissions = $admin ? MobileAuthController::fetchPermissionsForAdmin($admin) : [];
+
+        if (!in_array('*', $permissions) && !in_array('orders.delete', $permissions) && !in_array('orders.manage', $permissions)) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to delete orders.'], 403);
+        }
+
+        try {
+            $order = DB::table('pcb_orders')->where('id', $id)->first();
+            if (!$order) {
+                return response()->json(['success' => false, 'message' => 'Order not found.'], 404);
+            }
+
+            DB::table('pcb_orders')->where('id', $id)->update(['deleted_at' => date('Y-m-d H:i:s')]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Order deleted successfully'
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json(['success' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
 }

@@ -1221,151 +1221,172 @@ namespace App\Http\Controllers;
                     ], 422);
                 }
 
-                $userId = $request->input('user_id');
-                if (empty($userId) || $userId == 0) {
-                    $userId = null;
-                }
+                return \Illuminate\Support\Facades\DB::transaction(function () use ($request) {
+                    $userId = $request->input('user_id');
+                    if (empty($userId) || $userId == 0) {
+                        $userId = null;
+                    }
 
-                $reqSource = strtolower(trim((string)($request->input('quotation_source') ?? $request->input('order_type') ?? '')));
-                if (empty($reqSource)) {
-                    $layersNum = (int) preg_replace('/[^0-9]/', '', (string)($request->input('layers') ?? '2'));
-                    $reqSource = ($layersNum > 2 || $request->filled('jlcpcb_file_key')) ? 'jlcpcb' : 'internal';
-                }
-                $reqOrderType = ($reqSource === 'jlcpcb') ? 'jlcpcb' : 'normal';
-                $series = ($reqOrderType === 'jlcpcb') ? 'JL' : 'M';
-                $orderNumber = \App\Services\OrderNumberService::generateOrderNumber($series);
+                    $reqSource = strtolower(trim((string)($request->input('quotation_source') ?? $request->input('order_type') ?? '')));
+                    if (empty($reqSource)) {
+                        $layersNum = (int) preg_replace('/[^0-9]/', '', (string)($request->input('layers') ?? '2'));
+                        $reqSource = ($layersNum > 2 || $request->filled('jlcpcb_file_key')) ? 'jlcpcb' : 'internal';
+                    }
+                    $reqOrderType = ($reqSource === 'jlcpcb') ? 'jlcpcb' : 'normal';
+                    $series = ($reqOrderType === 'jlcpcb') ? 'JL' : 'M';
+                    $orderNumber = \App\Services\OrderNumberService::generateOrderNumber($series);
 
-                // Handle Gerber file upload
-                $gerberFileId = null;
-                $gerberFileUrl = null;
-                $gerberFileName = null;
-                $gerberFileSize = null;
+                    // Handle Gerber file upload
+                    $gerberFileId = null;
+                    $gerberFileUrl = null;
+                    $gerberFileName = null;
+                    $gerberFileSize = null;
 
-                if ($request->hasFile('gerber_file')) {
-                    $file = $request->file('gerber_file');
-                    $originalName = $file->getClientOriginalName();
-                    $fileName = time() . '_' . Str::random(10) . '.' . $file->getClientOriginalExtension();
-                    $filePath = $file->storeAs('gerber-files', $fileName, 'public');
-                    $gerberFileUrl = Storage::url($filePath);
-                    $gerberFileSize = $this->formatFileSize($file->getSize());
+                    if ($request->hasFile('gerber_file')) {
+                        $file = $request->file('gerber_file');
+                        $originalName = $file->getClientOriginalName();
+                        $fileName = time() . '_' . Str::random(10) . '.' . $file->getClientOriginalExtension();
+                        $filePath = $file->storeAs('gerber-files', $fileName, 'public');
+                        $gerberFileUrl = Storage::url($filePath);
+                        $gerberFileSize = $this->formatFileSize($file->getSize());
 
-                    if (\Illuminate\Support\Facades\Schema::hasTable('gerber_files')) {
-                        $gerberFileId = \Illuminate\Support\Facades\DB::table('gerber_files')->insertGetId([
-                            'user_id' => $userId ?? 0, // store as client_id = 0 if guest/null
-                            'original_name' => $originalName,
-                            'file_name' => $fileName,
-                            'file_path' => $filePath,
-                            'file_url' => $gerberFileUrl,
-                            'file_size' => $gerberFileSize,
-                            'board_name' => $request->input('board_name', pathinfo($originalName, PATHINFO_FILENAME)),
-                            'preview_data' => $request->input('preview_data', null),
+                        if (\Illuminate\Support\Facades\Schema::hasTable('gerber_files')) {
+                            $gerberFileId = \Illuminate\Support\Facades\DB::table('gerber_files')->insertGetId([
+                                'user_id' => $userId ?? 0,
+                                'original_name' => $originalName,
+                                'file_name' => $fileName,
+                                'file_path' => $filePath,
+                                'file_url' => $gerberFileUrl,
+                                'file_size' => $gerberFileSize,
+                                'board_name' => $request->input('board_name', pathinfo($originalName, PATHINFO_FILENAME)),
+                                'preview_data' => $request->input('preview_data', null),
+                                'created_at' => date('Y-m-d H:i:s'),
+                                'updated_at' => date('Y-m-d H:i:s')
+                            ]);
+                        }
+                        $gerberFileName = $originalName;
+                    } else if ($request->filled('gerber_file_id')) {
+                        $gerberFileId = $request->input('gerber_file_id');
+                        if ($request->filled('preview_data') && \Illuminate\Support\Facades\Schema::hasTable('gerber_files')) {
+                            \Illuminate\Support\Facades\DB::table('gerber_files')
+                                ->where('id', $gerberFileId)
+                                ->update([
+                                    'preview_data' => $request->input('preview_data'),
+                                    'updated_at' => date('Y-m-d H:i:s')
+                                ]);
+                        }
+                    }
+
+                    // Authoritative pricing calculation via OrderPricingService
+                    $pricing = \App\Services\OrderPricingService::calculateOrderPricing($request->all());
+
+                    // Handle Payment & Transaction
+                    $transactionId = null;
+                    $payMethod = $request->input('payment_method', 'Manual Payment');
+                    $isPaid = strtolower($request->input('payment_status', 'pending')) === 'completed' ||
+                              strtolower($request->input('payment_status', 'pending')) === 'paid' ||
+                              $request->boolean('payment_completed') ||
+                              $payMethod === 'Manual Payment';
+
+                    if ($isPaid && \Illuminate\Support\Facades\Schema::hasTable('payment_transactions')) {
+                        $txnNum = $request->input('payment_reference') ?: ('TXN-MANUAL-' . strtoupper(Str::random(8)));
+                        $transactionId = \Illuminate\Support\Facades\DB::table('payment_transactions')->insertGetId([
+                            'user_id' => $userId,
+                            'transaction_number' => $txnNum,
+                            'amount' => $pricing['total_amount'],
+                            'currency' => 'INR',
+                            'status' => 'success',
+                            'payment_method' => $payMethod,
+                            'payload' => json_encode([
+                                'reference' => $request->input('payment_reference'),
+                                'payment_date' => $request->input('payment_date', date('Y-m-d')),
+                                'notes' => $request->input('payment_notes', 'Manual payment recorded by admin'),
+                                'order_number' => $orderNumber
+                            ]),
                             'created_at' => date('Y-m-d H:i:s'),
                             'updated_at' => date('Y-m-d H:i:s')
                         ]);
                     }
-                    $gerberFileName = $originalName;
-                } else if ($request->filled('gerber_file_id')) {
-                    $gerberFileId = $request->input('gerber_file_id');
-                    if ($request->filled('preview_data') && \Illuminate\Support\Facades\Schema::hasTable('gerber_files')) {
-                        \Illuminate\Support\Facades\DB::table('gerber_files')
-                            ->where('id', $gerberFileId)
-                            ->update([
-                                'preview_data' => $request->input('preview_data'),
-                                'updated_at' => date('Y-m-d H:i:s')
-                            ]);
+
+                    // Find status id if available
+                    $statusId = null;
+                    if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses')) {
+                        $st = \Illuminate\Support\Facades\DB::table('pcb_order_statuses')->where('name', 'Pending')->first();
+                        if ($st) {
+                            $statusId = $st->id;
+                        }
                     }
-                }
 
-                // Handle Manual Payment
-                $transactionId = null;
-                $isPaid = strtolower($request->input('payment_status', 'pending')) === 'completed' || strtolower($request->input('payment_status', 'pending')) === 'paid';
-
-                if ($isPaid && \Illuminate\Support\Facades\Schema::hasTable('payment_transactions')) {
-                    $orderVal = floatval($request->input('order_value', 0));
-                    $payMethod = $request->input('payment_method', 'Manual / Admin');
-                    $txnNum = 'TXN-MANUAL-' . strtoupper(Str::random(8));
-
-                    $transactionId = \Illuminate\Support\Facades\DB::table('payment_transactions')->insertGetId([
+                    // Create Order Record
+                    $orderData = [
                         'user_id' => $userId,
-                        'transaction_number' => $txnNum,
-                        'amount' => $orderVal,
-                        'currency' => 'INR',
-                        'status' => 'success',
-                        'payment_method' => $payMethod,
-                        'payload' => json_encode(['note' => 'Manual payment recorded by admin', 'order_number' => $orderNumber]),
+                        'order_number' => $orderNumber,
+                        'status_id' => $statusId,
+                        'gerber_file_id' => $gerberFileId,
+                        'transaction_id' => $transactionId,
+                        'unit_price' => $pricing['unit_price'],
+                        'order_value' => $pricing['total_amount'],
+                        'delivery_date' => $request->input('delivery_date') ?: null,
                         'created_at' => date('Y-m-d H:i:s'),
                         'updated_at' => date('Y-m-d H:i:s')
-                    ]);
-                }
+                    ];
 
-                // Find status id if available
-                $statusId = null;
-                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses')) {
-                    $st = \Illuminate\Support\Facades\DB::table('pcb_order_statuses')->where('name', 'Pending')->first();
-                    if ($st) {
-                        $statusId = $st->id;
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'board_name')) {
+                        $orderData['board_name'] = $request->input('board_name');
                     }
-                }
-
-                // Create Order Record
-                $orderData = [
-                    'user_id' => $userId,
-                    'order_number' => $orderNumber,
-                    'status_id' => $statusId,
-                    'gerber_file_id' => $gerberFileId,
-                    'transaction_id' => $transactionId,
-                    'unit_price' => floatval($request->input('unit_price', 0)),
-                    'order_value' => floatval($request->input('order_value', 0)),
-                    'delivery_date' => $request->input('delivery_date') ?: null,
-                    'created_at' => date('Y-m-d H:i:s'),
-                    'updated_at' => date('Y-m-d H:i:s')
-                ];
-
-                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'board_name')) {
-                    $orderData['board_name'] = $request->input('board_name');
-                }
-                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'customer_name')) {
-                    $orderData['customer_name'] = $request->input('customer_name');
-                }
-                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'user_email')) {
-                    $orderData['user_email'] = $request->input('user_email');
-                }
-                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'user_mobile')) {
-                    $orderData['user_mobile'] = $request->input('user_mobile');
-                }
-
-                $orderId = \Illuminate\Support\Facades\DB::table('pcb_orders')->insertGetId($orderData);
-
-                // Store Metadata
-                $allParams = $request->all();
-                unset($allParams['gerber_file']);
-
-                if ($gerberFileUrl) {
-                    $allParams['gerber_file_url'] = $gerberFileUrl;
-                    $allParams['gerber_file_name'] = $gerberFileName;
-                    $allParams['gerber_file_size'] = $gerberFileSize;
-                }
-
-                foreach ($allParams as $key => $value) {
-                    if ($value !== null && $value !== '') {
-                        PcbOrderMeta::create([
-                            'pcb_order_id' => $orderId,
-                            'meta_key' => $key,
-                            'meta_value' => is_array($value) ? json_encode($value) : (string)$value,
-                        ]);
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'customer_name')) {
+                        $orderData['customer_name'] = $request->input('customer_name');
                     }
-                }
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'user_email')) {
+                        $orderData['user_email'] = $request->input('user_email');
+                    }
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'user_mobile')) {
+                        $orderData['user_mobile'] = $request->input('user_mobile');
+                    }
 
-                return response()->json([
-                    'status' => true,
-                    'message' => 'Order created successfully',
-                    'data' => [
-                        'id' => $orderId,
-                        'order_number' => $orderNumber,
-                        'order_value' => $request->input('order_value'),
-                        'transaction_id' => $transactionId
-                    ]
-                ], 201);
+                    $orderId = \Illuminate\Support\Facades\DB::table('pcb_orders')->insertGetId($orderData);
+
+                    // Store Metadata
+                    $allParams = $request->all();
+                    unset($allParams['gerber_file']);
+
+                    if ($gerberFileUrl) {
+                        $allParams['gerber_file_url'] = $gerberFileUrl;
+                        $allParams['gerber_file_name'] = $gerberFileName;
+                        $allParams['gerber_file_size'] = $gerberFileSize;
+                    }
+
+                    // Store explicit calculated pricing metadata
+                    $allParams['pricing_method'] = $pricing['pricing_method'];
+                    $allParams['pcb_rate'] = $pricing['pcb_rate'];
+                    $allParams['price_per_sqm'] = $pricing['price_per_sqm'];
+                    $allParams['subtotal'] = $pricing['subtotal'];
+                    $allParams['gst_rate'] = $pricing['gst_rate'];
+                    $allParams['gst_amount'] = $pricing['gst_amount'];
+                    $allParams['total_amount'] = $pricing['total_amount'];
+                    $allParams['payment_method'] = $payMethod;
+
+                    foreach ($allParams as $key => $value) {
+                        if ($value !== null && $value !== '') {
+                            PcbOrderMeta::create([
+                                'pcb_order_id' => $orderId,
+                                'meta_key' => $key,
+                                'meta_value' => is_array($value) ? json_encode($value) : (string)$value,
+                            ]);
+                        }
+                    }
+
+                    return response()->json([
+                        'status' => true,
+                        'message' => 'Order created successfully',
+                        'data' => [
+                            'id' => $orderId,
+                            'order_number' => $orderNumber,
+                            'order_value' => $pricing['total_amount'],
+                            'transaction_id' => $transactionId
+                        ]
+                    ], 201);
+                });
 
             } catch (\Throwable $th) {
                 return response()->json([
@@ -1392,198 +1413,267 @@ namespace App\Http\Controllers;
                     ], 444);
                 }
 
-                // Determine root order number prefix
-                $origOrderNumber = $originalOrder->order_number;
-                $rootOrderNumber = explode('-', $origOrderNumber)[0];
+                return \Illuminate\Support\Facades\DB::transaction(function () use ($request, $originalOrder) {
+                    // Determine root order number prefix
+                    $origOrderNumber = $originalOrder->order_number;
+                    $rootOrderNumber = explode('-', $origOrderNumber)[0];
 
-                // Find existing reorders matching the root prefix
-                $existingOrders = PcbOrder::withTrashed()
-                    ->where('order_number', 'LIKE', $rootOrderNumber . '-%')
-                    ->pluck('order_number')
-                    ->toArray();
+                    // Find existing reorders matching the root prefix
+                    $existingOrders = PcbOrder::withTrashed()
+                        ->where('order_number', 'LIKE', $rootOrderNumber . '-%')
+                        ->pluck('order_number')
+                        ->toArray();
 
-                $maxSuffix = 0;
-                foreach ($existingOrders as $num) {
-                    $parts = explode('-', $num);
-                    if (count($parts) > 1 && is_numeric(end($parts))) {
-                        $val = (int)end($parts);
-                        if ($val > $maxSuffix) {
-                            $maxSuffix = $val;
-                        }
-                    }
-                }
-
-                $newOrderNumber = $rootOrderNumber . '-' . ($maxSuffix + 1);
-
-                // Replicate order
-                $newOrder = $originalOrder->replicate(['created_at', 'updated_at', 'deleted_at']);
-                $newOrder->order_number = $newOrderNumber;
-                $newOrder->status = 'Pending';
-
-                // Find and assign Pending status_id
-                $statusId = null;
-                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses')) {
-                    $st = \Illuminate\Support\Facades\DB::table('pcb_order_statuses')->where('name', 'Pending')->first();
-                    if ($st) {
-                        $statusId = $st->id;
-                    }
-                } elseif (\Illuminate\Support\Facades\Schema::hasTable('pcb_statuses')) {
-                    $st = \Illuminate\Support\Facades\DB::table('pcb_statuses')->where('name', 'Pending')->first();
-                    if ($st) {
-                        $statusId = $st->id;
-                    }
-                } elseif (\Illuminate\Support\Facades\Schema::hasTable('statuses')) {
-                    $st = \Illuminate\Support\Facades\DB::table('statuses')->where('name', 'Pending')->first();
-                    if ($st) {
-                        $statusId = $st->id;
-                    }
-                }
-                $newOrder->status_id = $statusId;
-
-                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'is_reorder')) {
-                    $newOrder->is_reorder = true;
-                }
-                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'source_order_number')) {
-                    $newOrder->source_order_number = $originalOrder->order_number;
-                }
-                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'source_order_id')) {
-                    $newOrder->source_order_id = $originalOrder->id;
-                }
-
-                $newOrder->completed_qty = 0;
-                $newOrder->failed_qty = 0;
-                $newOrder->launch_qty = 0;
-                $newOrder->panel_qty = 0;
-                $newOrder->ups_qty = 0;
-                $newOrder->final_qty = 0;
-                $newOrder->bill_number = null;
-                $newOrder->launch_date = null;
-
-                // Resolve C/G status based on customer GST number
-                $reorderGst = null;
-                if ($originalOrder->user_id) {
-                    $uRec = \App\Models\PcbUser::find($originalOrder->user_id);
-                    if ($uRec && !empty($uRec->gst_number)) {
-                        $reorderGst = trim($uRec->gst_number);
-                    }
-                }
-                if (!empty($reorderGst)) {
-                    $newOrder->c_g = 'GST';
-                } else if (empty($originalOrder->c_g)) {
-                    $newOrder->c_g = 'Cash';
-                }
-
-                // Handle custom order quantity if specified
-                $reqQty = $request->input('order_qty', $request->input('quantity'));
-                if ($reqQty !== null && is_numeric($reqQty) && (int)$reqQty > 0) {
-                    $newOrder->order_qty = (int)$reqQty;
-                }
-
-                // Handle custom delivery date if specified
-                $reqDeliveryDate = $request->input('delivery_date', $request->input('deliveryDate'));
-                if (!empty($reqDeliveryDate)) {
-                    $newOrder->delivery_date = $reqDeliveryDate;
-                }
-
-                // Recalculate order_value based on new order_qty if applicable
-                if ($newOrder->unit_price && (float)$newOrder->unit_price > 0) {
-                    $newOrder->order_value = round((float)$newOrder->unit_price * $newOrder->order_qty, 2);
-                } elseif ($originalOrder->order_qty > 0 && (float)$originalOrder->order_value > 0) {
-                    $unitCalc = (float)$originalOrder->order_value / (float)$originalOrder->order_qty;
-                    $newOrder->order_value = round($unitCalc * $newOrder->order_qty, 2);
-                }
-
-                $newOrder->created_at = now();
-                $newOrder->updated_at = now();
-                $newOrder->save();
-
-                // Replicate metadata with updated quantity, delivery_date, order_value, and status = Pending
-                $hasQtyMeta = false;
-                $hasDeliveryDateMeta = false;
-                $hasStatusMeta = false;
-
-                foreach ($originalOrder->metas as $meta) {
-                    // Skip film datetime if any, or retain original specifications
-                    if (in_array($meta->meta_key, ['film_datetime', 'film_date'])) {
-                        continue;
-                    }
-
-                    $metaValue = $meta->meta_value;
-                    if (in_array($meta->meta_key, ['status', 'order_status', 'pcb_status'])) {
-                        $hasStatusMeta = true;
-                        $metaValue = 'Pending';
-                    } elseif ($meta->meta_key === 'quantity') {
-                        $hasQtyMeta = true;
-                        $metaValue = (string) $newOrder->order_qty;
-                    } elseif ($meta->meta_key === 'delivery_date') {
-                        $hasDeliveryDateMeta = true;
-                        if ($newOrder->delivery_date) {
-                            $metaValue = (string) $newOrder->delivery_date;
-                        }
-                    } elseif (in_array($meta->meta_key, ['order_value', 'total_price', 'total'])) {
-                        if ($newOrder->order_value) {
-                            $metaValue = (string) $newOrder->order_value;
+                    $maxSuffix = 0;
+                    foreach ($existingOrders as $num) {
+                        $parts = explode('-', $num);
+                        if (count($parts) > 1 && is_numeric(end($parts))) {
+                            $val = (int)end($parts);
+                            if ($val > $maxSuffix) {
+                                $maxSuffix = $val;
+                            }
                         }
                     }
 
-                    PcbOrderMeta::create([
-                        'pcb_order_id' => $newOrder->id,
-                        'meta_key' => $meta->meta_key,
-                        'meta_value' => $metaValue,
-                    ]);
-                }
+                    $newOrderNumber = $rootOrderNumber . '-' . ($maxSuffix + 1);
 
-                if (!$hasStatusMeta) {
-                    PcbOrderMeta::create([
-                        'pcb_order_id' => $newOrder->id,
-                        'meta_key' => 'status',
-                        'meta_value' => 'Pending',
-                    ]);
-                }
+                    // Replicate order
+                    $newOrder = $originalOrder->replicate(['created_at', 'updated_at', 'deleted_at']);
+                    $newOrder->order_number = $newOrderNumber;
+                    $newOrder->status = 'Pending';
 
-                if (!$hasQtyMeta && $newOrder->order_qty) {
-                    PcbOrderMeta::create([
-                        'pcb_order_id' => $newOrder->id,
-                        'meta_key' => 'quantity',
-                        'meta_value' => (string) $newOrder->order_qty,
-                    ]);
-                }
+                    // Find and assign Pending status_id
+                    $statusId = null;
+                    if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses')) {
+                        $st = \Illuminate\Support\Facades\DB::table('pcb_order_statuses')->where('name', 'Pending')->first();
+                        if ($st) {
+                            $statusId = $st->id;
+                        }
+                    } elseif (\Illuminate\Support\Facades\Schema::hasTable('pcb_statuses')) {
+                        $st = \Illuminate\Support\Facades\DB::table('pcb_statuses')->where('name', 'Pending')->first();
+                        if ($st) {
+                            $statusId = $st->id;
+                        }
+                    } elseif (\Illuminate\Support\Facades\Schema::hasTable('statuses')) {
+                        $st = \Illuminate\Support\Facades\DB::table('statuses')->where('name', 'Pending')->first();
+                        if ($st) {
+                            $statusId = $st->id;
+                        }
+                    }
+                    $newOrder->status_id = $statusId;
 
-                if (!$hasDeliveryDateMeta && $newOrder->delivery_date) {
-                    PcbOrderMeta::create([
-                        'pcb_order_id' => $newOrder->id,
-                        'meta_key' => 'delivery_date',
-                        'meta_value' => (string) $newOrder->delivery_date,
-                    ]);
-                }
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'is_reorder')) {
+                        $newOrder->is_reorder = true;
+                    }
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'source_order_number')) {
+                        $newOrder->source_order_number = $originalOrder->order_number;
+                    }
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'source_order_id')) {
+                        $newOrder->source_order_id = $originalOrder->id;
+                    }
 
-                // Log reorder event if log table exists
-                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_logs')) {
-                    $logData = [
-                        'pcb_order_id' => $newOrder->id,
-                        'order_number' => $newOrder->order_number,
-                        'status' => 'Pending',
-                        'action' => 'Reordered',
-                        'created_at' => now(),
-                        'updated_at' => now()
+                    $newOrder->completed_qty = 0;
+                    $newOrder->failed_qty = 0;
+                    $newOrder->launch_qty = 0;
+                    $newOrder->panel_qty = 0;
+                    $newOrder->ups_qty = 0;
+                    $newOrder->final_qty = 0;
+                    $newOrder->bill_number = null;
+                    $newOrder->launch_date = null;
+
+                    // Resolve C/G status based on customer GST number
+                    $reorderGst = null;
+                    if ($originalOrder->user_id) {
+                        $uRec = \App\Models\PcbUser::find($originalOrder->user_id);
+                        if ($uRec && !empty($uRec->gst_number)) {
+                            $reorderGst = trim($uRec->gst_number);
+                        }
+                    }
+                    if (!empty($reorderGst)) {
+                        $newOrder->c_g = 'GST';
+                    } else if (empty($originalOrder->c_g)) {
+                        $newOrder->c_g = 'Cash';
+                    }
+
+                    // Handle custom order quantity if specified
+                    $reqQty = $request->input('order_qty', $request->input('quantity', $originalOrder->order_qty ?: 1));
+                    $newOrder->order_qty = max(1, (int)$reqQty);
+
+                    // Handle custom delivery date if specified
+                    $reqDeliveryDate = $request->input('delivery_date', $request->input('deliveryDate'));
+                    if (!empty($reqDeliveryDate)) {
+                        $newOrder->delivery_date = $reqDeliveryDate;
+                    }
+
+                    // Extract dimensions from original order metas if present
+                    $dimLen = floatval($request->input('dimensions_length', $originalOrder->getMeta('dimensions_length', 100)));
+                    $dimWid = floatval($request->input('dimensions_width', $originalOrder->getMeta('dimensions_width', 100)));
+                    if ($dimLen <= 0 || $dimWid <= 0) {
+                        $dimStr = (string)$originalOrder->getMeta('dimensions', '');
+                        if (preg_match('/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i', $dimStr, $m)) {
+                            $dimLen = floatval($m[1]);
+                            $dimWid = floatval($m[2]);
+                        }
+                    }
+
+                    // Authoritative pricing calculation via OrderPricingService
+                    $pricingParams = array_merge($request->all(), [
+                        'launch_qty' => $newOrder->order_qty,
+                        'order_qty' => $newOrder->order_qty,
+                        'dimensions_length' => $dimLen,
+                        'dimensions_width' => $dimWid,
+                        'auto_calculated_value' => ($originalOrder->unit_price > 0 ? $originalOrder->unit_price * $newOrder->order_qty : $originalOrder->order_value)
+                    ]);
+                    $pricing = \App\Services\OrderPricingService::calculateOrderPricing($pricingParams);
+
+                    $newOrder->unit_price = $pricing['unit_price'];
+                    $newOrder->order_value = $pricing['total_amount'];
+
+                    // Handle Manual Payment Transaction creation for reorder
+                    $transactionId = null;
+                    $payMethod = $request->input('payment_method', 'Online');
+                    if ($payMethod === 'Manual Payment' || $request->boolean('payment_completed')) {
+                        if (\Illuminate\Support\Facades\Schema::hasTable('payment_transactions')) {
+                            $txnNum = $request->input('payment_reference') ?: ('TXN-MANUAL-' . strtoupper(Str::random(8)));
+                            $transactionId = \Illuminate\Support\Facades\DB::table('payment_transactions')->insertGetId([
+                                'user_id' => $originalOrder->user_id,
+                                'transaction_number' => $txnNum,
+                                'amount' => $pricing['total_amount'],
+                                'currency' => 'INR',
+                                'status' => 'success',
+                                'payment_method' => 'Manual Payment',
+                                'payload' => json_encode([
+                                    'reference' => $request->input('payment_reference'),
+                                    'payment_date' => $request->input('payment_date', date('Y-m-d')),
+                                    'notes' => $request->input('payment_notes', 'Manual payment recorded for reorder'),
+                                    'reordered_from' => $originalOrder->order_number,
+                                    'order_number' => $newOrderNumber
+                                ]),
+                                'created_at' => date('Y-m-d H:i:s'),
+                                'updated_at' => date('Y-m-d H:i:s')
+                            ]);
+                        }
+                    }
+                    $newOrder->transaction_id = $transactionId;
+
+                    $newOrder->created_at = now();
+                    $newOrder->updated_at = now();
+                    $newOrder->save();
+
+                    // Replicate metadata with updated pricing, quantity, delivery_date, order_value, and status = Pending
+                    $hasQtyMeta = false;
+                    $hasDeliveryDateMeta = false;
+                    $hasStatusMeta = false;
+
+                    $updatedMetas = [
+                        'pricing_method' => $pricing['pricing_method'],
+                        'pcb_rate' => $pricing['pcb_rate'],
+                        'price_per_sqm' => $pricing['price_per_sqm'],
+                        'subtotal' => $pricing['subtotal'],
+                        'gst_rate' => $pricing['gst_rate'],
+                        'gst_amount' => $pricing['gst_amount'],
+                        'total_amount' => $pricing['total_amount'],
+                        'payment_method' => $payMethod,
                     ];
-                    if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_logs', 'description')) {
-                        $logData['description'] = "Reordered from original order #{$originalOrder->order_number}";
+                    if ($request->filled('payment_reference')) {
+                        $updatedMetas['payment_reference'] = $request->input('payment_reference');
                     }
-                    if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_logs', 'details')) {
-                        $logData['details'] = "Reordered from original order #{$originalOrder->order_number}";
+                    if ($request->filled('payment_notes')) {
+                        $updatedMetas['payment_notes'] = $request->input('payment_notes');
                     }
-                    if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_logs', 'admin_id')) {
-                        $logData['admin_id'] = $request->attributes->get('admin_id') ?: 1;
-                    }
-                    \Illuminate\Support\Facades\DB::table('pcb_order_logs')->insert($logData);
-                }
 
-                return response()->json([
-                    'status' => true,
-                    'message' => "Order #{$originalOrder->order_number} reordered successfully as #{$newOrderNumber}!",
-                    'data' => $newOrder
-                ], 201);
+                    foreach ($originalOrder->metas as $meta) {
+                        if (in_array($meta->meta_key, ['film_datetime', 'film_date'])) {
+                            continue;
+                        }
+
+                        $metaValue = $meta->meta_value;
+                        if (in_array($meta->meta_key, ['status', 'order_status', 'pcb_status'])) {
+                            $hasStatusMeta = true;
+                            $metaValue = 'Pending';
+                        } elseif ($meta->meta_key === 'quantity') {
+                            $hasQtyMeta = true;
+                            $metaValue = (string) $newOrder->order_qty;
+                        } elseif ($meta->meta_key === 'delivery_date') {
+                            $hasDeliveryDateMeta = true;
+                            if ($newOrder->delivery_date) {
+                                $metaValue = (string) $newOrder->delivery_date;
+                            }
+                        } elseif (in_array($meta->meta_key, ['order_value', 'total_price', 'total'])) {
+                            $metaValue = (string) $newOrder->order_value;
+                        } elseif (array_key_exists($meta->meta_key, $updatedMetas)) {
+                            $metaValue = (string) $updatedMetas[$meta->meta_key];
+                            unset($updatedMetas[$meta->meta_key]);
+                        }
+
+                        PcbOrderMeta::create([
+                            'pcb_order_id' => $newOrder->id,
+                            'meta_key' => $meta->meta_key,
+                            'meta_value' => $metaValue,
+                        ]);
+                    }
+
+                    // Write any remaining new pricing metas
+                    foreach ($updatedMetas as $uKey => $uVal) {
+                        PcbOrderMeta::create([
+                            'pcb_order_id' => $newOrder->id,
+                            'meta_key' => $uKey,
+                            'meta_value' => (string) $uVal,
+                        ]);
+                    }
+
+                    if (!$hasStatusMeta) {
+                        PcbOrderMeta::create([
+                            'pcb_order_id' => $newOrder->id,
+                            'meta_key' => 'status',
+                            'meta_value' => 'Pending',
+                        ]);
+                    }
+
+                    if (!$hasQtyMeta && $newOrder->order_qty) {
+                        PcbOrderMeta::create([
+                            'pcb_order_id' => $newOrder->id,
+                            'meta_key' => 'quantity',
+                            'meta_value' => (string) $newOrder->order_qty,
+                        ]);
+                    }
+
+                    if (!$hasDeliveryDateMeta && $newOrder->delivery_date) {
+                        PcbOrderMeta::create([
+                            'pcb_order_id' => $newOrder->id,
+                            'meta_key' => 'delivery_date',
+                            'meta_value' => (string) $newOrder->delivery_date,
+                        ]);
+                    }
+
+                    // Log reorder event if log table exists
+                    if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_logs')) {
+                        $logData = [
+                            'pcb_order_id' => $newOrder->id,
+                            'order_number' => $newOrder->order_number,
+                            'status' => 'Pending',
+                            'action' => 'Reordered',
+                            'created_at' => now(),
+                            'updated_at' => now()
+                        ];
+                        if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_logs', 'description')) {
+                            $logData['description'] = "Reordered from original order #{$originalOrder->order_number}";
+                        }
+                        if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_logs', 'details')) {
+                            $logData['details'] = "Reordered from original order #{$originalOrder->order_number}";
+                        }
+                        if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_logs', 'admin_id')) {
+                            $logData['admin_id'] = $request->attributes->get('admin_id') ?: 1;
+                        }
+                        \Illuminate\Support\Facades\DB::table('pcb_order_logs')->insert($logData);
+                    }
+
+                    return response()->json([
+                        'status' => true,
+                        'message' => "Order #{$originalOrder->order_number} reordered successfully as #{$newOrderNumber}!",
+                        'data' => $newOrder
+                    ], 201);
+                });
             } catch (\Throwable $th) {
                 return response()->json([
                     'status' => false,

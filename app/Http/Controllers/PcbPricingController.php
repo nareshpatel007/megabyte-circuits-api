@@ -425,4 +425,20 @@ class PcbPricingController extends Controller
             ], 500);
         }
     }
+
+    public function getGstSettings()
+    {
+        try {
+            $gst = \App\Services\OrderPricingService::getGstSettings();
+            return response()->json([
+                'success' => true,
+                'data' => $gst
+            ]);
+        } catch (\Throwable $th) {
+            return response()->json([
+                'success' => false,
+                'message' => $th->getMessage()
+            ], 500);
+        }
+    }
 }

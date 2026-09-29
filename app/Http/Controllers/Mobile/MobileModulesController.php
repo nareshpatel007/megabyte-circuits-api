@@ -522,4 +522,314 @@ class MobileModulesController extends Controller
             'X-Accel-Buffering' => 'no',
         ]);
     }
+
+    // --- CLIENTS CRUD ---
+    public function storeClient(Request $request)
+    {
+        if (!self::hasPermission($request, 'clients.create')) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to create clients.'], 403);
+        }
+        try {
+            $name = trim($request->input('name', ''));
+            $email = trim($request->input('email', ''));
+            if (empty($name) || empty($email)) {
+                return response()->json(['success' => false, 'message' => 'Name and email are required.'], 422);
+            }
+            $id = DB::table('users')->insertGetId([
+                'name' => $name,
+                'email' => $email,
+                'company' => trim($request->input('company', '')),
+                'mobile' => trim($request->input('mobile', '')),
+                'password' => bcrypt(trim($request->input('password', '12345678'))),
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s')
+            ]);
+            return response()->json(['success' => true, 'message' => 'Client created successfully.', 'id' => (string)$id]);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function updateClient(Request $request, $id)
+    {
+        if (!self::hasPermission($request, 'clients.edit')) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to edit clients.'], 403);
+        }
+        try {
+            $update = ['updated_at' => date('Y-m-d H:i:s')];
+            if ($request->has('name')) $update['name'] = trim($request->input('name'));
+            if ($request->has('email')) $update['email'] = trim($request->input('email'));
+            if ($request->has('company')) $update['company'] = trim($request->input('company'));
+            if ($request->has('mobile')) $update['mobile'] = trim($request->input('mobile'));
+            DB::table('users')->where('id', $id)->update($update);
+            return response()->json(['success' => true, 'message' => 'Client updated successfully.']);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function deleteClient(Request $request, $id)
+    {
+        if (!self::hasPermission($request, 'clients.delete')) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to delete clients.'], 403);
+        }
+        try {
+            if (Schema::hasColumn('users', 'deleted_at')) {
+                DB::table('users')->where('id', $id)->update(['deleted_at' => date('Y-m-d H:i:s')]);
+            } else {
+                DB::table('users')->where('id', $id)->delete();
+            }
+            return response()->json(['success' => true, 'message' => 'Client deleted successfully.']);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    // --- STAFF CRUD ---
+    public function storeStaff(Request $request)
+    {
+        if (!self::hasPermission($request, 'staff.create')) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to add staff members.'], 403);
+        }
+        try {
+            $name = trim($request->input('name', ''));
+            $email = trim($request->input('email', ''));
+            if (empty($name) || empty($email)) {
+                return response()->json(['success' => false, 'message' => 'Name and email are required.'], 422);
+            }
+            $username = trim($request->input('username', strtolower(explode(' ', $name)[0] . rand(100, 999))));
+            $roleId = (int)$request->input('role_id', 2);
+            $id = DB::table('admins')->insertGetId([
+                'name' => $name,
+                'username' => $username,
+                'email' => $email,
+                'role_id' => $roleId,
+                'status' => 'Active',
+                'password' => bcrypt(trim($request->input('password', '12345678'))),
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s')
+            ]);
+            return response()->json(['success' => true, 'message' => 'Staff member created successfully.', 'id' => (string)$id]);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function updateStaff(Request $request, $id)
+    {
+        if (!self::hasPermission($request, 'staff.edit')) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to edit staff members.'], 403);
+        }
+        try {
+            $update = ['updated_at' => date('Y-m-d H:i:s')];
+            if ($request->has('name')) $update['name'] = trim($request->input('name'));
+            if ($request->has('email')) $update['email'] = trim($request->input('email'));
+            if ($request->has('username')) $update['username'] = trim($request->input('username'));
+            if ($request->has('role_id')) $update['role_id'] = (int)$request->input('role_id');
+            if ($request->has('status')) $update['status'] = trim($request->input('status'));
+            DB::table('admins')->where('id', $id)->update($update);
+            return response()->json(['success' => true, 'message' => 'Staff member updated successfully.']);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function deleteStaff(Request $request, $id)
+    {
+        if (!self::hasPermission($request, 'staff.delete')) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to delete staff members.'], 403);
+        }
+        try {
+            DB::table('admins')->where('id', $id)->delete();
+            return response()->json(['success' => true, 'message' => 'Staff member deleted successfully.']);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    // --- ROLES CRUD ---
+    public function storeRole(Request $request)
+    {
+        if (!self::hasPermission($request, 'role.create')) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to create roles.'], 403);
+        }
+        try {
+            $name = trim($request->input('name', ''));
+            if (empty($name)) {
+                return response()->json(['success' => false, 'message' => 'Role name is required.'], 422);
+            }
+            $slug = strtolower(str_replace(' ', '-', $name));
+            $id = DB::table('roles')->insertGetId([
+                'name' => $name,
+                'slug' => $slug,
+                'description' => trim($request->input('description', '')),
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s')
+            ]);
+            return response()->json(['success' => true, 'message' => 'Role created successfully.', 'id' => (string)$id]);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function updateRole(Request $request, $id)
+    {
+        if (!self::hasPermission($request, 'role.edit')) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to edit roles.'], 403);
+        }
+        try {
+            $update = ['updated_at' => date('Y-m-d H:i:s')];
+            if ($request->has('name')) $update['name'] = trim($request->input('name'));
+            if ($request->has('description')) $update['description'] = trim($request->input('description'));
+            DB::table('roles')->where('id', $id)->update($update);
+            return response()->json(['success' => true, 'message' => 'Role updated successfully.']);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function deleteRole(Request $request, $id)
+    {
+        if (!self::hasPermission($request, 'role.delete')) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to delete roles.'], 403);
+        }
+        try {
+            DB::table('roles')->where('id', $id)->delete();
+            return response()->json(['success' => true, 'message' => 'Role deleted successfully.']);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    // --- BLOGS CRUD ---
+    public function storeBlog(Request $request)
+    {
+        if (!self::hasPermission($request, 'blog.create')) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to create blog posts.'], 403);
+        }
+        try {
+            $title = trim($request->input('title', ''));
+            if (empty($title)) {
+                return response()->json(['success' => false, 'message' => 'Blog title is required.'], 422);
+            }
+            $id = DB::table('blogs')->insertGetId([
+                'title' => $title,
+                'slug' => strtolower(str_replace(' ', '-', $title)),
+                'content' => trim($request->input('content', '')),
+                'status' => trim($request->input('status', 'Published')),
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s')
+            ]);
+            return response()->json(['success' => true, 'message' => 'Blog post created successfully.', 'id' => (string)$id]);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function updateBlog(Request $request, $id)
+    {
+        if (!self::hasPermission($request, 'blog.edit')) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to edit blog posts.'], 403);
+        }
+        try {
+            $update = ['updated_at' => date('Y-m-d H:i:s')];
+            if ($request->has('title')) {
+                $update['title'] = trim($request->input('title'));
+                $update['slug'] = strtolower(str_replace(' ', '-', $update['title']));
+            }
+            if ($request->has('content')) $update['content'] = trim($request->input('content'));
+            if ($request->has('status')) $update['status'] = trim($request->input('status'));
+            DB::table('blogs')->where('id', $id)->update($update);
+            return response()->json(['success' => true, 'message' => 'Blog post updated successfully.']);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function deleteBlog(Request $request, $id)
+    {
+        if (!self::hasPermission($request, 'blog.delete')) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to delete blog posts.'], 403);
+        }
+        try {
+            DB::table('blogs')->where('id', $id)->delete();
+            return response()->json(['success' => true, 'message' => 'Blog post deleted successfully.']);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    // --- GERBER FILES CRUD ---
+    public function deleteGerberFile(Request $request, $id)
+    {
+        if (!self::hasPermission($request, 'gerber.delete')) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to delete Gerber files.'], 403);
+        }
+        try {
+            if (Schema::hasColumn('gerber_files', 'deleted_at')) {
+                DB::table('gerber_files')->where('id', $id)->update(['deleted_at' => date('Y-m-d H:i:s')]);
+            } else {
+                DB::table('gerber_files')->where('id', $id)->delete();
+            }
+            return response()->json(['success' => true, 'message' => 'Gerber file deleted successfully.']);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    // --- STATUSES CRUD ---
+    public function storeStatus(Request $request)
+    {
+        if (!self::hasPermission($request, 'statuses.manage') && !self::hasPermission($request, 'settings.update')) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to manage statuses.'], 403);
+        }
+        try {
+            $name = trim($request->input('name', ''));
+            if (empty($name)) {
+                return response()->json(['success' => false, 'message' => 'Status name is required.'], 422);
+            }
+            $table = Schema::hasTable('pcb_order_statuses') ? 'pcb_order_statuses' : (Schema::hasTable('pcb_statuses') ? 'pcb_statuses' : 'statuses');
+            $maxOrder = DB::table($table)->max('sort_order') ?? 0;
+            $id = DB::table($table)->insertGetId([
+                'name' => $name,
+                'sort_order' => $maxOrder + 1,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s')
+            ]);
+            return response()->json(['success' => true, 'message' => 'Status added successfully.', 'id' => (string)$id]);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function updateStatusConfig(Request $request, $id)
+    {
+        if (!self::hasPermission($request, 'statuses.manage') && !self::hasPermission($request, 'settings.update')) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to manage statuses.'], 403);
+        }
+        try {
+            $table = Schema::hasTable('pcb_order_statuses') ? 'pcb_order_statuses' : (Schema::hasTable('pcb_statuses') ? 'pcb_statuses' : 'statuses');
+            $update = ['updated_at' => date('Y-m-d H:i:s')];
+            if ($request->has('name')) $update['name'] = trim($request->input('name'));
+            if ($request->has('sort_order')) $update['sort_order'] = (int)$request->input('sort_order');
+            DB::table($table)->where('id', $id)->update($update);
+            return response()->json(['success' => true, 'message' => 'Status updated successfully.']);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function deleteStatusConfig(Request $request, $id)
+    {
+        if (!self::hasPermission($request, 'statuses.manage') && !self::hasPermission($request, 'settings.update')) {
+            return response()->json(['success' => false, 'message' => 'You do not have permission to manage statuses.'], 403);
+        }
+        try {
+            $table = Schema::hasTable('pcb_order_statuses') ? 'pcb_order_statuses' : (Schema::hasTable('pcb_statuses') ? 'pcb_statuses' : 'statuses');
+            DB::table($table)->where('id', $id)->delete();
+            return response()->json(['success' => true, 'message' => 'Status deleted successfully.']);
+        } catch (\Throwable $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
 }
