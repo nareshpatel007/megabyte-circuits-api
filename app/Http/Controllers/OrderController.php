@@ -259,7 +259,7 @@ namespace App\Http\Controllers;
                     'surface_finish', 'finish', 'legend_color', 'silkscreen',
                     'silkscreen_side', 'legend_side', 'route', 'routing',
                     'v_cut', 'fpt_program', 'second_stage', 'copper_area',
-                    'tool', 'quote_number', 'p_n', 'part_number', 'ups', 'panels',
+                    'tool', 'quote_number', 'p_n', 'pn_number', 'part_number', 'board_name', 'gerber_file_id', 'ups', 'panels',
                     'jlcpcb_file_key', 'quotation_source', 'order_type', 'jlcpcb_price', 'jlcpcb_quote_id', 'jlcpcb_quotation_snapshot', 'jlcpcb_quote'
                 ];
 
@@ -468,12 +468,17 @@ namespace App\Http\Controllers;
                         $order->status = 'Pending';
                     }
                     if (empty($order->pn_number)) {
+                        $gf = $order->gerberFile;
+                        if (!$gf && !empty($order->getMeta('gerber_file_id')) && \Illuminate\Support\Facades\Schema::hasTable('gerber_files')) {
+                            $gf = \App\Models\GerberFile::find($order->getMeta('gerber_file_id'));
+                        }
                         $order->pn_number = $order->getMeta('p_n')
                             ?: $order->getMeta('part_number')
                             ?: $order->getMeta('gerber_file_name')
                             ?: $order->getMeta('gerber_name')
+                            ?: ($gf ? ($gf->original_name ?: $gf->file_name) : null)
                             ?: $order->getMeta('board_name')
-                            ?: ($order->gerberFile ? ($order->gerberFile->original_name ?: $order->gerberFile->file_name) : null);
+                            ?: $order->board_name;
                     }
                     return $order;
                 });
@@ -613,6 +618,12 @@ namespace App\Http\Controllers;
             // Verify if actual physical Gerber file exists on disk or valid URL
             $hasActualGerber = false;
             $gerberFileObj = $order->gerberFile;
+            if (!$gerberFileObj && !empty($order->getMeta('gerber_file_id')) && \Illuminate\Support\Facades\Schema::hasTable('gerber_files')) {
+                $gerberFileObj = \App\Models\GerberFile::find($order->getMeta('gerber_file_id'));
+                if ($gerberFileObj) {
+                    $order->setRelation('gerberFile', $gerberFileObj);
+                }
+            }
             if ($gerberFileObj) {
                 $filePath = $gerberFileObj->file_path;
                 $fileUrl = $gerberFileObj->file_url;
@@ -780,8 +791,9 @@ namespace App\Http\Controllers;
                         $order->pn_number = $newPn !== '' ? $newPn : null;
                         $changesLog[] = "P/N Number: '{$oldPn}' → '" . ($newPn !== '' ? $newPn : 'Empty') . "'";
 
-                        if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_meta')) {
-                            \Illuminate\Support\Facades\DB::table('pcb_order_meta')
+                        $metaTable = \Illuminate\Support\Facades\Schema::hasTable('pcb_order_meta') ? 'pcb_order_meta' : (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_metas') ? 'pcb_order_metas' : null);
+                        if ($metaTable) {
+                            \Illuminate\Support\Facades\DB::table($metaTable)
                                 ->where('pcb_order_id', $order->id)
                                 ->where(function ($mq) use ($oldPn) {
                                     $mq->whereIn('meta_key', ['pn_number', 'p_n', 'part_number'])
@@ -791,6 +803,11 @@ namespace App\Http\Controllers;
                                        });
                                 })
                                 ->update(['meta_value' => $newPn !== '' ? $newPn : '']);
+
+                            \Illuminate\Support\Facades\DB::table($metaTable)->updateOrInsert(
+                                ['pcb_order_id' => $order->id, 'meta_key' => 'pn_number'],
+                                ['meta_value' => $newPn !== '' ? $newPn : '']
+                            );
                         }
                     }
                 }
@@ -861,15 +878,13 @@ namespace App\Http\Controllers;
 
                 if ($request->has('delivery_date')) {
                     $rawReqDate = $request->input('delivery_date');
-                    if ($rawReqDate !== null && $rawReqDate !== '') {
-                        $normReqDate = date('Y-m-d', strtotime($rawReqDate));
-                        $normOldDate = !empty($order->delivery_date) ? date('Y-m-d', strtotime($order->delivery_date)) : null;
-                        if ($normReqDate !== $normOldDate) {
-                            $oldValStr = !empty($normOldDate) ? date('d M Y', strtotime($normOldDate)) : 'N/A';
-                            $newValStr = !empty($normReqDate) ? date('d M Y', strtotime($normReqDate)) : 'N/A';
-                            $order->delivery_date = $normReqDate;
-                            $changesLog[] = "Delivery Date: '{$oldValStr}' → '{$newValStr}'";
-                        }
+                    $normReqDate = (!empty($rawReqDate)) ? date('Y-m-d', strtotime($rawReqDate)) : null;
+                    $normOldDate = !empty($order->delivery_date) ? date('Y-m-d', strtotime($order->delivery_date)) : null;
+                    if ($normReqDate !== $normOldDate) {
+                        $oldValStr = !empty($normOldDate) ? date('d M Y', strtotime($normOldDate)) : 'N/A';
+                        $newValStr = !empty($normReqDate) ? date('d M Y', strtotime($normReqDate)) : 'Cleared';
+                        $order->delivery_date = $normReqDate;
+                        $changesLog[] = "Delivery Date: '{$oldValStr}' → '{$newValStr}'";
                     }
                 }
 
