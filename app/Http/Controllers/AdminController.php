@@ -1438,7 +1438,7 @@ class AdminController extends Controller
         try {
             $authHeader = $request->header('Authorization');
             $token = str_replace('Bearer ', '', $authHeader);
-            $secret = env('JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
+            $secret = \App\Services\CredentialService::get('auth', 'JWT_SECRET', 'JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
             $decoded = JWT::decode($token, new \Firebase\JWT\Key($secret, 'HS256'));
             $adminId = $decoded->admin_id ?? null;
 
@@ -1478,9 +1478,12 @@ class AdminController extends Controller
                 $permissions = DB::table('permissions')->pluck('slug')->toArray();
             }
 
+            $roleName = isset($role) && !empty($role->name) ? $role->name : ($admin->role ?? ($isSuperAdmin ? 'Super Admin' : 'Admin'));
+
             return response()->json([
                 'status' => true,
                 'is_super_admin' => $isSuperAdmin,
+                'role' => $roleName,
                 'permissions' => array_values(array_unique($permissions))
             ]);
         } catch (\Throwable $th) {
