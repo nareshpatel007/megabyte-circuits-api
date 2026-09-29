@@ -95,22 +95,38 @@ class MobileOrderController extends Controller
             $page = max(1, (int)$request->input('page', 1));
             $perPage = min(100, max(5, (int)$request->input('per_page', 20)));
 
-            $query = DB::table('pcb_orders')->whereNull('deleted_at');
+            $statusTable = Schema::hasTable('pcb_order_statuses') ? 'pcb_order_statuses' : (Schema::hasTable('pcb_statuses') ? 'pcb_statuses' : null);
 
-            // Hide combo member child orders from mobile production list (show parent & normal orders only)
-            if (Schema::hasTable('pcb_order_combos')) {
+            $query = DB::table('pcb_orders')->whereNull('pcb_orders.deleted_at');
+
+            if ($statusTable) {
+                $query->leftJoin($statusTable, 'pcb_orders.status_id', '=', "{$statusTable}.id")
+                      ->select(
+                          'pcb_orders.*',
+                          "{$statusTable}.name as dynamic_status_name",
+                          "{$statusTable}.slug as dynamic_status_slug"
+                      );
+            } else {
+                $query->select('pcb_orders.*');
+            }
+
+            // Hide combo member child orders from mobile production list by default (show parent & normal orders only)
+            // But when user is explicitly searching ($search !== ''), include child combo orders so the searched order is found!
+            if ($search === '' && Schema::hasTable('pcb_order_combos')) {
                 $query->whereNotIn('pcb_orders.id', function ($subQuery) {
                     $subQuery->select('combo_order_id')->from('pcb_order_combos');
                 });
             }
 
             if ($search !== '') {
-                $query->where(function ($q) use ($search) {
+                $cleanSearch = ltrim(trim($search), '#');
+                $query->where(function ($q) use ($search, $cleanSearch, $statusTable) {
                     $hasClause = false;
 
                     $columnsToCheck = [
                         'order_number',
                         'tool',
+                        'combo',
                         'part_number',
                         'board_name',
                         'gerber_file_name',
@@ -126,17 +142,32 @@ class MobileOrderController extends Controller
 
                     foreach ($columnsToCheck as $col) {
                         if (Schema::hasColumn('pcb_orders', $col)) {
-                            $hasClause ? $q->orWhere($col, 'LIKE', "%{$search}%") : $q->where($col, 'LIKE', "%{$search}%");
+                            $hasClause ? $q->orWhere("pcb_orders.{$col}", 'LIKE', "%{$search}%") : $q->where("pcb_orders.{$col}", 'LIKE', "%{$search}%");
+                            if ($cleanSearch !== '' && $cleanSearch !== $search) {
+                                $q->orWhere("pcb_orders.{$col}", 'LIKE', "%{$cleanSearch}%");
+                            }
                             $hasClause = true;
+                        }
+                    }
+
+                    if ($statusTable) {
+                        $q->orWhere("{$statusTable}.name", 'LIKE', "%{$search}%");
+                        if ($cleanSearch !== '' && $cleanSearch !== $search) {
+                            $q->orWhere("{$statusTable}.name", 'LIKE', "%{$cleanSearch}%");
                         }
                     }
 
                     // Search in pcb_order_meta table for gerber file names, board names, and other metadata
                     if (Schema::hasTable('pcb_order_meta')) {
-                        $metaSub = function ($sub) use ($search) {
+                        $metaSub = function ($sub) use ($search, $cleanSearch) {
                             $sub->select('pcb_order_id')
                                 ->from('pcb_order_meta')
-                                ->where('meta_value', 'LIKE', "%{$search}%");
+                                ->where(function ($mq) use ($search, $cleanSearch) {
+                                    $mq->where('meta_value', 'LIKE', "%{$search}%");
+                                    if ($cleanSearch !== '' && $cleanSearch !== $search) {
+                                        $mq->orWhere('meta_value', 'LIKE', "%{$cleanSearch}%");
+                                    }
+                                });
                         };
                         $hasClause ? $q->orWhereIn('pcb_orders.id', $metaSub) : $q->whereIn('pcb_orders.id', $metaSub);
                         $hasClause = true;
@@ -145,15 +176,29 @@ class MobileOrderController extends Controller
                     // Search in gerber_files table if present
                     if (Schema::hasTable('gerber_files')) {
                         if (Schema::hasColumn('pcb_orders', 'gerber_file_id')) {
-                            $gerberSub = function ($sub) use ($search) {
+                            $gerberSub = function ($sub) use ($search, $cleanSearch) {
                                 $sub->select('id')
                                     ->from('gerber_files')
-                                    ->where(function ($gq) use ($search) {
+                                    ->where(function ($gq) use ($search, $cleanSearch) {
                                         $cols = ['original_name', 'file_name', 'filename', 'board_name'];
                                         $first = true;
                                         foreach ($cols as $c) {
                                             if (Schema::hasColumn('gerber_files', $c)) {
-                                                $first ? $gq->where($c, 'LIKE', "%{$search}%") : $gq->orWhere($c, 'LIKE', "%{$search}%");
+                                                if ($first) {
+                                                    $gq->where(function ($colQ) use ($c, $search, $cleanSearch) {
+                                                        $colQ->where($c, 'LIKE', "%{$search}%");
+                                                        if ($cleanSearch !== '' && $cleanSearch !== $search) {
+                                                            $colQ->orWhere($c, 'LIKE', "%{$cleanSearch}%");
+                                                        }
+                                                    });
+                                                } else {
+                                                    $gq->orWhere(function ($colQ) use ($c, $search, $cleanSearch) {
+                                                        $colQ->where($c, 'LIKE', "%{$search}%");
+                                                        if ($cleanSearch !== '' && $cleanSearch !== $search) {
+                                                            $colQ->orWhere($c, 'LIKE', "%{$cleanSearch}%");
+                                                        }
+                                                    });
+                                                }
                                                 $first = false;
                                             }
                                         }
@@ -162,15 +207,29 @@ class MobileOrderController extends Controller
                             $hasClause ? $q->orWhereIn('pcb_orders.gerber_file_id', $gerberSub) : $q->whereIn('pcb_orders.gerber_file_id', $gerberSub);
                             $hasClause = true;
                         } elseif (Schema::hasColumn('gerber_files', 'pcb_order_id')) {
-                            $gerberSub = function ($sub) use ($search) {
+                            $gerberSub = function ($sub) use ($search, $cleanSearch) {
                                 $sub->select('pcb_order_id')
                                     ->from('gerber_files')
-                                    ->where(function ($gq) use ($search) {
+                                    ->where(function ($gq) use ($search, $cleanSearch) {
                                         $cols = ['original_name', 'file_name', 'filename', 'board_name'];
                                         $first = true;
                                         foreach ($cols as $c) {
                                             if (Schema::hasColumn('gerber_files', $c)) {
-                                                $first ? $gq->where($c, 'LIKE', "%{$search}%") : $gq->orWhere($c, 'LIKE', "%{$search}%");
+                                                if ($first) {
+                                                    $gq->where(function ($colQ) use ($c, $search, $cleanSearch) {
+                                                        $colQ->where($c, 'LIKE', "%{$search}%");
+                                                        if ($cleanSearch !== '' && $cleanSearch !== $search) {
+                                                            $colQ->orWhere($c, 'LIKE', "%{$cleanSearch}%");
+                                                        }
+                                                    });
+                                                } else {
+                                                    $gq->orWhere(function ($colQ) use ($c, $search, $cleanSearch) {
+                                                        $colQ->where($c, 'LIKE', "%{$search}%");
+                                                        if ($cleanSearch !== '' && $cleanSearch !== $search) {
+                                                            $colQ->orWhere($c, 'LIKE', "%{$cleanSearch}%");
+                                                        }
+                                                    });
+                                                }
                                                 $first = false;
                                             }
                                         }
@@ -183,25 +242,125 @@ class MobileOrderController extends Controller
                 });
             }
 
-            // Status filtering
+            // Status filtering exactly matching Admin Panel (OrderController)
             $statusLower = strtolower(trim($status));
-            if ($statusLower === 'all' || $statusLower === 'all_statuses' || ($search !== '' && ($statusLower === '' || $statusLower === 'in_production' || $statusLower === 'in production'))) {
-                // When explicitly requested 'all' or when searching with a query, search across all statuses including completed/cancelled
+            $isSearchActive = ($search !== '');
+
+            if ($statusLower === 'all' || $statusLower === 'all_statuses' || ($isSearchActive && ($statusLower === '' || $statusLower === 'in_production' || $statusLower === 'in production'))) {
+                // When explicitly requested 'all' or when searching with a query, search across all statuses
             } elseif ($statusLower === '' || $statusLower === 'in_production' || $statusLower === 'in production') {
-                $query->whereNotIn(DB::raw('LOWER(status)'), ['completed', 'cancelled', 'delivered', 'archived']);
+                // Admin Panel definition of "In Production": exclude pending, completed, shipped, delivered, cancelled, etc.
+                $excluded = ['pending', 'completed', 'shipped', 'delivered', 'cancelled', 'canceled', 'archived'];
+
+                if ($statusTable) {
+                    $query->where(function ($q) use ($excluded, $statusTable) {
+                        $q->where(function ($sq) use ($excluded) {
+                            $sq->whereNull('pcb_orders.status_id')
+                               ->whereNotIn(DB::raw('LOWER(TRIM(pcb_orders.status))'), $excluded);
+                        })->orWhere(function ($sq) use ($excluded, $statusTable) {
+                            $sq->whereNotNull('pcb_orders.status_id')
+                               ->whereNotIn(DB::raw("LOWER(TRIM({$statusTable}.name))"), $excluded)
+                               ->whereNotIn(DB::raw("LOWER(TRIM(COALESCE({$statusTable}.slug, '')))"), $excluded);
+                        });
+                    });
+                } else {
+                    $query->whereNotIn(DB::raw('LOWER(TRIM(pcb_orders.status))'), $excluded);
+                }
             } else {
-                $query->where('status', 'LIKE', "%{$status}%");
+                // Specific status requested (e.g. "Pending", "Traveler", "Drilling", etc.)
+                if ($statusTable) {
+                    $query->where(function ($q) use ($statusLower, $status, $statusTable) {
+                        $q->where(function ($sq) use ($statusLower, $status) {
+                            $sq->whereNull('pcb_orders.status_id')
+                               ->where(function ($ssq) use ($statusLower, $status) {
+                                   $ssq->where(DB::raw('LOWER(TRIM(pcb_orders.status))'), $statusLower)
+                                       ->orWhere('pcb_orders.status', 'LIKE', "%{$status}%");
+                               });
+                        })->orWhere(function ($sq) use ($statusLower, $status, $statusTable) {
+                            $sq->whereNotNull('pcb_orders.status_id')
+                               ->where(function ($ssq) use ($statusLower, $status, $statusTable) {
+                                   $ssq->where(DB::raw("LOWER(TRIM({$statusTable}.name))"), $statusLower)
+                                       ->orWhere("{$statusTable}.name", 'LIKE', "%{$status}%")
+                                       ->orWhere(DB::raw("LOWER(TRIM(COALESCE({$statusTable}.slug, '')))"), $statusLower);
+                               });
+                        });
+                    });
+                } else {
+                    $query->where(function ($q) use ($statusLower, $status) {
+                        $q->where(DB::raw('LOWER(TRIM(pcb_orders.status))'), $statusLower)
+                           ->orWhere('pcb_orders.status', 'LIKE', "%{$status}%");
+                    });
+                }
             }
 
             $total = $query->count();
-            $orders = $query->orderBy('id', 'desc')
+
+            $sortBy = trim((string)$request->input('sort_by', 'delivery_date'));
+            $sortOrder = strtolower(trim((string)$request->input('sort_order', 'asc'))) === 'desc' ? 'desc' : 'asc';
+
+            // When searching, prioritize exact order_number / tool match to appear at the top
+            if ($search !== '') {
+                $cleanSearchLower = strtolower(ltrim(trim($search), '#'));
+                $hasToolCol = Schema::hasColumn('pcb_orders', 'tool');
+                if ($hasToolCol) {
+                    $query->orderByRaw(
+                        "CASE 
+                            WHEN LOWER(TRIM(pcb_orders.order_number)) = ? OR LOWER(TRIM(pcb_orders.order_number)) = ? OR LOWER(TRIM(pcb_orders.tool)) = ? THEN 1
+                            WHEN LOWER(TRIM(pcb_orders.order_number)) LIKE ? OR LOWER(TRIM(pcb_orders.tool)) LIKE ? THEN 2
+                            ELSE 3
+                        END ASC",
+                        [$cleanSearchLower, '#' . $cleanSearchLower, $cleanSearchLower, $cleanSearchLower . '%', $cleanSearchLower . '%']
+                    );
+                } else {
+                    $query->orderByRaw(
+                        "CASE 
+                            WHEN LOWER(TRIM(pcb_orders.order_number)) = ? OR LOWER(TRIM(pcb_orders.order_number)) = ? THEN 1
+                            WHEN LOWER(TRIM(pcb_orders.order_number)) LIKE ? THEN 2
+                            ELSE 3
+                        END ASC",
+                        [$cleanSearchLower, '#' . $cleanSearchLower, $cleanSearchLower . '%']
+                    );
+                }
+            }
+
+            // Order by delivery date (earliest due date first, NULLs last)
+            if ($sortBy === 'delivery_date') {
+                $query->orderByRaw("CASE WHEN pcb_orders.delivery_date IS NULL THEN 1 ELSE 0 END ASC")
+                      ->orderBy('pcb_orders.delivery_date', $sortOrder)
+                      ->orderBy('pcb_orders.created_at', 'desc')
+                      ->orderBy('pcb_orders.id', 'desc');
+            } elseif ($sortBy === 'created_at' || $sortBy === 'order_date') {
+                $query->orderBy('pcb_orders.created_at', $sortOrder)
+                      ->orderBy('pcb_orders.id', $sortOrder);
+            } else {
+                $query->orderBy('pcb_orders.' . $sortBy, $sortOrder)
+                      ->orderBy('pcb_orders.id', 'desc');
+            }
+
+            $orders = $query
                 ->skip(($page - 1) * $perPage)
                 ->take($perPage)
                 ->get();
 
             $today = date('Y-m-d');
 
-            $items = $orders->map(function ($order) use ($today) {
+            // Pre-load child-to-parent combo relationships for current page orders
+            $childToParentMap = [];
+            if (Schema::hasTable('pcb_order_combos') && $orders->isNotEmpty()) {
+                $orderIds = $orders->pluck('id')->toArray();
+                $childToParentMap = DB::table('pcb_order_combos')
+                    ->join('pcb_orders', 'pcb_order_combos.parent_order_id', '=', 'pcb_orders.id')
+                    ->whereIn('pcb_order_combos.combo_order_id', $orderIds)
+                    ->select('pcb_order_combos.combo_order_id', 'pcb_orders.order_number')
+                    ->get()
+                    ->groupBy('combo_order_id')
+                    ->map(function ($rows) {
+                        return $rows->pluck('order_number')->filter()->implode(', ');
+                    })
+                    ->toArray();
+            }
+
+            $items = $orders->map(function ($order) use ($today, $childToParentMap) {
                 $dueDateStr = 'Upcoming';
                 $delDate = $order->delivery_date ?? null;
                 if ($delDate) {
@@ -236,10 +395,14 @@ class MobileOrderController extends Controller
                     ?? $metaMap['file_name']
                     ?? null;
 
+                $displayStatus = (!empty($order->dynamic_status_name))
+                    ? $order->dynamic_status_name
+                    : (!empty($order->status) ? $order->status : 'Pending');
+
                 return [
                     'id' => (string) $order->id,
                     'tool' => $order->order_number ?? ('M' . $order->id),
-                    'status' => ucfirst($order->status ?? 'Traveler'),
+                    'status' => ucfirst($displayStatus),
                     'film' => isset($metaMap['film']) ? (bool)$metaMap['film'] : false,
                     'film_applied' => isset($order->film_applied) ? (bool)$order->film_applied : (isset($metaMap['film_applied']) ? (bool)$metaMap['film_applied'] : false),
                     'orderNumber' => $metaMap['order_number'] ?? (string)$order->id,
@@ -261,6 +424,7 @@ class MobileOrderController extends Controller
                     'failedQty' => $failedQty,
                     'pendingQty' => $pendingQty,
                     'combo' => $order->combo ?? null,
+                    'combo_parent' => $childToParentMap[$order->id] ?? null,
                     'lastUpdate' => ($order->updated_at ?? null) ? date('h:i A', strtotime($order->updated_at)) : 'Just now'
                 ];
             });
@@ -297,13 +461,20 @@ class MobileOrderController extends Controller
         }
 
         try {
-            $order = DB::table('pcb_orders')
-                ->whereNull('deleted_at')
-                ->where(function($q) use ($id) {
-                    $q->where('id', $id)
-                      ->orWhere('order_number', $id);
-                })
-                ->first();
+            $statusTable = Schema::hasTable('pcb_order_statuses') ? 'pcb_order_statuses' : (Schema::hasTable('pcb_statuses') ? 'pcb_statuses' : null);
+
+            $orderQuery = DB::table('pcb_orders')->whereNull('pcb_orders.deleted_at');
+            if ($statusTable) {
+                $orderQuery->leftJoin($statusTable, 'pcb_orders.status_id', '=', "{$statusTable}.id")
+                           ->select('pcb_orders.*', "{$statusTable}.name as dynamic_status_name");
+            } else {
+                $orderQuery->select('pcb_orders.*');
+            }
+
+            $order = $orderQuery->where(function($q) use ($id) {
+                $q->where('pcb_orders.id', $id)
+                  ->orWhere('pcb_orders.order_number', $id);
+            })->first();
 
             if (!$order) {
                 return response()->json([
@@ -362,10 +533,14 @@ class MobileOrderController extends Controller
             $failedQty = (int) ($order->failed_qty ?? $metaMap['failed_qty'] ?? 0);
             $pendingQty = (int) ($order->pending_qty ?? $metaMap['pending_qty'] ?? max(0, $launchQty - $finalQty - $failedQty));
 
+            $displayStatus = (!empty($order->dynamic_status_name))
+                ? $order->dynamic_status_name
+                : (!empty($order->status) ? $order->status : 'Pending');
+
             $data = [
                 'id' => (string) $order->id,
                 'tool' => $order->order_number ?? ('M' . $order->id),
-                'status' => ucfirst($order->status ?? 'Traveler'),
+                'status' => ucfirst($displayStatus),
                 'film' => isset($metaMap['film']) ? (bool)$metaMap['film'] : false,
                 'film_applied' => isset($order->film_applied) ? (bool)$order->film_applied : (isset($metaMap['film_applied']) ? (bool)$metaMap['film_applied'] : false),
                 'orderNumber' => $metaMap['order_number'] ?? (string)$order->id,
@@ -384,6 +559,8 @@ class MobileOrderController extends Controller
                 'pendingQty' => $pendingQty,
                 'combo' => $order->combo ?? null,
                 'combo_orders' => Schema::hasTable('pcb_order_combos') ? DB::table('pcb_order_combos')->join('pcb_orders', 'pcb_order_combos.combo_order_id', '=', 'pcb_orders.id')->where('pcb_order_combos.parent_order_id', $order->id)->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status')->get() : [],
+                'combo_parent' => Schema::hasTable('pcb_order_combos') ? DB::table('pcb_order_combos')->join('pcb_orders', 'pcb_order_combos.parent_order_id', '=', 'pcb_orders.id')->where('pcb_order_combos.combo_order_id', $order->id)->pluck('pcb_orders.order_number')->filter()->implode(', ') : null,
+                'parent_combo_orders' => Schema::hasTable('pcb_order_combos') ? DB::table('pcb_order_combos')->join('pcb_orders', 'pcb_order_combos.parent_order_id', '=', 'pcb_orders.id')->where('pcb_order_combos.combo_order_id', $order->id)->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status')->get() : [],
                 'lastUpdate' => ($order->updated_at ?? null) ? date('h:i A', strtotime($order->updated_at)) : 'Just now',
                 'user_email' => $order->user_email ?? '',
                 'user_mobile' => $order->user_mobile ?? '',
@@ -496,6 +673,17 @@ class MobileOrderController extends Controller
                 'status' => $newStatus,
                 'updated_at' => date('Y-m-d H:i:s')
             ];
+
+            $statusTable = Schema::hasTable('pcb_order_statuses') ? 'pcb_order_statuses' : (Schema::hasTable('pcb_statuses') ? 'pcb_statuses' : null);
+            if ($statusTable) {
+                $matchingStatus = DB::table($statusTable)
+                    ->where(DB::raw('LOWER(TRIM(name))'), $newValStr)
+                    ->orWhere(DB::raw('LOWER(TRIM(slug))'), $newValStr)
+                    ->first();
+                if ($matchingStatus) {
+                    $updateData['status_id'] = $matchingStatus->id;
+                }
+            }
 
             if ($inputBillNumber !== null) {
                 $updateData['bill_number'] = $inputBillNumber !== '' ? $inputBillNumber : null;
