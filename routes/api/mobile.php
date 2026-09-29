@@ -9,6 +9,8 @@ use App\Http\Controllers\Mobile\MobileInventoryController;
 use App\Http\Controllers\Mobile\MobileProfileController;
 use App\Http\Controllers\Mobile\MobileNotificationController;
 
+use App\Http\Controllers\Mobile\MobileModulesController;
+
 /*
 |--------------------------------------------------------------------------
 | Mobile API Routes v1
@@ -43,6 +45,18 @@ Route::prefix('mobile/v1')->group(function () {
         Route::get('inventory', [MobileInventoryController::class, 'index']);
         Route::get('inventory/{id}', [MobileInventoryController::class, 'show']);
         Route::post('inventory/{id}/stock', [MobileInventoryController::class, 'adjustStock']);
+
+        // Dynamic Admin Modules for Mobile
+        Route::get('payments', [MobileModulesController::class, 'payments']);
+        Route::get('gerber-files', [MobileModulesController::class, 'gerberFiles']);
+        Route::get('clients', [MobileModulesController::class, 'clients']);
+        Route::get('staff', [MobileModulesController::class, 'staff']);
+        Route::get('roles', [MobileModulesController::class, 'roles']);
+        Route::get('email-logs', [MobileModulesController::class, 'emailLogs']);
+        Route::get('system-health', [MobileModulesController::class, 'systemHealth']);
+        Route::get('blogs', [MobileModulesController::class, 'blogs']);
+        Route::get('settings', [MobileModulesController::class, 'settings']);
+        Route::get('permissions/stream', [MobileModulesController::class, 'streamPermissions']);
 
         // Profile
         Route::get('profile', [MobileProfileController::class, 'profile']);

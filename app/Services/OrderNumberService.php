@@ -10,12 +10,12 @@ class OrderNumberService
     /**
      * Generate a unique, atomic, sequential order number for a given series ('M' or 'JL').
      *
-     * Series M: M00001, M00002, M00003... (Normal / Internal PCB orders, 5-digit padding)
+     * Series M: M0001, M0002, M0003... (Normal / Internal PCB orders, 4-digit padding)
      * Series JL: JL0001, JL0002, JL0003... (JLCPCB PCB orders, 4-digit padding)
      *
      * @param string $series 'M' or 'JL' (or legacy 'J')
-     * @param int|null $paddingLength Custom padding length (Defaults: 5 for 'M', 4 for 'JL')
-     * @return string Formatted order number (e.g. M00001 or JL0001)
+     * @param int|null $paddingLength Custom padding length (Defaults: 4 for 'M', 4 for 'JL')
+     * @return string Formatted order number (e.g. M0001 or JL0001)
      */
     public static function generateOrderNumber(string $series = 'M', ?int $paddingLength = null): string
     {
@@ -28,7 +28,7 @@ class OrderNumberService
         } else {
             $series = 'M';
             if ($paddingLength === null) {
-                $paddingLength = 5;
+                $paddingLength = 4;
             }
         }
 

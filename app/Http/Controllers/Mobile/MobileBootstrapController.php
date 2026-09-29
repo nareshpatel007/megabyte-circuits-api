@@ -27,12 +27,28 @@ class MobileBootstrapController extends Controller
                 $permissions = ['orders.view', 'inventory.view'];
             }
 
-            $hasOrdersPermission = in_array('orders.view', $permissions);
-            $hasInventoryPermission = in_array('inventory.view', $permissions);
+            $isSuperAdmin = in_array('*', $permissions);
+
+            $hasPerm = function($p) use ($permissions, $isSuperAdmin) {
+                if ($isSuperAdmin) return true;
+                return in_array($p, $permissions);
+            };
+
+            $hasOrders = $hasPerm('orders.view');
+            $hasInventory = $hasPerm('inventory.view');
+            $hasPayments = $hasPerm('payments.view');
+            $hasGerber = $hasPerm('gerber.view') || $hasPerm('orders.view_gerber');
+            $hasClients = $hasPerm('clients.view') || $hasPerm('users.manage');
+            $hasStaff = $hasPerm('staff.view') || $hasPerm('users.manage');
+            $hasRoles = $hasPerm('role.view') || $hasPerm('roles.manage');
+            $hasEmailLogs = $hasPerm('email_logs.view');
+            $hasSystemHealth = $hasPerm('system_health.view');
+            $hasBlogs = $hasPerm('blog.view');
+            $hasSettings = $hasPerm('settings.general');
 
             // Unread notifications count
             $unreadNotificationsCount = 0;
-            if (DB::getSchemaBuilder()->hasTable('notifications')) {
+            if (\Illuminate\Support\Facades\Schema::hasTable('notifications')) {
                 $unreadNotificationsCount = DB::table('notifications')
                     ->where('user_id', $adminId)
                     ->where('read', 0)
@@ -54,10 +70,20 @@ class MobileBootstrapController extends Controller
                         'department' => $admin->department ?? 'PCB Production',
                         'employee_code' => 'MCS-' . str_pad($admin->id ?? 42, 3, '0', STR_PAD_LEFT),
                     ],
-                    'permissions' => $permissions,
+                    'permissions' => array_values(array_unique($permissions)),
                     'modules' => [
-                        'orders' => $hasOrdersPermission,
-                        'inventory' => $hasInventoryPermission,
+                        'dashboard' => true,
+                        'orders' => $hasOrders,
+                        'inventory' => $hasInventory,
+                        'payments' => $hasPayments,
+                        'gerber' => $hasGerber,
+                        'clients' => $hasClients,
+                        'staff' => $hasStaff,
+                        'roles' => $hasRoles,
+                        'email_logs' => $hasEmailLogs,
+                        'system_health' => $hasSystemHealth,
+                        'blogs' => $hasBlogs,
+                        'settings' => $hasSettings,
                         'profile' => true,
                     ],
                     'notification_count' => $unreadNotificationsCount

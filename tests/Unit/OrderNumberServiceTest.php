@@ -82,7 +82,7 @@ class OrderNumberServiceTest extends TestCase
         $seqMAfter = DB::table('order_sequences')->where('series', 'M')->value('last_number');
 
         $this->assertEquals($seqMBefore + 1, $seqMAfter);
-        $this->assertEquals('M' . str_pad($seqMAfter, 5, '0', STR_PAD_LEFT), $numM);
+        $this->assertEquals('M' . str_pad($seqMAfter, 4, '0', STR_PAD_LEFT), $numM);
 
         $seqJLBefore = DB::table('order_sequences')->where('series', 'JL')->value('last_number') ?? 0;
         $numJL = OrderNumberService::generateOrderNumber('JL');
