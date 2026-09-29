@@ -15,18 +15,44 @@ class MobileNotificationController extends Controller
             $adminId = $request->attributes->get('admin_id');
 
             if (Schema::hasTable('notifications')) {
-                $notifications = DB::table('notifications')
-                    ->where('user_id', $adminId)
+                $query = DB::table('notifications');
+                $hasRecipientId = Schema::hasColumn('notifications', 'recipient_id');
+                $hasUserId = Schema::hasColumn('notifications', 'user_id');
+                $hasIsRead = Schema::hasColumn('notifications', 'is_read');
+                $hasRead = Schema::hasColumn('notifications', 'read');
+
+                if ($hasRecipientId) {
+                    if ($adminId) {
+                        $query->where(function ($q) use ($adminId) {
+                            $q->where('recipient_id', $adminId)->orWhereNull('recipient_id');
+                        });
+                    }
+                    if (Schema::hasColumn('notifications', 'recipient_type')) {
+                        $query->whereIn('recipient_type', ['admin', 'all', 'user']);
+                    }
+                } elseif ($hasUserId && $adminId) {
+                    $query->where('user_id', $adminId);
+                }
+
+                $notifications = $query
                     ->orderBy('created_at', 'desc')
+                    ->limit(50)
                     ->get()
-                    ->map(function ($n) {
+                    ->map(function ($n) use ($hasIsRead, $hasRead) {
+                        $isUnread = false;
+                        if ($hasIsRead) {
+                            $isUnread = !(bool)$n->is_read;
+                        } elseif ($hasRead) {
+                            $isUnread = !(bool)$n->read;
+                        }
+
                         return [
                             'id' => (string)$n->id,
-                            'type' => $n->type ?? 'assignment',
+                            'type' => $n->type ?? $n->category ?? 'assignment',
                             'title' => $n->title ?? 'Production Notice',
                             'detail' => $n->detail ?? $n->message ?? '',
-                            'time' => $n->created_at ? date('h:i A', strtotime($n->created_at)) : 'Just now',
-                            'unread' => (bool)!$n->read
+                            'time' => !empty($n->created_at) ? date('h:i A', strtotime($n->created_at)) : 'Just now',
+                            'unread' => $isUnread
                         ];
                     });
 
@@ -60,10 +86,30 @@ class MobileNotificationController extends Controller
         try {
             $adminId = $request->attributes->get('admin_id');
             if (Schema::hasTable('notifications')) {
-                DB::table('notifications')
-                    ->where('id', $id)
-                    ->where('user_id', $adminId)
-                    ->update(['read' => 1, 'updated_at' => date('Y-m-d H:i:s')]);
+                $hasRecipientId = Schema::hasColumn('notifications', 'recipient_id');
+                $hasUserId = Schema::hasColumn('notifications', 'user_id');
+                $hasIsRead = Schema::hasColumn('notifications', 'is_read');
+                $hasRead = Schema::hasColumn('notifications', 'read');
+
+                $query = DB::table('notifications')->where('id', $id);
+                if ($hasRecipientId && $adminId) {
+                    $query->where(function($q) use ($adminId) {
+                        $q->where('recipient_id', $adminId)->orWhereNull('recipient_id');
+                    });
+                } elseif ($hasUserId && $adminId) {
+                    $query->where('user_id', $adminId);
+                }
+
+                $updates = ['updated_at' => date('Y-m-d H:i:s')];
+                if ($hasIsRead) {
+                    $updates['is_read'] = 1;
+                    $updates['read_at'] = date('Y-m-d H:i:s');
+                }
+                if ($hasRead) {
+                    $updates['read'] = 1;
+                }
+
+                $query->update($updates);
             }
 
             return response()->json([
@@ -81,9 +127,28 @@ class MobileNotificationController extends Controller
         try {
             $adminId = $request->attributes->get('admin_id');
             if (Schema::hasTable('notifications')) {
-                DB::table('notifications')
-                    ->where('user_id', $adminId)
-                    ->update(['read' => 1, 'updated_at' => date('Y-m-d H:i:s')]);
+                $hasRecipientId = Schema::hasColumn('notifications', 'recipient_id');
+                $hasUserId = Schema::hasColumn('notifications', 'user_id');
+                $hasIsRead = Schema::hasColumn('notifications', 'is_read');
+                $hasRead = Schema::hasColumn('notifications', 'read');
+
+                $query = DB::table('notifications');
+                if ($hasRecipientId && $adminId) {
+                    $query->where('recipient_id', $adminId);
+                } elseif ($hasUserId && $adminId) {
+                    $query->where('user_id', $adminId);
+                }
+
+                $updates = ['updated_at' => date('Y-m-d H:i:s')];
+                if ($hasIsRead) {
+                    $updates['is_read'] = 1;
+                    $updates['read_at'] = date('Y-m-d H:i:s');
+                }
+                if ($hasRead) {
+                    $updates['read'] = 1;
+                }
+
+                $query->update($updates);
             }
 
             return response()->json([

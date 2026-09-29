@@ -211,48 +211,52 @@ class MobileAuthController extends Controller
 
     private static function ensureDefaultPermissions()
     {
-        $defaults = [
-            ['name' => 'View Dashboard', 'slug' => 'dashboard.view', 'module' => 'Dashboard & Analytics'],
-            ['name' => 'View Orders', 'slug' => 'orders.view', 'module' => 'Order Management'],
-            ['name' => 'Create Orders', 'slug' => 'orders.create', 'module' => 'Order Management'],
-            ['name' => 'Edit Orders', 'slug' => 'orders.edit', 'module' => 'Order Management'],
-            ['name' => 'Delete Orders', 'slug' => 'orders.delete', 'module' => 'Order Management'],
-            ['name' => 'Manage Orders', 'slug' => 'orders.manage', 'module' => 'Order Management'],
-            ['name' => 'Update Order Status', 'slug' => 'orders.status', 'module' => 'Order Management'],
-            ['name' => 'View Gerber Files', 'slug' => 'gerber.view', 'module' => 'Gerber Files'],
-            ['name' => 'Download Gerber Files', 'slug' => 'gerber.download', 'module' => 'Gerber Files'],
-            ['name' => 'Delete Gerber Files', 'slug' => 'gerber.delete', 'module' => 'Gerber Files'],
-            ['name' => 'View Inventory', 'slug' => 'inventory.view', 'module' => 'Inventory Management'],
-            ['name' => 'Create Inventory Item', 'slug' => 'inventory.create', 'module' => 'Inventory Management'],
-            ['name' => 'Edit Inventory Item', 'slug' => 'inventory.edit', 'module' => 'Inventory Management'],
-            ['name' => 'Delete Inventory Item', 'slug' => 'inventory.delete', 'module' => 'Inventory Management'],
-            ['name' => 'Manage Inventory Stock', 'slug' => 'inventory.manage', 'module' => 'Inventory Management'],
-            ['name' => 'View Payments', 'slug' => 'payments.view', 'module' => 'Payment Management'],
-            ['name' => 'View Clients', 'slug' => 'clients.view', 'module' => 'Client Management'],
-            ['name' => 'Create Clients', 'slug' => 'clients.create', 'module' => 'Client Management'],
-            ['name' => 'Edit Clients', 'slug' => 'clients.edit', 'module' => 'Client Management'],
-            ['name' => 'Delete Clients', 'slug' => 'clients.delete', 'module' => 'Client Management'],
-            ['name' => 'View Staff', 'slug' => 'staff.view', 'module' => 'Staff & User Roles'],
-            ['name' => 'Create Staff', 'slug' => 'staff.create', 'module' => 'Staff & User Roles'],
-            ['name' => 'Edit Staff', 'slug' => 'staff.edit', 'module' => 'Staff & User Roles'],
-            ['name' => 'Delete Staff', 'slug' => 'staff.delete', 'module' => 'Staff & User Roles'],
-            ['name' => 'View Roles', 'slug' => 'role.view', 'module' => 'Staff & User Roles'],
-            ['name' => 'Manage Roles', 'slug' => 'roles.manage', 'module' => 'Staff & User Roles'],
-            ['name' => 'View Email Logs', 'slug' => 'email_logs.view', 'module' => 'Email Logs'],
-            ['name' => 'View System Health', 'slug' => 'system_health.view', 'module' => 'System Health'],
-            ['name' => 'View Blogs', 'slug' => 'blog.view', 'module' => 'Blog Management'],
-            ['name' => 'View Settings', 'slug' => 'settings.general', 'module' => 'System Settings'],
-            ['name' => 'Manage Order Status Settings', 'slug' => 'settings.order_status', 'module' => 'System Settings'],
-        ];
+        try {
+            $defaults = [
+                ['name' => 'View Dashboard', 'slug' => 'dashboard.view', 'module' => 'Dashboard & Analytics'],
+                ['name' => 'View Orders', 'slug' => 'orders.view', 'module' => 'Order Management'],
+                ['name' => 'Create Orders', 'slug' => 'orders.create', 'module' => 'Order Management'],
+                ['name' => 'Edit Orders', 'slug' => 'orders.edit', 'module' => 'Order Management'],
+                ['name' => 'Delete Orders', 'slug' => 'orders.delete', 'module' => 'Order Management'],
+                ['name' => 'Manage Orders', 'slug' => 'orders.manage', 'module' => 'Order Management'],
+                ['name' => 'Update Order Status', 'slug' => 'orders.status', 'module' => 'Order Management'],
+                ['name' => 'View Gerber Files', 'slug' => 'gerber.view', 'module' => 'Gerber Files'],
+                ['name' => 'Download Gerber Files', 'slug' => 'gerber.download', 'module' => 'Gerber Files'],
+                ['name' => 'Delete Gerber Files', 'slug' => 'gerber.delete', 'module' => 'Gerber Files'],
+                ['name' => 'View Inventory', 'slug' => 'inventory.view', 'module' => 'Inventory Management'],
+                ['name' => 'Create Inventory Item', 'slug' => 'inventory.create', 'module' => 'Inventory Management'],
+                ['name' => 'Edit Inventory Item', 'slug' => 'inventory.edit', 'module' => 'Inventory Management'],
+                ['name' => 'Delete Inventory Item', 'slug' => 'inventory.delete', 'module' => 'Inventory Management'],
+                ['name' => 'Manage Inventory Stock', 'slug' => 'inventory.manage', 'module' => 'Inventory Management'],
+                ['name' => 'View Payments', 'slug' => 'payments.view', 'module' => 'Payment Management'],
+                ['name' => 'View Clients', 'slug' => 'clients.view', 'module' => 'Client Management'],
+                ['name' => 'Create Clients', 'slug' => 'clients.create', 'module' => 'Client Management'],
+                ['name' => 'Edit Clients', 'slug' => 'clients.edit', 'module' => 'Client Management'],
+                ['name' => 'Delete Clients', 'slug' => 'clients.delete', 'module' => 'Client Management'],
+                ['name' => 'View Staff', 'slug' => 'staff.view', 'module' => 'Staff & User Roles'],
+                ['name' => 'Create Staff', 'slug' => 'staff.create', 'module' => 'Staff & User Roles'],
+                ['name' => 'Edit Staff', 'slug' => 'staff.edit', 'module' => 'Staff & User Roles'],
+                ['name' => 'Delete Staff', 'slug' => 'staff.delete', 'module' => 'Staff & User Roles'],
+                ['name' => 'View Roles', 'slug' => 'role.view', 'module' => 'Staff & User Roles'],
+                ['name' => 'Manage Roles', 'slug' => 'roles.manage', 'module' => 'Staff & User Roles'],
+                ['name' => 'View Email Logs', 'slug' => 'email_logs.view', 'module' => 'Email Logs'],
+                ['name' => 'View System Health', 'slug' => 'system_health.view', 'module' => 'System Health'],
+                ['name' => 'View Blogs', 'slug' => 'blog.view', 'module' => 'Blog Management'],
+                ['name' => 'View Settings', 'slug' => 'settings.general', 'module' => 'System Settings'],
+                ['name' => 'Manage Order Status Settings', 'slug' => 'settings.order_status', 'module' => 'System Settings'],
+            ];
 
-        foreach ($defaults as $d) {
-            $exists = DB::table('permissions')->where('slug', $d['slug'])->exists();
-            if (!$exists) {
-                DB::table('permissions')->insert(array_merge($d, [
-                    'created_at' => now(),
-                    'updated_at' => now()
-                ]));
+            foreach ($defaults as $d) {
+                $exists = DB::table('permissions')->where('slug', $d['slug'])->exists();
+                if (!$exists) {
+                    DB::table('permissions')->insert(array_merge($d, [
+                        'created_at' => now(),
+                        'updated_at' => now()
+                    ]));
+                }
             }
+        } catch (\Throwable $e) {
+            // Silently continue if permissions table is read-only or slightly different schema
         }
     }
 }

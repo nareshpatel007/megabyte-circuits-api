@@ -34,7 +34,7 @@ class MobileModulesController extends Controller
         }
 
         // Module fallbacks & alias mappings
-        if ($permission === 'gerber.view' && (in_array('orders.view_gerber', $permissions) || in_array('orders.view', $permissions))) {
+        if ($permission === 'gerber.view' && in_array('orders.view_gerber', $permissions)) {
             return true;
         }
         if ($permission === 'clients.view' && in_array('users.manage', $permissions)) {
@@ -291,7 +291,15 @@ class MobileModulesController extends Controller
      */
     public function roles(Request $request)
     {
-        if (!self::hasPermission($request, 'role.view')) {
+        if (
+            !self::hasPermission($request, 'role.view') &&
+            !self::hasPermission($request, 'roles.view') &&
+            !self::hasPermission($request, 'roles.manage') &&
+            !self::hasPermission($request, 'staff.view') &&
+            !self::hasPermission($request, 'staff.edit') &&
+            !self::hasPermission($request, 'staff.create') &&
+            !self::hasPermission($request, 'users.manage')
+        ) {
             return response()->json([
                 'success' => false,
                 'message' => 'You do not have permission to access Roles.'
@@ -702,6 +710,36 @@ class MobileModulesController extends Controller
     }
 
     // --- BLOGS CRUD ---
+    public function showBlog(Request $request, $id)
+    {
+        if (!self::hasPermission($request, 'blog.view')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You do not have permission to view blog posts.'
+            ], 403);
+        }
+
+        try {
+            $blog = DB::table('blogs')->where('id', $id)->first();
+            if (!$blog) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Blog post not found.'
+                ], 404);
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $blog
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch blog post: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function storeBlog(Request $request)
     {
         if (!self::hasPermission($request, 'blog.create')) {

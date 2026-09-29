@@ -48,13 +48,33 @@ class MobileBootstrapController extends Controller
 
             // Unread notifications count
             $unreadNotificationsCount = 0;
-            if (\Illuminate\Support\Facades\Schema::hasTable('notifications')) {
-                $unreadNotificationsCount = DB::table('notifications')
-                    ->where('user_id', $adminId)
-                    ->where('read', 0)
-                    ->count();
-            } else {
-                $unreadNotificationsCount = 3;
+            try {
+                if (\Illuminate\Support\Facades\Schema::hasTable('notifications')) {
+                    $query = DB::table('notifications');
+
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('notifications', 'recipient_id')) {
+                        if ($adminId) {
+                            $query->where(function ($q) use ($adminId) {
+                                $q->where('recipient_id', $adminId)->orWhereNull('recipient_id');
+                            });
+                        }
+                        if (\Illuminate\Support\Facades\Schema::hasColumn('notifications', 'recipient_type')) {
+                            $query->whereIn('recipient_type', ['admin', 'all', 'user']);
+                        }
+                    } elseif (\Illuminate\Support\Facades\Schema::hasColumn('notifications', 'user_id') && $adminId) {
+                        $query->where('user_id', $adminId);
+                    }
+
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('notifications', 'is_read')) {
+                        $query->where('is_read', 0);
+                    } elseif (\Illuminate\Support\Facades\Schema::hasColumn('notifications', 'read')) {
+                        $query->where('read', 0);
+                    }
+
+                    $unreadNotificationsCount = $query->count();
+                }
+            } catch (\Throwable $notifEx) {
+                $unreadNotificationsCount = 0;
             }
 
             return response()->json([

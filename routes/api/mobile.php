@@ -77,6 +77,7 @@ Route::prefix('mobile/v1')->group(function () {
         Route::get('system-health', [MobileModulesController::class, 'systemHealth']);
 
         Route::get('blogs', [MobileModulesController::class, 'blogs']);
+        Route::get('blogs/{id}', [MobileModulesController::class, 'showBlog']);
         Route::post('blogs', [MobileModulesController::class, 'storeBlog']);
         Route::put('blogs/{id}', [MobileModulesController::class, 'updateBlog']);
         Route::delete('blogs/{id}', [MobileModulesController::class, 'deleteBlog']);
