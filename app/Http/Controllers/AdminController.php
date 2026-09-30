@@ -582,6 +582,33 @@ class AdminController extends Controller
 
             $orders = $ordersQuery->select($selectFields)->orderBy('pcb_orders.created_at', 'desc')->get();
 
+            if ($orders->isNotEmpty() && Schema::hasTable('pcb_order_metas')) {
+                $orderIds = $orders->pluck('id')->toArray();
+                $metas = DB::table('pcb_order_metas')
+                    ->whereIn('pcb_order_id', $orderIds)
+                    ->whereIn('meta_key', ['pn_number', 'p_n', 'part_number', 'board_name'])
+                    ->get()
+                    ->groupBy('pcb_order_id');
+
+                foreach ($orders as $order) {
+                    if (empty($order->pn_number)) {
+                        $orderMetas = $metas->get($order->id);
+                        if ($orderMetas) {
+                            $metaPn = $orderMetas->firstWhere('meta_key', 'pn_number')
+                                ?? $orderMetas->firstWhere('meta_key', 'p_n')
+                                ?? $orderMetas->firstWhere('meta_key', 'part_number')
+                                ?? $orderMetas->firstWhere('meta_key', 'board_name');
+                            if ($metaPn && !empty($metaPn->meta_value)) {
+                                $order->pn_number = $metaPn->meta_value;
+                            }
+                        }
+                    }
+                    if (empty($order->pn_number) && !empty($order->board_name)) {
+                        $order->pn_number = $order->board_name;
+                    }
+                }
+            }
+
             // Calculate Order Summary Stats
             $ordersCount = $orders->count();
             $totalSpent = $orders->sum('order_value');
