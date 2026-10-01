@@ -737,12 +737,39 @@ class JlcpcbService
 
         // 3. Guard against Flex PCB parameter mismatches (plateType 7):
         if (isset($pcbParam['plateType']) && (int)$pcbParam['plateType'] === 7) {
-            unset($pcbParam['insideCuprumThickness']);
             // If thickness is >= 0.5mm, this is PTFE/Teflon incorrectly mapped to 7, normalize to 6 (PTFE)
             if (isset($pcbParam['thickness']) && (float)$pcbParam['thickness'] >= 0.5) {
                 $pcbParam['plateType'] = 6;
-            } elseif (isset($pcbParam['thickness']) && (float)$pcbParam['thickness'] <= 0.11) {
-                $pcbParam['copperWeight'] = 0.33;
+            } else {
+                $layers = (int)($pcbParam['layer'] ?? 2);
+                if ($layers >= 4) {
+                    $pcbParam['copperWeight'] = 1;
+                    $ctcOpt = 'PI:25um/AD:25um';
+                } else {
+                    unset($pcbParam['insideCuprumThickness']);
+                    $pcbParam['copperWeight'] = 0.33;
+                    $ctcOpt = 'PI:12.5um/AD:15um';
+                }
+
+                // Ensure Coverlay Thickness (CTC) is present for Flex
+                $hasCtc = false;
+                if (!empty($pcbParam['serviceConfigVos']) && is_array($pcbParam['serviceConfigVos'])) {
+                    foreach ($pcbParam['serviceConfigVos'] as $vo) {
+                        if (($vo['serviceConfigCode'] ?? '') === 'CTC') {
+                            $hasCtc = true;
+                            break;
+                        }
+                    }
+                }
+                if (!$hasCtc) {
+                    if (!isset($pcbParam['serviceConfigVos']) || !is_array($pcbParam['serviceConfigVos'])) {
+                        $pcbParam['serviceConfigVos'] = [];
+                    }
+                    $pcbParam['serviceConfigVos'][] = [
+                        'serviceConfigCode' => 'CTC',
+                        'configOptionShow' => $ctcOpt
+                    ];
+                }
             }
         }
 
