@@ -428,9 +428,62 @@ namespace App\Http\Controllers;
                 $totalRecords = PcbOrder::count();
                 $totalFiltered = (clone $query)->count();
 
-                $statsTotalValue = (float) (clone $query)->sum('order_value');
-                $statsActiveOrders = (clone $query)->whereNotIn(\Illuminate\Support\Facades\DB::raw('LOWER(TRIM(status))'), ['completed', 'shipped', 'delivered', 'cancelled', 'canceled'])->count();
-                $statsCompletedOrders = (clone $query)->whereIn(\Illuminate\Support\Facades\DB::raw('LOWER(TRIM(status))'), ['completed', 'shipped', 'delivered'])->count();
+                // Compute aggregated summary stats across ALL filtered orders matching the query & status
+                $statsBuilder = (clone $query)->getQuery();
+                $statsBuilder->orders = null;
+
+                $hasStatusesTable = \Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses');
+                $statusExpr = $hasStatusesTable
+                    ? "LOWER(TRIM(COALESCE((SELECT name FROM pcb_order_statuses WHERE pcb_order_statuses.id = pcb_orders.status_id LIMIT 1), pcb_orders.status, 'pending')))"
+                    : "LOWER(TRIM(COALESCE(pcb_orders.status, 'pending')))";
+
+                $statsAgg = $statsBuilder->selectRaw("
+                    COUNT(*) as total_orders,
+                    COALESCE(SUM(CASE WHEN {$statusExpr} NOT IN ('completed', 'shipped', 'delivered', 'cancelled', 'canceled') THEN 1 ELSE 0 END), 0) as active_orders,
+                    COALESCE(SUM(CASE WHEN {$statusExpr} IN ('completed', 'shipped', 'delivered') THEN 1 ELSE 0 END), 0) as completed_orders,
+                    COALESCE(SUM(order_value), 0) as total_value,
+                    COALESCE(SUM(
+                        CASE WHEN (
+                            pcb_orders.order_type = 'part' 
+                            OR EXISTS (SELECT 1 FROM pcb_order_meta WHERE pcb_order_meta.pcb_order_id = pcb_orders.id AND pcb_order_meta.meta_key = 'product_type' AND LOWER(pcb_order_meta.meta_value) = 'part')
+                        ) THEN 0 
+                        ELSE COALESCE(NULLIF(order_qty, 0), (SELECT CAST(meta_value AS SIGNED) FROM pcb_order_meta WHERE pcb_order_id = pcb_orders.id AND meta_key IN ('qty', 'quantity') LIMIT 1), 0)
+                        END
+                    ), 0) as total_qty,
+                    COALESCE(SUM(
+                        CASE WHEN (
+                            pcb_orders.order_type = 'part' 
+                            OR EXISTS (SELECT 1 FROM pcb_order_meta WHERE pcb_order_meta.pcb_order_id = pcb_orders.id AND pcb_order_meta.meta_key = 'product_type' AND LOWER(pcb_order_meta.meta_value) = 'part')
+                        ) THEN 0 
+                        ELSE COALESCE(NULLIF(launch_qty, 0), (SELECT CAST(meta_value AS SIGNED) FROM pcb_order_meta WHERE pcb_order_id = pcb_orders.id AND meta_key = 'launch_qty' LIMIT 1), NULLIF(order_qty, 0), (SELECT CAST(meta_value AS SIGNED) FROM pcb_order_meta WHERE pcb_order_id = pcb_orders.id AND meta_key IN ('qty', 'quantity') LIMIT 1), 0)
+                        END
+                    ), 0) as launch_qty,
+                    COALESCE(SUM(
+                        CASE WHEN (
+                            pcb_orders.order_type = 'part' 
+                            OR EXISTS (SELECT 1 FROM pcb_order_meta WHERE pcb_order_meta.pcb_order_id = pcb_orders.id AND pcb_order_meta.meta_key = 'product_type' AND LOWER(pcb_order_meta.meta_value) = 'part')
+                        ) THEN 0 
+                        ELSE COALESCE(NULLIF(final_qty, 0), NULLIF(completed_qty, 0), (SELECT CAST(meta_value AS SIGNED) FROM pcb_order_meta WHERE pcb_order_id = pcb_orders.id AND meta_key IN ('final_qty', 'completed_qty') LIMIT 1), CASE WHEN {$statusExpr} IN ('completed', 'shipped', 'delivered') THEN COALESCE(NULLIF(order_qty, 0), (SELECT CAST(meta_value AS SIGNED) FROM pcb_order_meta WHERE pcb_order_id = pcb_orders.id AND meta_key IN ('qty', 'quantity') LIMIT 1), 0) ELSE 0 END)
+                        END
+                    ), 0) as final_qty,
+                    COALESCE(SUM(
+                        CASE WHEN (
+                            pcb_orders.order_type = 'part' 
+                            OR EXISTS (SELECT 1 FROM pcb_order_meta WHERE pcb_order_meta.pcb_order_id = pcb_orders.id AND pcb_order_meta.meta_key = 'product_type' AND LOWER(pcb_order_meta.meta_value) = 'part')
+                        ) THEN 0 
+                        ELSE COALESCE(NULLIF(failed_qty, 0), (SELECT CAST(meta_value AS SIGNED) FROM pcb_order_meta WHERE pcb_order_id = pcb_orders.id AND meta_key IN ('failed_qty', 'fail_qty') LIMIT 1), 0)
+                        END
+                    ), 0) as failed_qty
+                ")->first();
+
+                $statsTotalOrders = (int) ($statsAgg->total_orders ?? $totalFiltered);
+                $statsActiveOrders = (int) ($statsAgg->active_orders ?? 0);
+                $statsCompletedOrders = (int) ($statsAgg->completed_orders ?? 0);
+                $statsTotalValue = (float) ($statsAgg->total_value ?? 0);
+                $statsTotalQty = (int) ($statsAgg->total_qty ?? 0);
+                $statsLaunchQty = (int) ($statsAgg->launch_qty ?? 0);
+                $statsFinalQty = (int) ($statsAgg->final_qty ?? 0);
+                $statsFailedQty = (int) ($statsAgg->failed_qty ?? 0);
 
                 // Sorting (Default: created_at desc - latest placed orders first)
                 $sortBy = $request->input('sort_by', 'created_at');
@@ -505,11 +558,17 @@ namespace App\Http\Controllers;
                     'per_page' => $perPage,
                     'last_page' => (int) ceil($totalFiltered / ($perPage > 0 ? $perPage : 1)),
                     'stats' => [
-                        'total_orders' => $totalFiltered,
-                        'total_records' => $totalRecords,
-                        'active_orders' => $statsActiveOrders,
+                        'total_orders'     => $statsTotalOrders,
+                        'total_records'    => (int) $totalRecords,
+                        'active_orders'    => $statsActiveOrders,
                         'completed_orders' => $statsCompletedOrders,
-                        'total_value' => $statsTotalValue,
+                        'total_value'      => $statsTotalValue,
+                        'total_qty'        => $statsTotalQty,
+                        'ordered_qty'      => $statsTotalQty,
+                        'launch_qty'       => $statsLaunchQty,
+                        'final_qty'        => $statsFinalQty,
+                        'completed_qty'    => $statsFinalQty,
+                        'failed_qty'       => $statsFailedQty,
                     ]
                 ]);
             } catch (\Throwable $th) {
