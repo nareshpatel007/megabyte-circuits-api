@@ -40,6 +40,7 @@ Route::prefix('mobile/v1')->group(function () {
         Route::get('orders/{id}/history', [MobileOrderController::class, 'getHistory']);
         Route::get('orders/{id}/notes', [MobileOrderController::class, 'getNotes']);
         Route::post('orders/{id}/notes', [MobileOrderController::class, 'addNote']);
+        Route::delete('orders/notes/{noteId}', [MobileOrderController::class, 'deleteNote']);
         Route::put('orders/{id}/status', [MobileOrderController::class, 'updateStatus']);
         Route::put('orders/{id}/quantities', [MobileOrderController::class, 'updateQuantities']);
         Route::put('orders/{id}/film-applied', [MobileOrderController::class, 'updateFilmApplied']);

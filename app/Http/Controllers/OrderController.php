@@ -1482,9 +1482,15 @@ namespace App\Http\Controllers;
                     return response()->json(['status' => true, 'data' => []]);
                 }
 
+                $order = \Illuminate\Support\Facades\DB::table('pcb_orders')
+                    ->where('id', $id)
+                    ->orWhere('order_number', $id)
+                    ->first();
+                $orderId = $order ? $order->id : $id;
+
                 $notesQuery = \Illuminate\Support\Facades\DB::table('pcb_order_notes')
                     ->leftJoin('admins', 'pcb_order_notes.admin_id', '=', 'admins.id')
-                    ->where('pcb_order_notes.pcb_order_id', $id);
+                    ->where('pcb_order_notes.pcb_order_id', $orderId);
 
                 if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_notes', 'deleted_at')) {
                     $notesQuery->whereNull('pcb_order_notes.deleted_at');
@@ -1517,8 +1523,14 @@ namespace App\Http\Controllers;
                     return response()->json(['status' => false, 'message' => 'Note content cannot be empty.'], 400);
                 }
 
+                $order = \Illuminate\Support\Facades\DB::table('pcb_orders')
+                    ->where('id', $id)
+                    ->orWhere('order_number', $id)
+                    ->first();
+                $orderId = $order ? $order->id : $id;
+
                 $noteId = \Illuminate\Support\Facades\DB::table('pcb_order_notes')->insertGetId([
-                    'pcb_order_id' => $id,
+                    'pcb_order_id' => $orderId,
                     'admin_id' => $adminId ?: 1,
                     'note' => $noteText,
                     'is_internal' => true,
@@ -1526,10 +1538,16 @@ namespace App\Http\Controllers;
                     'updated_at' => now()
                 ]);
 
+                $newNote = \Illuminate\Support\Facades\DB::table('pcb_order_notes')
+                    ->leftJoin('admins', 'pcb_order_notes.admin_id', '=', 'admins.id')
+                    ->where('pcb_order_notes.id', $noteId)
+                    ->select('pcb_order_notes.*', 'admins.name as admin_name', 'admins.username as admin_username')
+                    ->first();
+
                 return response()->json([
                     'status' => true,
                     'message' => 'Note added successfully.',
-                    'data' => ['id' => $noteId]
+                    'data' => $newNote ?: ['id' => $noteId]
                 ], 201);
             } catch (\Throwable $th) {
                 return response()->json(['status' => false, 'message' => $th->getMessage()], 500);

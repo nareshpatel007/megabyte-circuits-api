@@ -703,6 +703,37 @@ class MobileOrderController extends Controller
                 'unit_price' => (float)($order->unit_price ?? 0),
                 'order_value' => (float)($order->order_value ?? 0),
                 'history' => $history,
+                'metas' => $metaMap,
+                'base_material' => $metaMap['base_material'] ?? $metaMap['material'] ?? 'FR-4',
+                'substrate_type' => $metaMap['substrate_type'] ?? 'N/A',
+                'material_type' => $metaMap['material_type'] ?? 'FR4-TG135',
+                'thickness' => $metaMap['thickness'] ?? $metaMap['board_thickness'] ?? '1.6mm',
+                'solder_mask' => $this->resolveMaskColor($order, $metaMap),
+                'silkscreen' => $metaMap['silkscreen'] ?? $metaMap['silkscreen_color'] ?? 'White',
+                'surface_finish' => $metaMap['surface_finish'] ?? $metaMap['finish'] ?? 'HASL(Leaded)',
+                'gold_thickness' => $metaMap['gold_thickness'] ?? 'N/A',
+                'copper_weight' => $metaMap['copper_weight'] ?? $metaMap['copper_thickness'] ?? '1 oz',
+                'via_covering' => $metaMap['via_covering'] ?? 'N/A',
+                'via_plating' => $metaMap['via_plating'] ?? 'N/A',
+                'min_hole' => $metaMap['min_hole'] ?? $metaMap['min_hole_size'] ?? 'N/A',
+                'confirm_file' => $metaMap['confirm_file'] ?? 'No',
+                'mark_on_pcb' => $metaMap['mark_on_pcb'] ?? 'Remove Mark',
+                'elec_test' => $metaMap['elec_test'] ?? 'Flying Probe Fully Test',
+                'different_design' => $metaMap['different_design'] ?? '1',
+                'delivery_format' => $metaMap['delivery_format'] ?? 'Single PCB',
+                'panel_format' => $metaMap['panel_format'] ?? 'N/A',
+                'coverlay_thickness' => $metaMap['coverlay_thickness'] ?? 'N/A',
+                'stiffener' => $metaMap['stiffener'] ?? 'N/A',
+                'emi_shielding' => $metaMap['emi_shielding'] ?? 'N/A',
+                'dimensions' => $metaMap['dimensions'] ?? null,
+                'gold_fingers' => $metaMap['gold_fingers'] ?? 'No',
+                'castellated' => $metaMap['castellated'] ?? 'No',
+                'edge_plating' => $metaMap['edge_plating'] ?? 'No',
+                'blind_slots' => $metaMap['blind_slots'] ?? 'No',
+                'ul_marking' => $metaMap['ul_marking'] ?? 'No',
+                'humidity' => $metaMap['humidity'] ?? 'No',
+                'kelvin_test' => $metaMap['kelvin_test'] ?? 'No',
+                'paper_between' => $metaMap['paper_between'] ?? 'No',
             ];
 
             return response()->json([
@@ -903,11 +934,14 @@ class MobileOrderController extends Controller
         }
 
         try {
+            $order = DB::table('pcb_orders')->where('id', $id)->orWhere('order_number', $id)->first();
+            $orderId = $order ? $order->id : $id;
+
             $notes = [];
             if (Schema::hasTable('pcb_order_notes')) {
                 $notesQuery = DB::table('pcb_order_notes')
                     ->leftJoin('admins', 'pcb_order_notes.admin_id', '=', 'admins.id')
-                    ->where('pcb_order_notes.pcb_order_id', $id);
+                    ->where('pcb_order_notes.pcb_order_id', $orderId);
 
                 if (Schema::hasColumn('pcb_order_notes', 'deleted_at')) {
                     $notesQuery->whereNull('pcb_order_notes.deleted_at');
@@ -935,7 +969,6 @@ class MobileOrderController extends Controller
 
             // Also retrieve customer remark / instruction for convenient access
             $customerNote = null;
-            $order = DB::table('pcb_orders')->where('id', $id)->first();
             if ($order) {
                 $metaMap = DB::table('pcb_order_meta')
                     ->where('pcb_order_id', $order->id)
@@ -993,11 +1026,13 @@ class MobileOrderController extends Controller
                 return response()->json(['success' => false, 'message' => 'Note content is required'], 400);
             }
 
+            $order = DB::table('pcb_orders')->where('id', $id)->orWhere('order_number', $id)->first();
+            $orderId = $order ? $order->id : $id;
             $adminId = $request->attributes->get('admin_id') ?: 1;
 
             if (Schema::hasTable('pcb_order_notes')) {
                 DB::table('pcb_order_notes')->insert([
-                    'pcb_order_id' => $id,
+                    'pcb_order_id' => $orderId,
                     'admin_id' => $adminId,
                     'note' => $note,
                     'is_internal' => 1,
@@ -1011,6 +1046,32 @@ class MobileOrderController extends Controller
                 'message' => 'Note added successfully'
             ]);
 
+        } catch (\Throwable $th) {
+            return response()->json(['success' => false, 'message' => $th->getMessage()], 500);
+        }
+    }
+
+    public function deleteNote(Request $request, $noteId)
+    {
+        if ($forbidden = $this->checkPermission($request)) {
+            return $forbidden;
+        }
+
+        try {
+            if (Schema::hasTable('pcb_order_notes')) {
+                if (Schema::hasColumn('pcb_order_notes', 'deleted_at')) {
+                    DB::table('pcb_order_notes')
+                        ->where('id', $noteId)
+                        ->update(['deleted_at' => date('Y-m-d H:i:s')]);
+                } else {
+                    DB::table('pcb_order_notes')->where('id', $noteId)->delete();
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Note deleted successfully'
+            ]);
         } catch (\Throwable $th) {
             return response()->json(['success' => false, 'message' => $th->getMessage()], 500);
         }

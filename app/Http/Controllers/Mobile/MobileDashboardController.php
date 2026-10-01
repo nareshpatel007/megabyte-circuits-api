@@ -236,20 +236,123 @@ class MobileDashboardController extends Controller
                 ];
             })->values();
 
-            // Mask colors breakdown
-            $maskCountsMap = DB::table('pcb_order_meta')
-                ->where('meta_key', 'mask_color')
-                ->select('meta_value as mask', DB::raw('count(*) as count'))
-                ->groupBy('meta_value')
-                ->pluck('count', 'mask')
-                ->toArray();
+            // Mask colors breakdown for active manufacturing runs
+            $hasMaskCol = Schema::hasColumn('pcb_orders', 'mask');
+            $activeOrdersQuery = DB::table('pcb_orders')
+                ->whereNull('deleted_at')
+                ->whereNotIn(DB::raw("LOWER(TRIM(COALESCE(status, '')))"), $completedStatuses);
+
+            if ($statusTable) {
+                $activeOrdersQuery->where(function ($q) use ($completedStatuses, $statusTable) {
+                    $q->whereNull("{$statusTable}.name")
+                      ->orWhereNotIn(DB::raw("LOWER(TRIM({$statusTable}.name))"), $completedStatuses);
+                });
+            }
+
+            // Exclude combo child orders to avoid double-counting panel jobs
+            if (Schema::hasTable('pcb_order_combos')) {
+                $activeOrdersQuery->whereNotIn('pcb_orders.id', function ($subQuery) {
+                    $subQuery->select('combo_order_id')->from('pcb_order_combos');
+                });
+            }
+
+            $selectCols = ['pcb_orders.id'];
+            if ($hasMaskCol) {
+                $selectCols[] = 'pcb_orders.mask';
+            }
+
+            $activeOrdersForMask = $activeOrdersQuery->select($selectCols)->get();
+            $orderIds = $activeOrdersForMask->pluck('id')->toArray();
+
+            $orderMetaMap = [];
+            if (!empty($orderIds) && Schema::hasTable('pcb_order_meta')) {
+                $metas = DB::table('pcb_order_meta')
+                    ->whereIn('pcb_order_id', $orderIds)
+                    ->whereIn('meta_key', ['mask_color', 'pcb_color', 'solder_mask', 'mask', 'coverlay_color', 'color'])
+                    ->select('pcb_order_id', 'meta_key', 'meta_value')
+                    ->get();
+
+                foreach ($metas as $m) {
+                    $val = trim((string)$m->meta_value);
+                    if ($val !== '') {
+                        $orderMetaMap[$m->pcb_order_id][$m->meta_key] = $val;
+                    }
+                }
+            }
+
+            $colorCounts = [
+                'green'  => 0,
+                'purple' => 0,
+                'red'    => 0,
+                'yellow' => 0,
+                'blue'   => 0,
+                'white'  => 0,
+                'black'  => 0,
+            ];
+            $extraColors = [];
+
+            foreach ($activeOrdersForMask as $ord) {
+                $mMap = $orderMetaMap[$ord->id] ?? [];
+                $rawColor = null;
+
+                if ($hasMaskCol && !empty($ord->mask) && trim((string)$ord->mask) !== '') {
+                    $rawColor = trim((string)$ord->mask);
+                } elseif (!empty($mMap['mask_color'])) {
+                    $rawColor = $mMap['mask_color'];
+                } elseif (!empty($mMap['pcb_color'])) {
+                    $rawColor = $mMap['pcb_color'];
+                } elseif (!empty($mMap['solder_mask'])) {
+                    $rawColor = $mMap['solder_mask'];
+                } elseif (!empty($mMap['mask'])) {
+                    $rawColor = $mMap['mask'];
+                } elseif (!empty($mMap['coverlay_color'])) {
+                    $rawColor = $mMap['coverlay_color'];
+                } elseif (!empty($mMap['color'])) {
+                    $rawColor = $mMap['color'];
+                }
+
+                if (empty($rawColor) || strtoupper($rawColor) === 'N/A' || $rawColor === '-') {
+                    $rawColor = 'Green';
+                }
+
+                $lower = strtolower($rawColor);
+                if (strpos($lower, 'green') !== false) {
+                    $colorCounts['green']++;
+                } elseif (strpos($lower, 'purple') !== false) {
+                    $colorCounts['purple']++;
+                } elseif (strpos($lower, 'red') !== false) {
+                    $colorCounts['red']++;
+                } elseif (strpos($lower, 'yellow') !== false) {
+                    $colorCounts['yellow']++;
+                } elseif (strpos($lower, 'blue') !== false) {
+                    $colorCounts['blue']++;
+                } elseif (strpos($lower, 'white') !== false) {
+                    $colorCounts['white']++;
+                } elseif (strpos($lower, 'black') !== false) {
+                    $colorCounts['black']++;
+                } else {
+                    $cap = ucfirst($rawColor);
+                    $extraColors[$cap] = ($extraColors[$cap] ?? 0) + 1;
+                }
+            }
 
             $maskColors = [
-                ['name' => 'Green', 'count' => (int)($maskCountsMap['Green'] ?? 0), 'color' => '#2fa34a'],
-                ['name' => 'White', 'count' => (int)($maskCountsMap['White'] ?? 0), 'color' => '#d8d8d8'],
-                ['name' => 'Black', 'count' => (int)($maskCountsMap['Black'] ?? 0), 'color' => '#1c2420'],
-                ['name' => 'Red', 'count' => (int)($maskCountsMap['Red'] ?? 0), 'color' => '#dc5a52'],
+                ['name' => 'Green',  'count' => $colorCounts['green'],  'color' => '#22c55e'],
+                ['name' => 'Purple', 'count' => $colorCounts['purple'], 'color' => '#9333ea'],
+                ['name' => 'Red',    'count' => $colorCounts['red'],    'color' => '#ef4444'],
+                ['name' => 'Yellow', 'count' => $colorCounts['yellow'], 'color' => '#eab308'],
+                ['name' => 'Blue',   'count' => $colorCounts['blue'],   'color' => '#3b82f6'],
+                ['name' => 'White',  'count' => $colorCounts['white'],  'color' => '#ffffff'],
+                ['name' => 'Black',  'count' => $colorCounts['black'],  'color' => '#18181b'],
             ];
+
+            foreach ($extraColors as $extName => $extCount) {
+                $maskColors[] = [
+                    'name' => $extName,
+                    'count' => $extCount,
+                    'color' => '#6b7280'
+                ];
+            }
 
             return response()->json([
                 'success' => true,
