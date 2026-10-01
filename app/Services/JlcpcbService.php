@@ -724,7 +724,31 @@ class JlcpcbService
 
         $pcbParam = array_merge($defaultPcbParam, $input['pcbParam'] ?? []);
 
-        // HASL (surfaceFinish = 0) is not available for 6-layer or higher PCBs on JLCPCB
+        // 1. Guard against HDI (code 2811): HDI requires at least 4 layers
+        if (isset($pcbParam['plateType']) && (int)$pcbParam['plateType'] === 8 && isset($pcbParam['layer']) && (int)$pcbParam['layer'] < 4) {
+            $pcbParam['plateType'] = 1;
+        }
+
+        // 2. Guard against Inner Copper Thickness error (code 2129):
+        // JLCPCB rejects insideCuprumThickness on boards with fewer than 4 layers
+        if (isset($pcbParam['layer']) && (int)$pcbParam['layer'] < 4) {
+            unset($pcbParam['insideCuprumThickness']);
+        }
+
+        // 3. Guard against Flex PCB parameter mismatches (plateType 7):
+        if (isset($pcbParam['plateType']) && (int)$pcbParam['plateType'] === 7) {
+            unset($pcbParam['insideCuprumThickness']);
+            if (isset($pcbParam['thickness']) && (float)$pcbParam['thickness'] <= 0.11) {
+                $pcbParam['copperWeight'] = 0.33;
+            }
+        }
+
+        // 4. cascadeStructure is only applicable for HDI boards
+        if (!isset($pcbParam['plateType']) || (int)$pcbParam['plateType'] !== 8) {
+            unset($pcbParam['cascadeStructure']);
+        }
+
+        // 5. HASL (surfaceFinish = 0) is not available for 6-layer or higher PCBs on JLCPCB
         if (isset($pcbParam['layer']) && (int)$pcbParam['layer'] >= 6 && isset($pcbParam['surfaceFinish']) && (int)$pcbParam['surfaceFinish'] === 0) {
             $pcbParam['surfaceFinish'] = 2; // ENIG
         }
