@@ -37,26 +37,42 @@ class VerifyAdminToken
 
         // Check if token matches expected static API_TOKEN
         $apiToken = \App\Services\CredentialService::get('auth', 'API_TOKEN', 'API_TOKEN');
-        if ($apiToken && $token === $apiToken) {
-            return $next($request);
+        $isStaticAuth = ($apiToken && $token === $apiToken);
+
+        // Extract and decode JWT from Authorization header or token if present
+        $authHeader = $request->header('Authorization');
+        $jwtCandidate = null;
+        if ($authHeader && str_starts_with($authHeader, 'Bearer ')) {
+            $jwtCandidate = trim(substr($authHeader, 7));
+        }
+        if (!$jwtCandidate && $token && $token !== $apiToken) {
+            $jwtCandidate = $token;
         }
 
-        // Otherwise, check if it is a valid admin JWT token
-        try {
-            $secret = \App\Services\CredentialService::get('auth', 'JWT_SECRET', 'JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
-            $decoded = JWT::decode($token, new Key($secret, 'HS256'));
-            if ($decoded) {
-                $adminId = $decoded->sub ?? ($decoded->admin_id ?? null);
-                if ($adminId) {
-                    $request->attributes->set('admin_id', $adminId);
+        if ($jwtCandidate && $jwtCandidate !== $apiToken) {
+            try {
+                $secret = \App\Services\CredentialService::get('auth', 'JWT_SECRET', 'JWT_SECRET', '7+18EvAjOct+KzCCwJLpuwEjtXlzevAk4n09YeUkgfA=');
+                $decoded = JWT::decode($jwtCandidate, new Key($secret, 'HS256'));
+                if ($decoded) {
+                    $adminId = $decoded->sub ?? ($decoded->admin_id ?? null);
+                    if ($adminId) {
+                        $request->attributes->set('admin_id', $adminId);
+                    }
+                    if (!empty($decoded->name)) {
+                        $request->attributes->set('admin_name', $decoded->name);
+                    }
+                    if (!empty($decoded->username)) {
+                        $request->attributes->set('admin_username', $decoded->username);
+                    }
+                    return $next($request);
                 }
-                if (isset($decoded->name)) {
-                    $request->attributes->set('admin_name', $decoded->name);
-                }
-                return $next($request);
+            } catch (\Throwable $e) {
+                // If static auth is valid, let it pass despite JWT error
             }
-        } catch (\Throwable $e) {
-            // Ignore error and fall through to invalid token response
+        }
+
+        if ($isStaticAuth) {
+            return $next($request);
         }
 
         return response()->json([

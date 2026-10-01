@@ -939,12 +939,59 @@ class MobileOrderController extends Controller
 
             $notes = [];
             if (Schema::hasTable('pcb_order_notes')) {
+                // Ensure created_by column exists
+                if (!Schema::hasColumn('pcb_order_notes', 'created_by')) {
+                    try {
+                        Schema::table('pcb_order_notes', function (\Illuminate\Database\Schema\Blueprint $table) {
+                            $table->unsignedBigInteger('created_by')->nullable()->after('admin_id');
+                        });
+                        DB::statement("UPDATE pcb_order_notes SET created_by = admin_id WHERE created_by IS NULL AND admin_id IS NOT NULL");
+                    } catch (\Throwable $e) {}
+                }
+
                 $notesQuery = DB::table('pcb_order_notes')
-                    ->leftJoin('admins', 'pcb_order_notes.admin_id', '=', 'admins.id')
                     ->where('pcb_order_notes.pcb_order_id', $orderId);
+
+                if (Schema::hasTable('admins')) {
+                    $notesQuery->leftJoin('admins', function($join) {
+                        $join->on('admins.id', '=', DB::raw('COALESCE(pcb_order_notes.created_by, pcb_order_notes.admin_id)'));
+                    });
+                }
+                if (Schema::hasTable('users')) {
+                    $notesQuery->leftJoin('users', function($join) {
+                        $join->on('users.id', '=', DB::raw('COALESCE(pcb_order_notes.created_by, pcb_order_notes.admin_id)'));
+                    });
+                }
 
                 if (Schema::hasColumn('pcb_order_notes', 'deleted_at')) {
                     $notesQuery->whereNull('pcb_order_notes.deleted_at');
+                }
+
+                $adminNameSql = 'COALESCE(admins.name, admins.username, users.name, users.username, NULL)';
+
+                // Fallback to active admin from order logs
+                $logAdminName = null;
+                if ($order && Schema::hasTable('pcb_order_logs')) {
+                    $latestLog = DB::table('pcb_order_logs')
+                        ->where(function($q) use ($order) {
+                            $q->where('pcb_order_id', $order->id)->orWhere('order_number', $order->order_number);
+                        });
+                    if (Schema::hasTable('admins')) {
+                        $latestLog->leftJoin('admins', 'pcb_order_logs.admin_id', '=', 'admins.id');
+                    }
+                    if (Schema::hasTable('users')) {
+                        $latestLog->leftJoin('users', 'pcb_order_logs.user_id', '=', 'users.id');
+                    }
+                    $logRow = $latestLog->where(function($q) {
+                        $q->whereNotNull('admins.name')->orWhereNotNull('users.name');
+                    })->select(DB::raw('COALESCE(admins.name, users.name) as name'))->latest('pcb_order_logs.id')->first();
+                    if ($logRow && !empty($logRow->name)) {
+                        $logAdminName = $logRow->name;
+                    }
+                }
+                if (!$logAdminName && Schema::hasTable('admins')) {
+                    $firstAdm = DB::table('admins')->where('id', '>', 0)->orderBy('id')->first();
+                    if ($firstAdm) $logAdminName = $firstAdm->name ?? $firstAdm->username;
                 }
 
                 $notes = $notesQuery->orderBy('pcb_order_notes.id', 'desc')
@@ -952,16 +999,16 @@ class MobileOrderController extends Controller
                         'pcb_order_notes.id',
                         'pcb_order_notes.note',
                         'pcb_order_notes.created_at',
-                        'admins.name as name',
-                        'admins.name as admin_name'
+                        DB::raw("{$adminNameSql} as admin_name")
                     )
                     ->get()
-                    ->map(function ($n) {
+                    ->map(function ($n) use ($logAdminName) {
+                        $author = $n->admin_name ?: ($logAdminName ?: 'Admin');
                         return [
                             'id' => (string) $n->id,
                             'note' => $n->note,
-                            'name' => $n->name ?: 'System / Staff',
-                            'admin_name' => $n->admin_name ?: 'System / Staff',
+                            'name' => $author,
+                            'admin_name' => $author,
                             'created_at' => ($n->created_at ?? null) ? date('d M Y, h:i A', strtotime($n->created_at)) : ''
                         ];
                     });
@@ -1028,16 +1075,61 @@ class MobileOrderController extends Controller
 
             $order = DB::table('pcb_orders')->where('id', $id)->orWhere('order_number', $id)->first();
             $orderId = $order ? $order->id : $id;
-            $adminId = $request->attributes->get('admin_id') ?: 1;
+            $adminId = $request->input('created_by') ?: ($request->input('admin_id') ?: ($request->attributes->get('admin_id') ?: 1));
 
             if (Schema::hasTable('pcb_order_notes')) {
-                DB::table('pcb_order_notes')->insert([
+                // Ensure created_by column exists
+                if (!Schema::hasColumn('pcb_order_notes', 'created_by')) {
+                    try {
+                        Schema::table('pcb_order_notes', function (\Illuminate\Database\Schema\Blueprint $table) {
+                            $table->unsignedBigInteger('created_by')->nullable()->after('admin_id');
+                        });
+                    } catch (\Throwable $e) {}
+                }
+
+                $insertData = [
                     'pcb_order_id' => $orderId,
                     'admin_id' => $adminId,
                     'note' => $note,
                     'is_internal' => 1,
                     'created_at' => date('Y-m-d H:i:s'),
                     'updated_at' => date('Y-m-d H:i:s')
+                ];
+
+                if (Schema::hasColumn('pcb_order_notes', 'created_by')) {
+                    $insertData['created_by'] = $adminId;
+                }
+
+                $noteId = DB::table('pcb_order_notes')->insertGetId($insertData);
+
+                // Query admin name from admins table
+                $adminName = null;
+                if (Schema::hasTable('admins')) {
+                    $adm = DB::table('admins')->where('id', $adminId)->first();
+                    if ($adm) {
+                        $adminName = $adm->name ?? $adm->username;
+                    }
+                }
+                if (!$adminName && Schema::hasTable('users')) {
+                    $u = DB::table('users')->where('id', $adminId)->first();
+                    if ($u) {
+                        $adminName = $u->name ?? $u->username;
+                    }
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Note added successfully',
+                    'data' => [
+                        'id' => (string) $noteId,
+                        'pcb_order_id' => $orderId,
+                        'created_by' => $adminId,
+                        'admin_id' => $adminId,
+                        'admin_name' => $adminName ?: 'Admin',
+                        'name' => $adminName ?: 'Admin',
+                        'note' => $note,
+                        'created_at' => date('d M Y, h:i A')
+                    ]
                 ]);
             }
 

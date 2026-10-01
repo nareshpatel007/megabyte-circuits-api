@@ -239,14 +239,15 @@ class MobileDashboardController extends Controller
             // Mask colors breakdown for active manufacturing runs
             $hasMaskCol = Schema::hasColumn('pcb_orders', 'mask');
             $activeOrdersQuery = DB::table('pcb_orders')
-                ->whereNull('deleted_at')
-                ->whereNotIn(DB::raw("LOWER(TRIM(COALESCE(status, '')))"), $completedStatuses);
+                ->whereNull('pcb_orders.deleted_at')
+                ->whereNotIn(DB::raw("LOWER(TRIM(COALESCE(pcb_orders.status, '')))"), $completedStatuses);
 
             if ($statusTable) {
-                $activeOrdersQuery->where(function ($q) use ($completedStatuses, $statusTable) {
-                    $q->whereNull("{$statusTable}.name")
-                      ->orWhereNotIn(DB::raw("LOWER(TRIM({$statusTable}.name))"), $completedStatuses);
-                });
+                $activeOrdersQuery->leftJoin($statusTable, 'pcb_orders.status_id', '=', "{$statusTable}.id")
+                    ->where(function ($q) use ($completedStatuses, $statusTable) {
+                        $q->whereNull("{$statusTable}.name")
+                          ->orWhereNotIn(DB::raw("LOWER(TRIM({$statusTable}.name))"), $completedStatuses);
+                    });
             }
 
             // Exclude combo child orders to avoid double-counting panel jobs
