@@ -506,8 +506,10 @@ class AdminController extends Controller
 
             $userId = DB::table('users')->insertGetId($insertData);
 
-            // Send Client Welcome Email
-            \App\Services\RegisterService::sendWelcomeEmail($userId, $name, $email);
+            // Do not send welcome email when client is created from admin
+            if ($request->boolean('send_welcome_email', false)) {
+                \App\Services\RegisterService::sendWelcomeEmail($userId, $name, $email);
+            }
 
             // Sync with pcb_users if table exists
             if (Schema::hasTable('pcb_users')) {
