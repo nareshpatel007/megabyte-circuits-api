@@ -957,17 +957,12 @@ class MobileOrderController extends Controller
                         $join->on('admins.id', '=', DB::raw('COALESCE(pcb_order_notes.created_by, pcb_order_notes.admin_id)'));
                     });
                 }
-                if (Schema::hasTable('users')) {
-                    $notesQuery->leftJoin('users', function($join) {
-                        $join->on('users.id', '=', DB::raw('COALESCE(pcb_order_notes.created_by, pcb_order_notes.admin_id)'));
-                    });
-                }
 
                 if (Schema::hasColumn('pcb_order_notes', 'deleted_at')) {
                     $notesQuery->whereNull('pcb_order_notes.deleted_at');
                 }
 
-                $adminNameSql = 'COALESCE(admins.name, admins.username, users.name, users.username, NULL)';
+                $adminNameSql = 'COALESCE(admins.name, admins.username, "Admin")';
 
                 // Fallback to active admin from order logs
                 $logAdminName = null;
@@ -979,19 +974,14 @@ class MobileOrderController extends Controller
                     if (Schema::hasTable('admins')) {
                         $latestLog->leftJoin('admins', 'pcb_order_logs.admin_id', '=', 'admins.id');
                     }
-                    if (Schema::hasTable('users')) {
-                        $latestLog->leftJoin('users', 'pcb_order_logs.user_id', '=', 'users.id');
-                    }
-                    $logRow = $latestLog->where(function($q) {
-                        $q->whereNotNull('admins.name')->orWhereNotNull('users.name');
-                    })->select(DB::raw('COALESCE(admins.name, users.name) as name'))->latest('pcb_order_logs.id')->first();
+                    $logRow = $latestLog->whereNotNull('admins.name')->select('admins.name')->latest('pcb_order_logs.id')->first();
                     if ($logRow && !empty($logRow->name)) {
                         $logAdminName = $logRow->name;
                     }
                 }
                 if (!$logAdminName && Schema::hasTable('admins')) {
                     $firstAdm = DB::table('admins')->where('id', '>', 0)->orderBy('id')->first();
-                    if ($firstAdm) $logAdminName = $firstAdm->name ?? $firstAdm->username;
+                    if ($firstAdm) $logAdminName = $firstAdm->name ?? ($firstAdm->username ?? 'Admin');
                 }
 
                 $notes = $notesQuery->orderBy('pcb_order_notes.id', 'desc')

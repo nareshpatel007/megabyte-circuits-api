@@ -644,25 +644,21 @@ namespace App\Http\Controllers;
                     ->where('pcb_order_notes.pcb_order_id', $id);
 
                 if (\Illuminate\Support\Facades\Schema::hasTable('admins')) {
-                    $notesQuery->leftJoin('admins', 'pcb_order_notes.admin_id', '=', 'admins.id');
-                }
-                if (\Illuminate\Support\Facades\Schema::hasTable('users')) {
-                    $notesQuery->leftJoin('users', 'pcb_order_notes.admin_id', '=', 'users.id');
+                    $notesQuery->leftJoin('admins', function($join) {
+                        $join->on('admins.id', '=', \Illuminate\Support\Facades\DB::raw('COALESCE(pcb_order_notes.created_by, pcb_order_notes.admin_id)'));
+                    });
                 }
 
                 if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_notes', 'deleted_at')) {
                     $notesQuery->whereNull('pcb_order_notes.deleted_at');
                 }
 
-                $hasAdminNameCol = \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_notes', 'admin_name');
-                $adminNameSql = $hasAdminNameCol
-                    ? 'COALESCE(NULLIF(pcb_order_notes.admin_name, ""), admins.name, users.name, admins.username, users.username, NULL)'
-                    : 'COALESCE(admins.name, users.name, admins.username, users.username, NULL)';
+                $adminNameSql = 'COALESCE(admins.name, admins.username, "Admin")';
 
                 $order->notes = $notesQuery->select(
                         'pcb_order_notes.*',
                         \Illuminate\Support\Facades\DB::raw("{$adminNameSql} as admin_name"),
-                        \Illuminate\Support\Facades\DB::raw('COALESCE(admins.username, users.username, NULL) as admin_username')
+                        \Illuminate\Support\Facades\DB::raw('COALESCE(admins.username, NULL) as admin_username')
                     )
                     ->orderBy('pcb_order_notes.created_at', 'desc')
                     ->get();
@@ -677,19 +673,14 @@ namespace App\Http\Controllers;
                     if (\Illuminate\Support\Facades\Schema::hasTable('admins')) {
                         $latestLog->leftJoin('admins', 'pcb_order_logs.admin_id', '=', 'admins.id');
                     }
-                    if (\Illuminate\Support\Facades\Schema::hasTable('users')) {
-                        $latestLog->leftJoin('users', 'pcb_order_logs.user_id', '=', 'users.id');
-                    }
-                    $logRow = $latestLog->where(function($q) {
-                        $q->whereNotNull('admins.name')->orWhereNotNull('users.name');
-                    })->select(\Illuminate\Support\Facades\DB::raw('COALESCE(admins.name, users.name) as name'))->latest('pcb_order_logs.id')->first();
+                    $logRow = $latestLog->whereNotNull('admins.name')->select('admins.name')->latest('pcb_order_logs.id')->first();
                     if ($logRow && !empty($logRow->name)) {
                         $logAdminName = $logRow->name;
                     }
                 }
                 if (!$logAdminName && \Illuminate\Support\Facades\Schema::hasTable('admins')) {
                     $firstAdm = \Illuminate\Support\Facades\DB::table('admins')->where('id', '>', 0)->orderBy('id')->first();
-                    if ($firstAdm) $logAdminName = $firstAdm->name ?? $firstAdm->username;
+                    if ($firstAdm) $logAdminName = $firstAdm->name ?? ($firstAdm->username ?? 'Admin');
                 }
 
                 $order->notes = $order->notes->map(function($n) use ($logAdminName) {
@@ -1550,22 +1541,17 @@ namespace App\Http\Controllers;
                         $join->on('admins.id', '=', \Illuminate\Support\Facades\DB::raw('COALESCE(pcb_order_notes.created_by, pcb_order_notes.admin_id)'));
                     });
                 }
-                if (\Illuminate\Support\Facades\Schema::hasTable('users')) {
-                    $notesQuery->leftJoin('users', function($join) {
-                        $join->on('users.id', '=', \Illuminate\Support\Facades\DB::raw('COALESCE(pcb_order_notes.created_by, pcb_order_notes.admin_id)'));
-                    });
-                }
 
                 if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_notes', 'deleted_at')) {
                     $notesQuery->whereNull('pcb_order_notes.deleted_at');
                 }
 
-                $adminNameSql = 'COALESCE(admins.name, admins.username, users.name, users.username, NULL)';
+                $adminNameSql = 'COALESCE(admins.name, admins.username, "Admin")';
 
                 $notes = $notesQuery->select(
                         'pcb_order_notes.*',
                         \Illuminate\Support\Facades\DB::raw("{$adminNameSql} as admin_name"),
-                        \Illuminate\Support\Facades\DB::raw('COALESCE(admins.username, users.username, NULL) as admin_username')
+                        \Illuminate\Support\Facades\DB::raw('COALESCE(admins.username, NULL) as admin_username')
                     )
                     ->orderBy('pcb_order_notes.created_at', 'desc')
                     ->get();
@@ -1580,19 +1566,14 @@ namespace App\Http\Controllers;
                     if (\Illuminate\Support\Facades\Schema::hasTable('admins')) {
                         $latestLog->leftJoin('admins', 'pcb_order_logs.admin_id', '=', 'admins.id');
                     }
-                    if (\Illuminate\Support\Facades\Schema::hasTable('users')) {
-                        $latestLog->leftJoin('users', 'pcb_order_logs.user_id', '=', 'users.id');
-                    }
-                    $logRow = $latestLog->where(function($q) {
-                        $q->whereNotNull('admins.name')->orWhereNotNull('users.name');
-                    })->select(\Illuminate\Support\Facades\DB::raw('COALESCE(admins.name, users.name) as name'))->latest('pcb_order_logs.id')->first();
+                    $logRow = $latestLog->whereNotNull('admins.name')->select('admins.name')->latest('pcb_order_logs.id')->first();
                     if ($logRow && !empty($logRow->name)) {
                         $logAdminName = $logRow->name;
                     }
                 }
                 if (!$logAdminName && \Illuminate\Support\Facades\Schema::hasTable('admins')) {
                     $firstAdm = \Illuminate\Support\Facades\DB::table('admins')->where('id', '>', 0)->orderBy('id')->first();
-                    if ($firstAdm) $logAdminName = $firstAdm->name ?? $firstAdm->username;
+                    if ($firstAdm) $logAdminName = $firstAdm->name ?? ($firstAdm->username ?? 'Admin');
                 }
 
                 $notes = $notes->map(function($n) use ($logAdminName) {
@@ -1665,18 +1646,13 @@ namespace App\Http\Controllers;
                         $join->on('admins.id', '=', \Illuminate\Support\Facades\DB::raw('COALESCE(pcb_order_notes.created_by, pcb_order_notes.admin_id)'));
                     });
                 }
-                if (\Illuminate\Support\Facades\Schema::hasTable('users')) {
-                    $newNoteQuery->leftJoin('users', function($join) {
-                        $join->on('users.id', '=', \Illuminate\Support\Facades\DB::raw('COALESCE(pcb_order_notes.created_by, pcb_order_notes.admin_id)'));
-                    });
-                }
 
-                $adminNameSql = 'COALESCE(admins.name, admins.username, users.name, users.username, "Admin")';
+                $adminNameSql = 'COALESCE(admins.name, admins.username, "Admin")';
 
                 $newNote = $newNoteQuery->select(
                         'pcb_order_notes.*',
                         \Illuminate\Support\Facades\DB::raw("{$adminNameSql} as admin_name"),
-                        \Illuminate\Support\Facades\DB::raw('COALESCE(admins.username, users.username, NULL) as admin_username')
+                        \Illuminate\Support\Facades\DB::raw('COALESCE(admins.username, NULL) as admin_username')
                     )
                     ->first();
 
