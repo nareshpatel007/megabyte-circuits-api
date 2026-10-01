@@ -1353,9 +1353,11 @@ namespace App\Http\Controllers;
                     
                     $adminName = $adminUser ? $adminUser->name : ($request->attributes->get('admin_name') ?: ($request->input('admin_name') ?: ($effectiveAdminId ? "Admin #{$effectiveAdminId}" : "Admin")));
 
-                    $actionName = $request->has('status') ? "Status & Details Updated" : "Order Parameters Updated";
+                    $isMobile = ($request->input('source') === 'mobile') || ($request->header('X-Source') === 'mobile');
+                    $sourceLabel = $isMobile ? " [Mobile App]" : "";
+                    $actionName = ($request->has('status') ? "Status & Details Updated" : "Order Parameters Updated") . $sourceLabel;
                     $changesStr = implode(", ", $changesLog);
-                    $descText = "Updated by {$adminName}: {$changesStr}." . ($remark ? " Remark: {$remark}" : "");
+                    $descText = "Updated{$sourceLabel} by {$adminName}: {$changesStr}." . ($remark ? " Remark: {$remark}" : "");
 
                     \Illuminate\Support\Facades\DB::table('pcb_order_logs')->insert([
                         'pcb_order_id' => $order->id,
@@ -1399,6 +1401,7 @@ namespace App\Http\Controllers;
                 }
                 return response()->json([
                     'status' => true,
+                    'success' => true,
                     'message' => 'Order updated successfully',
                     'data' => $order->load($withRels)
                 ]);

@@ -261,7 +261,11 @@ class MobileModulesController extends Controller
      */
     public function clients(Request $request)
     {
-        if (!self::hasPermission($request, 'clients.view')) {
+        if (
+            !self::hasPermission($request, 'clients.view') &&
+            !self::hasPermission($request, 'orders.edit') &&
+            !self::hasPermission($request, 'orders.manage')
+        ) {
             return response()->json([
                 'success' => false,
                 'message' => 'You do not have permission to access Clients.'

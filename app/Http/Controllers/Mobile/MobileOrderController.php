@@ -66,14 +66,18 @@ class MobileOrderController extends Controller
                     'Drilling',
                     'Developing',
                     'Ready to Ship',
-                    'Completed',
                     'Cancelled',
                 ];
             }
 
+            $completedStatuses = ['completed', 'delivered', 'order completed', 'production completed', 'shipped'];
+            $statuses = array_values(array_filter(array_unique($statuses), function ($st) use ($completedStatuses) {
+                return !in_array(strtolower(trim((string)$st)), $completedStatuses, true);
+            }));
+
             return response()->json([
                 'success' => true,
-                'data' => array_values(array_unique($statuses))
+                'data' => $statuses
             ]);
         } catch (\Throwable $th) {
             return response()->json([
@@ -100,13 +104,27 @@ class MobileOrderController extends Controller
 
             $query = DB::table('pcb_orders')->whereNull('pcb_orders.deleted_at');
 
+            // 1. In mobile, do not show completed orders at all
+            $completedStatuses = ['completed', 'delivered', 'order completed', 'production completed', 'shipped'];
+            $query->where(function ($q) use ($completedStatuses) {
+                $q->whereNull('pcb_orders.status')
+                  ->orWhereNotIn(DB::raw('LOWER(TRIM(pcb_orders.status))'), $completedStatuses);
+            });
+
             if ($statusTable) {
                 $query->leftJoin($statusTable, 'pcb_orders.status_id', '=', "{$statusTable}.id")
                       ->select(
                           'pcb_orders.*',
                           "{$statusTable}.name as dynamic_status_name",
                           "{$statusTable}.slug as dynamic_status_slug"
-                      );
+                      )
+                      ->where(function ($q) use ($completedStatuses, $statusTable) {
+                          $q->whereNull("{$statusTable}.name")
+                            ->orWhere(function ($sq) use ($completedStatuses, $statusTable) {
+                                $sq->whereNotIn(DB::raw("LOWER(TRIM({$statusTable}.name))"), $completedStatuses)
+                                   ->whereNotIn(DB::raw("LOWER(TRIM(COALESCE({$statusTable}.slug, '')))"), $completedStatuses);
+                            });
+                      });
             } else {
                 $query->select('pcb_orders.*');
             }
@@ -244,18 +262,18 @@ class MobileOrderController extends Controller
                 });
             }
 
-            // Status filtering matching Admin Panel with normalization
+            // Status filtering: When searching, search ONLY in the selected status!
             $cleanStatus = trim($status);
             $statusLower = strtolower($cleanStatus);
             $normStatus = strtolower(str_replace(['/', '-', '_', ' '], '', $cleanStatus));
             if ($normStatus === 'devloping') $normStatus = 'developing';
             if ($normStatus === 'canceled') $normStatus = 'cancelled';
-            $isSearchActive = ($search !== '');
 
-            if ($statusLower === 'all' || $statusLower === 'all_statuses' || ($isSearchActive && ($statusLower === '' || $statusLower === 'in_production' || $statusLower === 'in production'))) {
-                // When explicitly requested 'all' or when searching with a query, search across all statuses
+            if ($statusLower === 'all' || $statusLower === 'all_statuses') {
+                // When explicitly requested 'all', view/search across all statuses (except completed which is excluded globally)
             } elseif ($statusLower === '' || $statusLower === 'in_production' || $statusLower === 'in production') {
                 // Admin Panel definition of "In Production": exclude pending, completed, shipped, delivered, cancelled, etc.
+                // When searching in 'in_production', search ONLY within in_production orders!
                 $excluded = ['pending', 'completed', 'shipped', 'delivered', 'cancelled', 'canceled', 'archived'];
 
                 $query->where(function ($q) use ($excluded, $statusTable) {
@@ -274,6 +292,7 @@ class MobileOrderController extends Controller
                 });
             } else {
                 // Specific status requested (e.g. "Pending", "Traveler", "Drilling", "Outside Drill", etc.)
+                // When searching, only search within this selected status!
                 $query->where(function ($q) use ($statusLower, $cleanStatus, $normStatus, $statusTable) {
                     $q->where(DB::raw('LOWER(TRIM(COALESCE(pcb_orders.status, "")))'), $statusLower)
                       ->orWhere('pcb_orders.status', 'LIKE', "%{$cleanStatus}%")
@@ -295,8 +314,9 @@ class MobileOrderController extends Controller
 
             $total = $query->count();
 
-            $sortBy = trim((string)$request->input('sort_by', 'delivery_date'));
-            $sortOrder = strtolower(trim((string)$request->input('sort_order', 'asc'))) === 'desc' ? 'desc' : 'asc';
+            // Default sort: order by order date (created_at desc) same as admin
+            $sortBy = trim((string)$request->input('sort_by', 'created_at'));
+            $sortOrder = strtolower(trim((string)$request->input('sort_order', 'desc'))) === 'asc' ? 'asc' : 'desc';
 
             // When searching, prioritize exact order_number / tool match to appear at the top
             if ($search !== '') {
@@ -323,18 +343,22 @@ class MobileOrderController extends Controller
                 }
             }
 
-            // Order by delivery date (earliest due date first, NULLs last)
+            // Order by: default is created_at desc (order date) same as admin
             if ($sortBy === 'delivery_date') {
-                $query->orderByRaw("CASE WHEN pcb_orders.delivery_date IS NULL THEN 1 ELSE 0 END ASC")
-                      ->orderBy('pcb_orders.delivery_date', $sortOrder)
+                $query->orderByRaw("COALESCE(pcb_orders.delivery_date, pcb_orders.created_at) {$sortOrder}")
                       ->orderBy('pcb_orders.created_at', 'desc')
                       ->orderBy('pcb_orders.id', 'desc');
             } elseif ($sortBy === 'created_at' || $sortBy === 'order_date') {
                 $query->orderBy('pcb_orders.created_at', $sortOrder)
                       ->orderBy('pcb_orders.id', $sortOrder);
             } else {
-                $query->orderBy('pcb_orders.' . $sortBy, $sortOrder)
-                      ->orderBy('pcb_orders.id', 'desc');
+                if (Schema::hasColumn('pcb_orders', $sortBy)) {
+                    $query->orderBy('pcb_orders.' . $sortBy, $sortOrder)
+                          ->orderBy('pcb_orders.id', 'desc');
+                } else {
+                    $query->orderBy('pcb_orders.created_at', $sortOrder)
+                          ->orderBy('pcb_orders.id', $sortOrder);
+                }
             }
 
             $orders = $query
@@ -608,14 +632,37 @@ class MobileOrderController extends Controller
                 }
             }
 
+            $comboOrders = Schema::hasTable('pcb_order_combos')
+                ? DB::table('pcb_order_combos')->join('pcb_orders', 'pcb_order_combos.combo_order_id', '=', 'pcb_orders.id')->where('pcb_order_combos.parent_order_id', $order->id)->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status')->get()
+                : [];
+            $comboOrderIds = Schema::hasTable('pcb_order_combos')
+                ? DB::table('pcb_order_combos')->where('parent_order_id', $order->id)->pluck('combo_order_id')->toArray()
+                : [];
+
+            $oldOrders = Schema::hasTable('pcb_order_old_orders')
+                ? DB::table('pcb_order_old_orders')->join('pcb_orders', 'pcb_order_old_orders.old_order_id', '=', 'pcb_orders.id')->where('pcb_order_old_orders.order_id', $order->id)->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status')->get()
+                : [];
+            $oldOrderIds = Schema::hasTable('pcb_order_old_orders')
+                ? DB::table('pcb_order_old_orders')->where('order_id', $order->id)->pluck('old_order_id')->toArray()
+                : [];
+
             $data = [
                 'id' => (string) $order->id,
                 'tool' => $order->order_number ?? ('M' . $order->id),
+                'order_number' => $order->order_number ?? ('M' . $order->id),
+                'orderNumber' => $order->order_number ?? ('M' . $order->id),
                 'status' => ucfirst($displayStatus),
+                'raw_status' => $displayStatus,
+                'status_id' => $order->status_id ?? null,
                 'film' => isset($metaMap['film']) ? (bool)$metaMap['film'] : false,
                 'film_applied' => isset($order->film_applied) ? (bool)$order->film_applied : (isset($metaMap['film_applied']) ? (bool)$metaMap['film_applied'] : false),
-                'orderNumber' => $metaMap['order_number'] ?? (string)$order->id,
                 'pn_number' => $order->pn_number ?? $metaMap['pn_number'] ?? $metaMap['p_n'] ?? $metaMap['part_number'] ?? null,
+                'c_g' => $order->c_g ?? null,
+                'q_no' => $order->q_no ?? null,
+                'bill_number' => $order->bill_number ?? null,
+                'delivery_date' => $order->delivery_date ?? null,
+                'customer_name' => ($order->customer_name ?? null) ?: ($metaMap['client'] ?? null),
+                'user_id' => $order->user_id ?? null,
                 'customer_notes' => $customerNote,
                 'customer_note' => $customerNote,
                 'pcb_remark' => $customerNote,
@@ -631,14 +678,25 @@ class MobileOrderController extends Controller
                 'maskColor' => $this->resolveMaskColor($order, $metaMap),
                 'layers' => $this->resolveLayers($order, $metaMap),
                 'quantity' => $orderQty,
+                'order_qty' => $orderQty,
                 'launchQty' => $launchQty,
+                'launch_qty' => $launchQty,
+                'panel_qty' => (int)($order->panel_qty ?? $metaMap['panel_qty'] ?? 0),
+                'ups_qty' => (int)($order->ups_qty ?? $metaMap['ups_qty'] ?? 0),
                 'finalQty' => $finalQty,
+                'final_qty' => $finalQty,
                 'failedQty' => $failedQty,
+                'failed_qty' => $failedQty,
+                'completed_qty' => (int)($order->completed_qty ?? $finalQty),
                 'pendingQty' => $pendingQty,
                 'combo' => $order->combo ?? null,
-                'combo_orders' => Schema::hasTable('pcb_order_combos') ? DB::table('pcb_order_combos')->join('pcb_orders', 'pcb_order_combos.combo_order_id', '=', 'pcb_orders.id')->where('pcb_order_combos.parent_order_id', $order->id)->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status')->get() : [],
+                'combo_orders' => $comboOrders,
+                'combo_order_ids' => $comboOrderIds,
                 'combo_parent' => Schema::hasTable('pcb_order_combos') ? DB::table('pcb_order_combos')->join('pcb_orders', 'pcb_order_combos.parent_order_id', '=', 'pcb_orders.id')->where('pcb_order_combos.combo_order_id', $order->id)->pluck('pcb_orders.order_number')->filter()->implode(', ') : null,
                 'parent_combo_orders' => Schema::hasTable('pcb_order_combos') ? DB::table('pcb_order_combos')->join('pcb_orders', 'pcb_order_combos.parent_order_id', '=', 'pcb_orders.id')->where('pcb_order_combos.combo_order_id', $order->id)->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status')->get() : [],
+                'old_order_number' => $order->old_order_number ?? null,
+                'old_orders' => $oldOrders,
+                'old_order_ids' => $oldOrderIds,
                 'lastUpdate' => ($order->updated_at ?? null) ? date('h:i A', strtotime($order->updated_at)) : 'Just now',
                 'user_email' => $order->user_email ?? '',
                 'user_mobile' => $order->user_mobile ?? '',
@@ -1188,56 +1246,28 @@ class MobileOrderController extends Controller
         $permissions = $admin ? MobileAuthController::fetchPermissionsForAdmin($admin) : [];
 
         if (!in_array('*', $permissions) && !in_array('orders.edit', $permissions) && !in_array('orders.manage', $permissions)) {
-            return response()->json(['success' => false, 'message' => 'You do not have permission to edit orders.'], 403);
+            return response()->json([
+                'success' => false,
+                'status' => false,
+                'message' => 'You do not have permission to edit orders.'
+            ], 403);
         }
 
         try {
-            $order = DB::table('pcb_orders')->where('id', $id)->first();
-            if (!$order) {
-                return response()->json(['success' => false, 'message' => 'Order not found.'], 404);
-            }
+            // Forward request to the shared OrderController update method with mobile source tag
+            $request->merge(['source' => 'mobile']);
+            $orderController = app(\App\Http\Controllers\OrderController::class);
+            $response = $orderController->update($request, $id);
 
-            $updateData = ['updated_at' => date('Y-m-d H:i:s')];
-            if ($request->has('customer_name')) $updateData['customer_name'] = trim($request->input('customer_name'));
-            if ($request->has('board_name')) $updateData['board_name'] = trim($request->input('board_name'));
-            if ($request->has('pn_number')) $updateData['pn_number'] = trim($request->input('pn_number')) ?: null;
-            if ($request->has('quantity')) {
-                $qty = (int)$request->input('quantity');
-                $updateData['order_qty'] = $qty;
-                $updateData['launch_qty'] = $qty;
-            }
-            if ($request->has('status')) $updateData['status'] = trim($request->input('status'));
-
-            DB::table('pcb_orders')->where('id', $id)->update($updateData);
-
-            if ($request->has('pcb_remark') || $request->has('customer_notes') || $request->has('customer_note')) {
-                $rem = trim((string)($request->input('pcb_remark') ?? $request->input('customer_notes') ?? $request->input('customer_note') ?? ''));
-                if (Schema::hasTable('pcb_order_meta')) {
-                    $existingMeta = DB::table('pcb_order_meta')
-                        ->where('pcb_order_id', $id)
-                        ->where('meta_key', 'pcb_remark')
-                        ->first();
-                    if ($existingMeta) {
-                        DB::table('pcb_order_meta')->where('id', $existingMeta->id)->update([
-                            'meta_value' => $rem,
-                            'updated_at' => date('Y-m-d H:i:s')
-                        ]);
-                    } else {
-                        DB::table('pcb_order_meta')->insert([
-                            'pcb_order_id' => $id,
-                            'meta_key' => 'pcb_remark',
-                            'meta_value' => $rem,
-                            'created_at' => date('Y-m-d H:i:s'),
-                            'updated_at' => date('Y-m-d H:i:s')
-                        ]);
-                    }
+            $content = json_decode($response->getContent(), true);
+            if (is_array($content)) {
+                if (!isset($content['success'])) {
+                    $content['success'] = !empty($content['status']);
                 }
+                return response()->json($content, $response->getStatusCode());
             }
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Order updated successfully'
-            ]);
+            return $response;
         } catch (\Throwable $th) {
             return response()->json(['success' => false, 'message' => $th->getMessage()], 500);
         }
