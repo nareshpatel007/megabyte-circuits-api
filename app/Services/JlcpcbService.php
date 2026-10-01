@@ -700,7 +700,6 @@ class JlcpcbService
             'pcbColor' => 0, // 0-green
             'surfaceFinish' => 0, // 0-HASL with lead
             'copperWeight' => 1, // 1 oz
-            'insideCuprumThickness' => '0.5',
             'goldFinger' => 0, // 0-Not required
             'materialDetails' => 0, // 0-FR4 Standard Tg 140°C
             'panelFlag' => 0, // 0-Single PCB
@@ -710,7 +709,6 @@ class JlcpcbService
             'flyingProbeTest' => 1, // 1-Sample test, 2-100% test
             'castellatedHoles' => 0,
             'orderDetailsRemark' => 'Quote calculated via Megabyte API',
-            'cascadeStructure' => 0,
             'impedanceFlag' => 'no',
             'isAddCustomerCode' => 'nocode',
             'plateType' => 1, // 1-FR-4
@@ -731,24 +729,54 @@ class JlcpcbService
 
         // 2. Guard against Inner Copper Thickness error (code 2129):
         // JLCPCB rejects insideCuprumThickness on boards with fewer than 4 layers
-        if (isset($pcbParam['layer']) && (int)$pcbParam['layer'] < 4) {
+        if (!isset($pcbParam['layer']) || (int)$pcbParam['layer'] < 4) {
             unset($pcbParam['insideCuprumThickness']);
+        } elseif (empty($pcbParam['insideCuprumThickness'])) {
+            $pcbParam['insideCuprumThickness'] = '0.5';
         }
 
         // 3. Guard against Flex PCB parameter mismatches (plateType 7):
         if (isset($pcbParam['plateType']) && (int)$pcbParam['plateType'] === 7) {
             unset($pcbParam['insideCuprumThickness']);
-            if (isset($pcbParam['thickness']) && (float)$pcbParam['thickness'] <= 0.11) {
+            // If thickness is >= 0.5mm, this is PTFE/Teflon incorrectly mapped to 7, normalize to 6 (PTFE)
+            if (isset($pcbParam['thickness']) && (float)$pcbParam['thickness'] >= 0.5) {
+                $pcbParam['plateType'] = 6;
+            } elseif (isset($pcbParam['thickness']) && (float)$pcbParam['thickness'] <= 0.11) {
                 $pcbParam['copperWeight'] = 0.33;
             }
         }
 
-        // 4. cascadeStructure is only applicable for HDI boards
+        // 4. High-Frequency Material Type for Rogers (5) or PTFE (6)
+        if (isset($pcbParam['plateType']) && in_array((int)$pcbParam['plateType'], [5, 6], true)) {
+            $hasHfmt = false;
+            if (!empty($pcbParam['serviceConfigVos']) && is_array($pcbParam['serviceConfigVos'])) {
+                foreach ($pcbParam['serviceConfigVos'] as $vo) {
+                    if (($vo['serviceConfigCode'] ?? '') === 'HFMT') {
+                        $hasHfmt = true;
+                        break;
+                    }
+                }
+            }
+            if (!$hasHfmt) {
+                if (!isset($pcbParam['serviceConfigVos']) || !is_array($pcbParam['serviceConfigVos'])) {
+                    $pcbParam['serviceConfigVos'] = [];
+                }
+                $defaultOpt = ((int)$pcbParam['plateType'] === 5)
+                    ? 'RO4350B(Dk=3.48,Df=0.0037)'
+                    : 'ZYF300CA-C(Dk=2.94,Df=0.0016)';
+                $pcbParam['serviceConfigVos'][] = [
+                    'serviceConfigCode' => 'HFMT',
+                    'configOptionShow' => $defaultOpt
+                ];
+            }
+        }
+
+        // 5. cascadeStructure is only applicable for HDI boards
         if (!isset($pcbParam['plateType']) || (int)$pcbParam['plateType'] !== 8) {
             unset($pcbParam['cascadeStructure']);
         }
 
-        // 5. HASL (surfaceFinish = 0) is not available for 6-layer or higher PCBs on JLCPCB
+        // 6. HASL (surfaceFinish = 0) is not available for 6-layer or higher PCBs on JLCPCB
         if (isset($pcbParam['layer']) && (int)$pcbParam['layer'] >= 6 && isset($pcbParam['surfaceFinish']) && (int)$pcbParam['surfaceFinish'] === 0) {
             $pcbParam['surfaceFinish'] = 2; // ENIG
         }
