@@ -14,6 +14,9 @@ class PcbOrder extends Model
 
     protected $fillable = [
         'user_id',
+        'transaction_id',
+        'shipping_address_id',
+        'billing_address_id',
         'status_id',
         'gerber_file_id',
         'order_number',
@@ -48,6 +51,12 @@ class PcbOrder extends Model
         'film_applied',
         'created_at',
     ];
+
+    // Ensure c_g is stored uppercase or null
+    public function setCGAttribute($value)
+    {
+        $this->attributes['c_g'] = ($value !== null && trim((string)$value) !== '') ? strtoupper(trim((string)$value)) : null;
+    }
 
     // Status relationship
     public function statusDetails()
@@ -172,6 +181,149 @@ class PcbOrder extends Model
                 $order->launch_date = now()->toDateString();
             }
         });
+
+        static::deleting(function ($order) {
+            if (method_exists($order, 'isForceDeleting') && $order->isForceDeleting()) {
+                return;
+            }
+
+            $deletedAt = now();
+
+            // 1. Soft-delete meta data
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_meta') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_meta', 'deleted_at')) {
+                \Illuminate\Support\Facades\DB::table('pcb_order_meta')
+                    ->where('pcb_order_id', $order->id)
+                    ->whereNull('deleted_at')
+                    ->update(['deleted_at' => $deletedAt]);
+            }
+
+            // 2. Soft-delete status histories
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_status_histories') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_status_histories', 'deleted_at')) {
+                \Illuminate\Support\Facades\DB::table('pcb_order_status_histories')
+                    ->where('pcb_order_id', $order->id)
+                    ->whereNull('deleted_at')
+                    ->update(['deleted_at' => $deletedAt]);
+            }
+
+            // 3. Soft-delete notes
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_notes') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_notes', 'deleted_at')) {
+                \Illuminate\Support\Facades\DB::table('pcb_order_notes')
+                    ->where('pcb_order_id', $order->id)
+                    ->whereNull('deleted_at')
+                    ->update(['deleted_at' => $deletedAt]);
+            }
+
+            // 4. Soft-delete job card documents
+            if (\Illuminate\Support\Facades\Schema::hasTable('job_card_documents') && \Illuminate\Support\Facades\Schema::hasColumn('job_card_documents', 'deleted_at')) {
+                \Illuminate\Support\Facades\DB::table('job_card_documents')
+                    ->where('pcb_order_id', $order->id)
+                    ->whereNull('deleted_at')
+                    ->update(['deleted_at' => $deletedAt]);
+            }
+
+            // 5. Soft-delete combo associations (where order is parent or child)
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_combos') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_combos', 'deleted_at')) {
+                \Illuminate\Support\Facades\DB::table('pcb_order_combos')
+                    ->where(function ($q) use ($order) {
+                        $q->where('parent_order_id', $order->id)
+                          ->orWhere('combo_order_id', $order->id);
+                    })
+                    ->whereNull('deleted_at')
+                    ->update(['deleted_at' => $deletedAt]);
+            }
+
+            // 6. Soft-delete old order references (where order is order_id or old_order_id)
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_old_orders') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_old_orders', 'deleted_at')) {
+                \Illuminate\Support\Facades\DB::table('pcb_order_old_orders')
+                    ->where(function ($q) use ($order) {
+                        $q->where('order_id', $order->id)
+                          ->orWhere('old_order_id', $order->id);
+                    })
+                    ->whereNull('deleted_at')
+                    ->update(['deleted_at' => $deletedAt]);
+            }
+
+            // 7. Soft-delete associated payment transaction if no other active order is linked to it
+            $transactionId = $order->transaction_id ?: (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'transaction_id') ? \Illuminate\Support\Facades\DB::table('pcb_orders')->where('id', $order->id)->value('transaction_id') : null);
+            if (!empty($transactionId) && \Illuminate\Support\Facades\Schema::hasTable('payment_transactions') && \Illuminate\Support\Facades\Schema::hasColumn('payment_transactions', 'deleted_at')) {
+                $hasOtherActiveOrder = \Illuminate\Support\Facades\DB::table('pcb_orders')
+                    ->where('transaction_id', $transactionId)
+                    ->where('id', '!=', $order->id)
+                    ->whereNull('deleted_at')
+                    ->exists();
+
+                if (!$hasOtherActiveOrder) {
+                    \Illuminate\Support\Facades\DB::table('payment_transactions')
+                        ->where('id', $transactionId)
+                        ->whereNull('deleted_at')
+                        ->update(['deleted_at' => $deletedAt]);
+                }
+            }
+        });
+
+        static::restoring(function ($order) {
+            // Restore related records if the order is restored
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_meta') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_meta', 'deleted_at')) {
+                \Illuminate\Support\Facades\DB::table('pcb_order_meta')
+                    ->where('pcb_order_id', $order->id)
+                    ->update(['deleted_at' => null]);
+            }
+
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_status_histories') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_status_histories', 'deleted_at')) {
+                \Illuminate\Support\Facades\DB::table('pcb_order_status_histories')
+                    ->where('pcb_order_id', $order->id)
+                    ->update(['deleted_at' => null]);
+            }
+
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_notes') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_notes', 'deleted_at')) {
+                \Illuminate\Support\Facades\DB::table('pcb_order_notes')
+                    ->where('pcb_order_id', $order->id)
+                    ->update(['deleted_at' => null]);
+            }
+
+            if (\Illuminate\Support\Facades\Schema::hasTable('job_card_documents') && \Illuminate\Support\Facades\Schema::hasColumn('job_card_documents', 'deleted_at')) {
+                \Illuminate\Support\Facades\DB::table('job_card_documents')
+                    ->where('pcb_order_id', $order->id)
+                    ->update(['deleted_at' => null]);
+            }
+
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_combos') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_combos', 'deleted_at')) {
+                \Illuminate\Support\Facades\DB::table('pcb_order_combos')
+                    ->where(function ($q) use ($order) {
+                        $q->where('parent_order_id', $order->id)
+                          ->orWhere('combo_order_id', $order->id);
+                    })
+                    ->update(['deleted_at' => null]);
+            }
+
+            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_old_orders') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_old_orders', 'deleted_at')) {
+                \Illuminate\Support\Facades\DB::table('pcb_order_old_orders')
+                    ->where(function ($q) use ($order) {
+                        $q->where('order_id', $order->id)
+                          ->orWhere('old_order_id', $order->id);
+                    })
+                    ->update(['deleted_at' => null]);
+            }
+
+            $transactionId = $order->transaction_id ?: (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'transaction_id') ? \Illuminate\Support\Facades\DB::table('pcb_orders')->where('id', $order->id)->value('transaction_id') : null);
+            if (!empty($transactionId) && \Illuminate\Support\Facades\Schema::hasTable('payment_transactions') && \Illuminate\Support\Facades\Schema::hasColumn('payment_transactions', 'deleted_at')) {
+                \Illuminate\Support\Facades\DB::table('payment_transactions')
+                    ->where('id', $transactionId)
+                    ->update(['deleted_at' => null]);
+            }
+        });
+    }
+
+    // Payment Transaction relationship
+    public function paymentTransaction()
+    {
+        return $this->belongsTo(PaymentTransaction::class, 'transaction_id');
+    }
+
+    // Notes relationship
+    public function notes()
+    {
+        return $this->hasMany(PcbOrderNote::class, 'pcb_order_id')->orderBy('created_at', 'desc');
     }
 
     // Meta relationship

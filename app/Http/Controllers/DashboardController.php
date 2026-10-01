@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 
@@ -58,10 +59,13 @@ class DashboardController extends Controller
                 ->count();
 
             $totalGerberFiles = DB::table('gerber_files')->where('user_id', $userId)->count();
-            $totalSpent = DB::table('payment_transactions')
+            $totalSpentQuery = DB::table('payment_transactions')
                 ->where('user_id', $userId)
-                ->where('status', 'success')
-                ->sum('amount');
+                ->where('status', 'success');
+            if (Schema::hasColumn('payment_transactions', 'deleted_at')) {
+                $totalSpentQuery->whereNull('deleted_at');
+            }
+            $totalSpent = $totalSpentQuery->sum('amount');
 
             // Recent 5 Orders
             $recentOrders = DB::table('pcb_orders')
@@ -109,11 +113,16 @@ class DashboardController extends Controller
             }
 
             // Recent 5 Payments (Only success & failed transactions)
-            $recentPayments = DB::table('payment_transactions')
+            $recentPaymentsQuery = DB::table('payment_transactions')
                 ->leftJoin('pcb_orders', 'pcb_orders.transaction_id', '=', 'payment_transactions.id')
                 ->where('payment_transactions.user_id', $userId)
-                ->whereIn('payment_transactions.status', ['success', 'failed', 'failure', 'paid'])
-                ->select(
+                ->whereIn('payment_transactions.status', ['success', 'failed', 'failure', 'paid']);
+
+            if (Schema::hasColumn('payment_transactions', 'deleted_at')) {
+                $recentPaymentsQuery->whereNull('payment_transactions.deleted_at');
+            }
+
+            $recentPayments = $recentPaymentsQuery->select(
                     'payment_transactions.id',
                     'payment_transactions.transaction_number',
                     'payment_transactions.razorpay_payment_id',
@@ -633,11 +642,15 @@ class DashboardController extends Controller
                 return response()->json(['status' => false, 'message' => 'Unauthorized user authentication'], 401);
             }
 
-            $payments = DB::table('payment_transactions')
+            $paymentsQuery = DB::table('payment_transactions')
                 ->where('user_id', $userId)
-                ->whereIn('status', ['success', 'failed', 'failure']) // Only show success or failure transactions
-                ->orderBy('id', 'desc')
-                ->get();
+                ->whereIn('status', ['success', 'failed', 'failure']);
+
+            if (Schema::hasColumn('payment_transactions', 'deleted_at')) {
+                $paymentsQuery->whereNull('deleted_at');
+            }
+
+            $payments = $paymentsQuery->orderBy('id', 'desc')->get();
 
             return response()->json(['status' => true, 'payments' => $payments]);
         } catch (\Throwable $th) {
@@ -668,10 +681,15 @@ class DashboardController extends Controller
             $searchPattern = '%' . $q . '%';
 
             // 1. Search User's Orders
-            $orders = DB::table('pcb_orders')
+            $ordersQuery = DB::table('pcb_orders')
                 ->leftJoin('pcb_order_statuses', 'pcb_orders.status_id', '=', 'pcb_order_statuses.id')
                 ->leftJoin('gerber_files', 'pcb_orders.gerber_file_id', '=', 'gerber_files.id')
-                ->leftJoin('pcb_order_meta', 'pcb_orders.id', '=', 'pcb_order_meta.pcb_order_id')
+                ->leftJoin('pcb_order_meta', function ($join) {
+                    $join->on('pcb_orders.id', '=', 'pcb_order_meta.pcb_order_id');
+                    if (Schema::hasColumn('pcb_order_meta', 'deleted_at')) {
+                        $join->whereNull('pcb_order_meta.deleted_at');
+                    }
+                })
                 ->where('pcb_orders.user_id', $userId)
                 ->whereNull('pcb_orders.deleted_at')
                 ->where(function($query) use ($searchPattern) {
@@ -679,8 +697,9 @@ class DashboardController extends Controller
                           ->orWhere('gerber_files.original_name', 'LIKE', $searchPattern)
                           ->orWhere('pcb_order_statuses.name', 'LIKE', $searchPattern)
                           ->orWhere('pcb_order_meta.meta_value', 'LIKE', $searchPattern);
-                })
-                ->select(
+                });
+
+            $orders = $ordersQuery->select(
                     'pcb_orders.id',
                     'pcb_orders.order_number',
                     'pcb_orders.order_value',
@@ -709,10 +728,15 @@ class DashboardController extends Controller
                 ->get();
 
             // 3. Search User's Payments
-            $payments = DB::table('payment_transactions')
+            $paymentsQuery = DB::table('payment_transactions')
                 ->leftJoin('pcb_orders', 'pcb_orders.transaction_id', '=', 'payment_transactions.id')
-                ->where('payment_transactions.user_id', $userId)
-                ->where(function($query) use ($searchPattern) {
+                ->where('payment_transactions.user_id', $userId);
+
+            if (Schema::hasColumn('payment_transactions', 'deleted_at')) {
+                $paymentsQuery->whereNull('payment_transactions.deleted_at');
+            }
+
+            $payments = $paymentsQuery->where(function($query) use ($searchPattern) {
                     $query->where('payment_transactions.transaction_number', 'LIKE', $searchPattern)
                           ->orWhere('payment_transactions.razorpay_payment_id', 'LIKE', $searchPattern)
                           ->orWhere('payment_transactions.razorpay_order_id', 'LIKE', $searchPattern)

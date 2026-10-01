@@ -78,6 +78,9 @@ class MobileModulesController extends Controller
             $ordersTable = Schema::hasTable('pcb_orders') ? 'pcb_orders' : (Schema::hasTable('orders') ? 'orders' : null);
 
             $query = DB::table('payment_transactions');
+            if (Schema::hasColumn('payment_transactions', 'deleted_at')) {
+                $query->whereNull('payment_transactions.deleted_at');
+            }
 
             if ($ordersTable) {
                 $query->leftJoin($ordersTable, 'payment_transactions.id', '=', "{$ordersTable}.transaction_id")

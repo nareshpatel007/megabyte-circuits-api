@@ -128,10 +128,13 @@ class OrderExportService
 
         // C/G Filter
         if (!empty($filters['c_g']) && strtolower($filters['c_g']) !== 'all') {
-            $cg = trim($filters['c_g']);
-            $query->whereHas('metas', function ($mq) use ($cg) {
-                $mq->where('meta_key', 'c_g')
-                   ->where('meta_value', 'LIKE', "%{$cg}%");
+            $cg = strtoupper(trim($filters['c_g']));
+            $query->where(function ($q) use ($cg) {
+                $q->where('c_g', $cg)
+                  ->orWhereHas('metas', function ($mq) use ($cg) {
+                      $mq->where('meta_key', 'c_g')
+                         ->where('meta_value', 'LIKE', "%{$cg}%");
+                  });
             });
         }
 
@@ -231,7 +234,7 @@ class OrderExportService
                 'launch_date'       => $launchDateStr,
                 'delivery_date'     => $deliveryDateVal,
                 'quote_number'      => $getMeta('quote_number', $getMeta('q_no', 'N/A')),
-                'c_g'               => $getMeta('c_g', 'GST'),
+                'c_g'               => $order->c_g ?: $getMeta('c_g', 'N/A'),
                 'tool'              => $getMeta('tool', $order->order_number),
                 'combo'             => $getMeta('combo', '-'),
                 'customer_name'     => $order->customer_name ?: $getMeta('customer_name', 'N/A'),
@@ -389,7 +392,7 @@ class OrderExportService
             $launchDateStr,                                                     // Col B: Launch Date
             $deliveryDateVal,                                                   // Col C: Delivery date
             $getMeta('quote_number', $getMeta('q_no', '')),                     // Col D: Q# No.
-            $getMeta('c_g', 'GST'),                                             // Col E: C/G
+            $order->c_g ?: $getMeta('c_g', ''),                                 // Col E: C/G
             $getMeta('tool', $order->order_number),                             // Col F: Tool
             $getMeta('combo', ''),                                             // Col G: Combo
             $order->customer_name ?: $getMeta('customer_name', ''),              // Col H: Customer name

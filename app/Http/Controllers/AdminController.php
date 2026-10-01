@@ -624,11 +624,16 @@ class AdminController extends Controller
             // Fetch Payment Transactions (filter ONLY status = success, paid, fail, failed)
             $transactions = [];
             if (Schema::hasTable('payment_transactions')) {
-                $transactions = DB::table('payment_transactions')
+                $txQuery = DB::table('payment_transactions')
                     ->leftJoin('pcb_orders', 'payment_transactions.id', '=', 'pcb_orders.transaction_id')
                     ->where('payment_transactions.user_id', $id)
-                    ->whereIn(DB::raw('LOWER(payment_transactions.status)'), ['success', 'paid', 'completed', 'fail', 'failed', 'failure'])
-                    ->select(
+                    ->whereIn(DB::raw('LOWER(payment_transactions.status)'), ['success', 'paid', 'completed', 'fail', 'failed', 'failure']);
+
+                if (Schema::hasColumn('payment_transactions', 'deleted_at')) {
+                    $txQuery->whereNull('payment_transactions.deleted_at');
+                }
+
+                $transactions = $txQuery->select(
                         'payment_transactions.*',
                         'pcb_orders.id as pcb_order_id',
                         'pcb_orders.order_number'
@@ -1665,6 +1670,10 @@ class AdminController extends Controller
 
             $query = DB::table('payment_transactions')
                 ->leftJoin($userTable, 'payment_transactions.user_id', '=', "{$userTable}.id");
+
+            if (Schema::hasColumn('payment_transactions', 'deleted_at')) {
+                $query->whereNull('payment_transactions.deleted_at');
+            }
 
             if ($ordersTable) {
                 $gerberTable = Schema::hasTable('gerber_files') ? 'gerber_files' : null;

@@ -331,6 +331,12 @@ namespace App\Http\Controllers;
                     $query->whereDate('created_at', '<=', $request->end_date);
                 }
 
+                // C/G Filter
+                if ($request->filled('c_g') && strtolower($request->c_g) !== 'all') {
+                    $cgFilterVal = strtoupper(trim($request->c_g));
+                    $query->where('c_g', $cgFilterVal);
+                }
+
                 // Search Filter (by Order #, Board Name, Email, Mobile, Customer Name, User/Company, Metas, Razorpay Payment IDs)
                 if ($request->filled('search')) {
                     $search = trim($request->input('search'));
@@ -446,6 +452,8 @@ namespace App\Http\Controllers;
                     $query->orderBy('film_applied', $sortOrder);
                 } else if ($sortBy === 'order_qty' || $sortBy === 'qty') {
                     $query->orderBy('order_qty', $sortOrder);
+                } else if ($sortBy === 'c_g') {
+                    $query->orderBy('c_g', $sortOrder);
                 } else {
                     $query->orderBy($sortBy, $sortOrder);
                 }
@@ -573,10 +581,15 @@ namespace App\Http\Controllers;
             
             // Also load internal notes if table exists
             if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_notes')) {
-                $order->notes = \Illuminate\Support\Facades\DB::table('pcb_order_notes')
+                $notesQuery = \Illuminate\Support\Facades\DB::table('pcb_order_notes')
                     ->leftJoin('admins', 'pcb_order_notes.admin_id', '=', 'admins.id')
-                    ->where('pcb_order_notes.pcb_order_id', $id)
-                    ->select(
+                    ->where('pcb_order_notes.pcb_order_id', $id);
+
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_notes', 'deleted_at')) {
+                    $notesQuery->whereNull('pcb_order_notes.deleted_at');
+                }
+
+                $order->notes = $notesQuery->select(
                         'pcb_order_notes.*',
                         'admins.name as admin_name',
                         'admins.username as admin_username'
@@ -745,6 +758,21 @@ namespace App\Http\Controllers;
                     }
                 }
 
+                if ($request->has('c_g') && $request->input('c_g') !== null && trim((string)$request->input('c_g')) !== '') {
+                    $normalizedCg = strtoupper(trim((string)$request->input('c_g')));
+                    if (!in_array($normalizedCg, ['CASH', 'GST', 'BOTH'], true)) {
+                        \Illuminate\Support\Facades\DB::rollBack();
+                        return response()->json([
+                            'success' => false,
+                            'status'  => false,
+                            'message' => 'The selected C/G is invalid. Allowed values: CASH, GST, BOTH.',
+                            'errors'  => [
+                                'c_g' => ['The selected C/G is invalid. Allowed values: CASH, GST, BOTH.']
+                            ]
+                        ], 422);
+                    }
+                }
+
                 if ($request->has('order_number')) {
                     $cleanOrderNumber = trim((string)$request->input('order_number'));
                     if ($cleanOrderNumber === '') {
@@ -902,6 +930,124 @@ namespace App\Http\Controllers;
                     }
                 }
 
+                if ($request->has('order_value')) {
+                    $newVal = floatval($request->order_value);
+                    $oldVal = floatval($order->order_value);
+                    if (abs($newVal - $oldVal) > 0.001) {
+                        $order->order_value = $newVal;
+                        $changesLog[] = "Order Value: ₹{$oldVal} → ₹{$newVal}";
+                        \App\Models\PcbOrderMeta::updateOrCreate(
+                            ['pcb_order_id' => $order->id, 'meta_key' => 'order_value'],
+                            ['meta_value' => (string)$newVal]
+                        );
+                    }
+                }
+
+                if ($request->has('unit_price')) {
+                    $newUnit = floatval($request->unit_price);
+                    $oldUnit = floatval($order->unit_price);
+                    if (abs($newUnit - $oldUnit) > 0.001) {
+                        $order->unit_price = $newUnit;
+                        $changesLog[] = "Unit Price: ₹{$oldUnit} → ₹{$newUnit}";
+                        \App\Models\PcbOrderMeta::updateOrCreate(
+                            ['pcb_order_id' => $order->id, 'meta_key' => 'unit_price'],
+                            ['meta_value' => (string)$newUnit]
+                        );
+                    }
+                }
+
+                if ($request->has('created_at') || $request->has('submitted_at') || $request->has('submitted_on')) {
+                    $rawSubmitted = $request->input('created_at', $request->input('submitted_at', $request->input('submitted_on')));
+                    if (!empty($rawSubmitted)) {
+                        $parsedDate = date('Y-m-d H:i:s', strtotime($rawSubmitted));
+                        $order->created_at = $parsedDate;
+                        $changesLog[] = "Submitted Date: " . date('d M Y', strtotime($parsedDate));
+                    }
+                }
+
+                if ($request->has('layers')) {
+                    $newLayers = intval($request->layers);
+                    if (intval($order->layers) !== $newLayers) {
+                        $order->layers = $newLayers;
+                        $changesLog[] = "Layers: {$newLayers}";
+                        \App\Models\PcbOrderMeta::updateOrCreate(
+                            ['pcb_order_id' => $order->id, 'meta_key' => 'layers'],
+                            ['meta_value' => (string)$newLayers]
+                        );
+                        \App\Models\PcbOrderMeta::updateOrCreate(
+                            ['pcb_order_id' => $order->id, 'meta_key' => 'layer'],
+                            ['meta_value' => (string)$newLayers]
+                        );
+                    }
+                }
+
+                if ($request->has('board_name')) {
+                    $newBoard = trim((string)$request->board_name);
+                    if ((string)$order->board_name !== $newBoard) {
+                        $order->board_name = $newBoard;
+                        $changesLog[] = "Board Name: {$newBoard}";
+                        \App\Models\PcbOrderMeta::updateOrCreate(
+                            ['pcb_order_id' => $order->id, 'meta_key' => 'board_name'],
+                            ['meta_value' => $newBoard]
+                        );
+                    }
+                }
+
+                if ($request->has('mask') || $request->has('pcb_color') || $request->has('solder_mask')) {
+                    $maskVal = trim((string)($request->input('mask') ?: $request->input('pcb_color') ?: $request->input('solder_mask')));
+                    if ((string)$order->mask !== $maskVal) {
+                        $order->mask = $maskVal;
+                        $changesLog[] = "Mask Color: {$maskVal}";
+                        \App\Models\PcbOrderMeta::updateOrCreate(
+                            ['pcb_order_id' => $order->id, 'meta_key' => 'pcb_color'],
+                            ['meta_value' => $maskVal]
+                        );
+                        \App\Models\PcbOrderMeta::updateOrCreate(
+                            ['pcb_order_id' => $order->id, 'meta_key' => 'solder_mask'],
+                            ['meta_value' => $maskVal]
+                        );
+                    }
+                }
+
+                // Handle arbitrary Technical Parameters and PCB Specifications
+                $allowedMetaKeys = [
+                    'base_material', 'material', 'substrate_type', 'material_type',
+                    'layers', 'layer', 'dimensions', 'dimensions_width', 'dimensions_length', 'dimension_unit',
+                    'quantity', 'qty', 'different_design', 'delivery_format', 'panel_format',
+                    'thickness', 'board_thickness', 'pcb_color', 'solder_mask', 'coverlay_color',
+                    'silkscreen', 'silkscreen_color', 'legend_color', 'surface_finish', 'finish',
+                    'gold_thickness', 'copper_weight', 'copper_thickness', 'via_covering', 'via_plating',
+                    'min_hole', 'min_hole_size', 'confirm_file', 'mark_on_pcb', 'elec_test',
+                    'coverlay_thickness', 'stiffener', 'emi_shielding',
+                    'gold_fingers', 'castellated', 'edge_plating', 'blind_slots',
+                    'ul_marking', 'humidity', 'kelvin_test', 'paper_between', 'pcb_remark', 'remarks'
+                ];
+
+                if ($request->has('metas') && is_array($request->input('metas'))) {
+                    foreach ($request->input('metas') as $mKey => $mVal) {
+                        $cleanKey = strtolower(trim((string)$mKey));
+                        if (in_array($cleanKey, $allowedMetaKeys)) {
+                            $cleanVal = trim((string)$mVal);
+                            \App\Models\PcbOrderMeta::updateOrCreate(
+                                ['pcb_order_id' => $order->id, 'meta_key' => $cleanKey],
+                                ['meta_value' => $cleanVal]
+                            );
+                            $changesLog[] = "Spec {$cleanKey}: {$cleanVal}";
+                        }
+                    }
+                }
+
+                foreach ($allowedMetaKeys as $specKey) {
+                    if ($request->has($specKey) && !in_array($specKey, ['layers', 'order_qty', 'qty', 'mask', 'pcb_color', 'solder_mask'])) {
+                        $specVal = trim((string)$request->input($specKey));
+                        \App\Models\PcbOrderMeta::updateOrCreate(
+                            ['pcb_order_id' => $order->id, 'meta_key' => $specKey],
+                            ['meta_value' => $specVal]
+                        );
+                        $changesLog[] = "Spec {$specKey}: {$specVal}";
+                    }
+                }
+
                 // Handle Manual Payment update / entry
                 if ($request->has('payment_status') || $request->has('mark_as_paid') || $request->has('payment_method')) {
                     $payStatusInput = strtolower((string)$request->input('payment_status', $request->input('mark_as_paid') ? 'paid' : ''));
@@ -1003,8 +1149,15 @@ namespace App\Http\Controllers;
                     $changesLog[] = "Old Order Number: '{$oldVal}' → '{$request->old_order_number}'";
                 }
 
-                if ($request->has('c_g') && (string)$order->c_g !== (string)$request->c_g) {
-                    $order->c_g = $request->c_g;
+                if ($request->has('c_g')) {
+                    $rawCg = $request->input('c_g');
+                    $newCg = ($rawCg !== null && trim((string)$rawCg) !== '') ? strtoupper(trim((string)$rawCg)) : null;
+                    if ($order->c_g !== $newCg) {
+                        $oldCg = $order->c_g ?? 'None';
+                        $displayNewCg = $newCg ?? 'None';
+                        $changesLog[] = "C/G: '{$oldCg}' → '{$displayNewCg}'";
+                        $order->c_g = $newCg;
+                    }
                 }
 
                 if ($request->has('film_applied')) {
@@ -1071,19 +1224,17 @@ namespace App\Http\Controllers;
                     }
                 }
 
-                // Enforce failed_qty = max(0, launch_qty - final_qty) if launch_qty > 0
-                $launchQtyVal = intval($order->launch_qty ?? 0);
-                $finalQtyVal = intval($order->final_qty ?? $order->completed_qty ?? 0);
-                $calcFailedQty = $launchQtyVal > 0 ? max(0, $launchQtyVal - $finalQtyVal) : intval($request->input('failed_qty', $order->failed_qty ?? 0));
-
-                if (intval($order->failed_qty) !== $calcFailedQty) {
-                    $oldVal = intval($order->failed_qty);
-                    $order->failed_qty = $calcFailedQty;
-                    $changesLog[] = "Failed Qty: {$oldVal} → {$order->failed_qty} Pcs";
-                    PcbOrderMeta::updateOrCreate(
-                        ['pcb_order_id' => $order->id, 'meta_key' => 'failed_qty'],
-                        ['meta_value' => (string)$calcFailedQty]
-                    );
+                if ($request->has('failed_qty')) {
+                    $newFailedQty = intval($request->failed_qty);
+                    if (intval($order->failed_qty) !== $newFailedQty) {
+                        $oldVal = intval($order->failed_qty ?? 0);
+                        $order->failed_qty = $newFailedQty;
+                        $changesLog[] = "Failed Qty: {$oldVal} → {$newFailedQty} Pcs";
+                        PcbOrderMeta::updateOrCreate(
+                            ['pcb_order_id' => $order->id, 'meta_key' => 'failed_qty'],
+                            ['meta_value' => (string)$newFailedQty]
+                        );
+                    }
                 }
 
                 try {
@@ -1269,10 +1420,15 @@ namespace App\Http\Controllers;
                     return response()->json(['status' => true, 'data' => []]);
                 }
 
-                $notes = \Illuminate\Support\Facades\DB::table('pcb_order_notes')
+                $notesQuery = \Illuminate\Support\Facades\DB::table('pcb_order_notes')
                     ->leftJoin('admins', 'pcb_order_notes.admin_id', '=', 'admins.id')
-                    ->where('pcb_order_notes.pcb_order_id', $id)
-                    ->select(
+                    ->where('pcb_order_notes.pcb_order_id', $id);
+
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_notes', 'deleted_at')) {
+                    $notesQuery->whereNull('pcb_order_notes.deleted_at');
+                }
+
+                $notes = $notesQuery->select(
                         'pcb_order_notes.*',
                         'admins.name as admin_name',
                         'admins.username as admin_username'
@@ -1321,7 +1477,13 @@ namespace App\Http\Controllers;
         public function deleteNote($noteId)
         {
             try {
-                \Illuminate\Support\Facades\DB::table('pcb_order_notes')->where('id', $noteId)->delete();
+                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_notes', 'deleted_at')) {
+                    \Illuminate\Support\Facades\DB::table('pcb_order_notes')
+                        ->where('id', $noteId)
+                        ->update(['deleted_at' => now()]);
+                } else {
+                    \Illuminate\Support\Facades\DB::table('pcb_order_notes')->where('id', $noteId)->delete();
+                }
                 return response()->json(['status' => true, 'message' => 'Note deleted.']);
             } catch (\Throwable $th) {
                 return response()->json(['status' => false, 'message' => $th->getMessage()], 500);
@@ -1661,18 +1823,13 @@ namespace App\Http\Controllers;
                     $newOrder->bill_number = null;
                     $newOrder->launch_date = null;
 
-                    // Resolve C/G status based on customer GST number
-                    $reorderGst = null;
-                    if ($originalOrder->user_id) {
-                        $uRec = \App\Models\PcbUser::find($originalOrder->user_id);
-                        if ($uRec && !empty($uRec->gst_number)) {
-                            $reorderGst = trim($uRec->gst_number);
-                        }
-                    }
-                    if (!empty($reorderGst)) {
-                        $newOrder->c_g = 'GST';
-                    } else if (empty($originalOrder->c_g)) {
-                        $newOrder->c_g = 'Cash';
+                    // Resolve C/G status: copy from original order or explicit request
+                    if ($request->has('c_g') && !empty($request->input('c_g'))) {
+                        $newOrder->c_g = strtoupper(trim($request->input('c_g')));
+                    } elseif (!empty($originalOrder->c_g)) {
+                        $newOrder->c_g = strtoupper(trim($originalOrder->c_g));
+                    } else {
+                        $newOrder->c_g = null;
                     }
 
                     // Handle custom order quantity if specified
@@ -2613,8 +2770,77 @@ namespace App\Http\Controllers;
                 $orderNumber = $order->order_number;
                 $orderId = $order->id;
 
-                // Execute Soft Delete only (Laravel SoftDeletes)
+                \Illuminate\Support\Facades\DB::beginTransaction();
+
+                // Execute Soft Delete (also fires PcbOrder::deleting boot hook)
                 $order->delete();
+
+                $deletedAt = $order->deleted_at ?: now()->toDateTimeString();
+
+                // Explicitly ensure cascade soft delete on all related tables
+                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_meta') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_meta', 'deleted_at')) {
+                    \Illuminate\Support\Facades\DB::table('pcb_order_meta')
+                        ->where('pcb_order_id', $orderId)
+                        ->whereNull('deleted_at')
+                        ->update(['deleted_at' => $deletedAt]);
+                }
+
+                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_status_histories') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_status_histories', 'deleted_at')) {
+                    \Illuminate\Support\Facades\DB::table('pcb_order_status_histories')
+                        ->where('pcb_order_id', $orderId)
+                        ->whereNull('deleted_at')
+                        ->update(['deleted_at' => $deletedAt]);
+                }
+
+                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_notes') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_notes', 'deleted_at')) {
+                    \Illuminate\Support\Facades\DB::table('pcb_order_notes')
+                        ->where('pcb_order_id', $orderId)
+                        ->whereNull('deleted_at')
+                        ->update(['deleted_at' => $deletedAt]);
+                }
+
+                if (\Illuminate\Support\Facades\Schema::hasTable('job_card_documents') && \Illuminate\Support\Facades\Schema::hasColumn('job_card_documents', 'deleted_at')) {
+                    \Illuminate\Support\Facades\DB::table('job_card_documents')
+                        ->where('pcb_order_id', $orderId)
+                        ->whereNull('deleted_at')
+                        ->update(['deleted_at' => $deletedAt]);
+                }
+
+                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_combos') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_combos', 'deleted_at')) {
+                    \Illuminate\Support\Facades\DB::table('pcb_order_combos')
+                        ->where(function ($q) use ($orderId) {
+                            $q->where('parent_order_id', $orderId)
+                              ->orWhere('combo_order_id', $orderId);
+                        })
+                        ->whereNull('deleted_at')
+                        ->update(['deleted_at' => $deletedAt]);
+                }
+
+                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_old_orders') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_old_orders', 'deleted_at')) {
+                    \Illuminate\Support\Facades\DB::table('pcb_order_old_orders')
+                        ->where(function ($q) use ($orderId) {
+                            $q->where('order_id', $orderId)
+                              ->orWhere('old_order_id', $orderId);
+                        })
+                        ->whereNull('deleted_at')
+                        ->update(['deleted_at' => $deletedAt]);
+                }
+
+                // Soft-delete associated payment transaction if no other active order is linked to it
+                if (!empty($order->transaction_id) && \Illuminate\Support\Facades\Schema::hasTable('payment_transactions') && \Illuminate\Support\Facades\Schema::hasColumn('payment_transactions', 'deleted_at')) {
+                    $hasOtherActiveOrder = \Illuminate\Support\Facades\DB::table('pcb_orders')
+                        ->where('transaction_id', $order->transaction_id)
+                        ->where('id', '!=', $orderId)
+                        ->whereNull('deleted_at')
+                        ->exists();
+
+                    if (!$hasOtherActiveOrder) {
+                        \Illuminate\Support\Facades\DB::table('payment_transactions')
+                            ->where('id', $order->transaction_id)
+                            ->whereNull('deleted_at')
+                            ->update(['deleted_at' => $deletedAt]);
+                    }
+                }
 
                 // Audit Log in pcb_order_logs table
                 if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_logs')) {
@@ -2624,11 +2850,13 @@ namespace App\Http\Controllers;
                         'order_number' => $orderNumber,
                         'admin_id'     => $adminId,
                         'action'       => 'Order Soft Deleted',
-                        'description'  => "Order #{$orderNumber} was soft deleted by {$adminName}",
+                        'description'  => "Order #{$orderNumber} and its associated metadata, payments, status histories, notes, and documents were soft deleted by {$adminName}",
                         'created_at'   => date('Y-m-d H:i:s'),
                         'updated_at'   => date('Y-m-d H:i:s'),
                     ]);
                 }
+
+                \Illuminate\Support\Facades\DB::commit();
 
                 return response()->json([
                     'success' => true,

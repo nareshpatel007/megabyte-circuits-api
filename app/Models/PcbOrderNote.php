@@ -6,20 +6,21 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-class PcbOrderStatusHistory extends Model
+class PcbOrderNote extends Model
 {
     use HasFactory, SoftDeletes;
 
-    protected $table = 'pcb_order_status_histories';
-
-    public $timestamps = false;
+    protected $table = 'pcb_order_notes';
 
     protected $fillable = [
         'pcb_order_id',
         'admin_id',
-        'status_name',
-        'remark',
-        'created_at'
+        'note',
+        'is_internal',
+    ];
+
+    protected $casts = [
+        'is_internal' => 'boolean',
     ];
 
     public function order()
@@ -29,6 +30,6 @@ class PcbOrderStatusHistory extends Model
 
     public function admin()
     {
-        return $this->belongsTo(PcbUser::class, 'admin_id');
+        return $this->belongsTo(Admin::class, 'admin_id');
     }
 }

@@ -941,6 +941,11 @@ class OrderImportService
                     }
                 }
 
+                // Handle C/G normalization
+                if ($key === 'c_g' && $val !== null && trim((string)$val) !== '') {
+                    $val = strtoupper(trim((string)$val));
+                }
+
                 $extracted[$key] = is_string($val) ? trim($val) : $val;
             } else {
                 // If column not found in spreadsheet header, default quantity fields to 0
@@ -963,6 +968,14 @@ class OrderImportService
         // Required fields check
         if (empty($data['customer_name']) || trim((string)$data['customer_name']) === '') {
             $errors['Customer name'] = 'Customer name is required.';
+        }
+
+        // C/G Validation: Allowed values: CASH, GST, BOTH (or empty/null)
+        if (!empty($data['c_g']) && trim((string)$data['c_g']) !== '') {
+            $cgUpper = strtoupper(trim((string)$data['c_g']));
+            if (!in_array($cgUpper, ['CASH', 'GST', 'BOTH'], true)) {
+                $errors['C/G'] = 'Invalid C/G value "' . $data['c_g'] . '". Allowed values: CASH, GST, BOTH.';
+            }
         }
 
         // Note: If combo order is not found, ignore combo adding and just add order data without combo error.
@@ -1007,16 +1020,11 @@ class OrderImportService
         $layers = !empty($data['layer']) ? (string)$data['layer'] : null;
         $mask = !empty($data['mask']) ? (string)$data['mask'] : null;
 
-        $cgValue = !empty($data['c_g']) ? (string)$data['c_g'] : null;
-        if (empty($cgValue)) {
-            if ($userId) {
-                $userRecord = DB::table('users')->where('id', $userId)->first();
-                if ($userRecord && !empty($userRecord->gst_number)) {
-                    $cgValue = 'GST';
-                }
-            }
-            if (empty($cgValue)) {
-                $cgValue = 'Cash';
+        $cgValue = null;
+        if (!empty($data['c_g']) && trim((string)$data['c_g']) !== '') {
+            $cgUpper = strtoupper(trim((string)$data['c_g']));
+            if (in_array($cgUpper, ['CASH', 'GST', 'BOTH'], true)) {
+                $cgValue = $cgUpper;
             }
         }
 
@@ -1117,8 +1125,13 @@ class OrderImportService
             $order->q_no = (string)$data['q_no'];
         }
 
-        if (isset($data['c_g'])) {
-            $order->c_g = (string)$data['c_g'];
+        if (array_key_exists('c_g', $data)) {
+            if (!empty($data['c_g']) && trim((string)$data['c_g']) !== '') {
+                $cgUpper = strtoupper(trim((string)$data['c_g']));
+                $order->c_g = in_array($cgUpper, ['CASH', 'GST', 'BOTH'], true) ? $cgUpper : null;
+            } else {
+                $order->c_g = null;
+            }
         }
 
         if (isset($data['combo'])) {
@@ -1221,7 +1234,6 @@ class OrderImportService
             'launch_date'      => 'launch_date',
             'delivery_date'    => 'delivery_date',
             'quote_number'     => 'quote_number',
-            'c_g'              => 'c_g',
             'tool'             => 'tool',
             'combo'            => 'combo',
             'customer_name'    => 'customer_name',
