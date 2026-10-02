@@ -1750,6 +1750,17 @@ namespace App\Http\Controllers;
                     ], 422);
                 }
 
+                if ($request->filled('delivery_date')) {
+                    $validation = \App\Services\DeliveryCalendarService::validateDeliveryDate($request->delivery_date);
+                    if (!$validation['valid']) {
+                        return response()->json([
+                            'status' => false,
+                            'success' => false,
+                            'message' => $validation['reason']
+                        ], 422);
+                    }
+                }
+
                 return \Illuminate\Support\Facades\DB::transaction(function () use ($request) {
                     $userId = $request->input('user_id');
                     if (empty($userId) || $userId == 0) {
@@ -1891,6 +1902,7 @@ namespace App\Http\Controllers;
 
                     // Store explicit calculated pricing metadata
                     $allParams['pricing_method'] = $pricing['pricing_method'];
+                    $allParams['manual_price'] = $pricing['manual_price'];
                     $allParams['pcb_rate'] = $pricing['pcb_rate'];
                     $allParams['price_per_sqm'] = $pricing['price_per_sqm'];
                     $allParams['subtotal'] = $pricing['subtotal'];

@@ -72,15 +72,32 @@ class OrderPricingService
 
         $pcbRate = floatval($params['pcb_rate'] ?? 0);
         $pricePerSqm = floatval($params['price_per_sqm'] ?? 0);
-        $autoValue = floatval($params['auto_calculated_value'] ?? $params['order_value'] ?? 0);
+        $autoValue = floatval($params['subtotal'] ?? $params['auto_calculated_value'] ?? $params['order_value'] ?? 0);
+
+        // Check for manual price override (takes absolute top precedence)
+        $manualPrice = null;
+        if (isset($params['manual_price']) && is_numeric($params['manual_price']) && floatval($params['manual_price']) >= 0) {
+            $manualPrice = floatval($params['manual_price']);
+        } elseif (isset($params['manual_pcb_price']) && is_numeric($params['manual_pcb_price']) && floatval($params['manual_pcb_price']) >= 0) {
+            $manualPrice = floatval($params['manual_pcb_price']);
+        }
+
+        // Unit conversion (inches to mm: * 25.4)
+        $unit = strtolower(trim((string)($params['dimension_unit'] ?? $params['unit'] ?? 'mm')));
+        $unitMult = ($unit === 'inch' || $unit === 'inches' || $unit === 'in') ? 25.4 : 1.0;
+        $lengthMm = $length * $unitMult;
+        $widthMm = $width * $unitMult;
 
         // Area calculations (Length mm * Width mm / 1,000,000 = SQM per board)
-        $areaPerBoardSqm = ($length * $width) / 1000000.0;
+        $areaPerBoardSqm = ($lengthMm * $widthMm) / 1000000.0;
         $totalAreaSqm = $areaPerBoardSqm * $qty;
 
         $basePcbAmount = 0.0;
 
-        if ($pricingMethod === 'pcb_rate') {
+        if ($manualPrice !== null) {
+            $basePcbAmount = $manualPrice;
+            $pricingMethod = 'manual';
+        } elseif ($pricingMethod === 'pcb_rate') {
             $basePcbAmount = $pcbRate * $qty;
         } elseif ($pricingMethod === 'price_per_sqm') {
             $basePcbAmount = $pricePerSqm * $totalAreaSqm;
@@ -108,6 +125,7 @@ class OrderPricingService
 
         return [
             'pricing_method' => $pricingMethod,
+            'manual_price' => $manualPrice,
             'pcb_rate' => $pcbRate,
             'price_per_sqm' => $pricePerSqm,
             'area_per_board_sqm' => round($areaPerBoardSqm, 6),
