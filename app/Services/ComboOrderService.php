@@ -91,15 +91,18 @@ class ComboOrderService
                 }
             }
 
-            // Remove old relationships for this parent order
-            PcbOrderCombo::where('parent_order_id', $parentOrder->id)->delete();
+            // Remove old relationships for this parent order (hard delete to prevent zombie duplicates)
+            if (Schema::hasTable('pcb_order_combos')) {
+                if (Schema::hasColumn('pcb_order_combos', 'deleted_at')) {
+                    PcbOrderCombo::withTrashed()->where('parent_order_id', $parentOrder->id)->forceDelete();
+                } else {
+                    PcbOrderCombo::where('parent_order_id', $parentOrder->id)->delete();
+                }
+            }
 
             // Insert new relationships
             $comboNumbers = [];
             foreach ($targetOrderIds as $targetId) {
-                // If child is currently assigned to another parent, remove it from that parent first
-                PcbOrderCombo::where('combo_order_id', $targetId)->delete();
-
                 PcbOrderCombo::create([
                     'parent_order_id' => $parentOrder->id,
                     'combo_order_id'  => $targetId,
@@ -112,6 +115,7 @@ class ComboOrderService
             }
 
             // Update parent string combo column for backwards compatibility
+            $comboNumbers = array_values(array_unique($comboNumbers));
             $parentOrder->combo = !empty($comboNumbers) ? implode(', ', $comboNumbers) : null;
             $parentOrder->save();
 

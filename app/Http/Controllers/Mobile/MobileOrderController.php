@@ -133,7 +133,10 @@ class MobileOrderController extends Controller
             // But when user is explicitly searching ($search !== ''), include child combo orders so the searched order is found!
             if ($search === '' && Schema::hasTable('pcb_order_combos')) {
                 $query->whereNotIn('pcb_orders.id', function ($subQuery) {
-                    $subQuery->select('combo_order_id')->from('pcb_order_combos');
+                    $sub = $subQuery->select('combo_order_id')->from('pcb_order_combos');
+                    if (Schema::hasColumn('pcb_order_combos', 'deleted_at')) {
+                        $sub->whereNull('deleted_at');
+                    }
                 });
             }
 
@@ -375,11 +378,13 @@ class MobileOrderController extends Controller
                 $childToParentMap = DB::table('pcb_order_combos')
                     ->join('pcb_orders', 'pcb_order_combos.parent_order_id', '=', 'pcb_orders.id')
                     ->whereIn('pcb_order_combos.combo_order_id', $orderIds)
+                    ->when(Schema::hasColumn('pcb_order_combos', 'deleted_at'), fn($q) => $q->whereNull('pcb_order_combos.deleted_at'))
                     ->select('pcb_order_combos.combo_order_id', 'pcb_orders.order_number')
+                    ->distinct()
                     ->get()
                     ->groupBy('combo_order_id')
                     ->map(function ($rows) {
-                        return $rows->pluck('order_number')->filter()->implode(', ');
+                        return $rows->pluck('order_number')->filter()->unique()->implode(', ');
                     })
                     ->toArray();
             }
@@ -633,17 +638,41 @@ class MobileOrderController extends Controller
             }
 
             $comboOrders = Schema::hasTable('pcb_order_combos')
-                ? DB::table('pcb_order_combos')->join('pcb_orders', 'pcb_order_combos.combo_order_id', '=', 'pcb_orders.id')->where('pcb_order_combos.parent_order_id', $order->id)->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status')->get()
+                ? DB::table('pcb_order_combos')
+                    ->join('pcb_orders', 'pcb_order_combos.combo_order_id', '=', 'pcb_orders.id')
+                    ->where('pcb_order_combos.parent_order_id', $order->id)
+                    ->when(Schema::hasColumn('pcb_order_combos', 'deleted_at'), fn($q) => $q->whereNull('pcb_order_combos.deleted_at'))
+                    ->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status')
+                    ->distinct()
+                    ->get()
                 : [];
             $comboOrderIds = Schema::hasTable('pcb_order_combos')
-                ? DB::table('pcb_order_combos')->where('parent_order_id', $order->id)->pluck('combo_order_id')->toArray()
+                ? DB::table('pcb_order_combos')
+                    ->where('parent_order_id', $order->id)
+                    ->when(Schema::hasColumn('pcb_order_combos', 'deleted_at'), fn($q) => $q->whereNull('pcb_order_combos.deleted_at'))
+                    ->pluck('combo_order_id')
+                    ->unique()
+                    ->values()
+                    ->toArray()
                 : [];
 
             $oldOrders = Schema::hasTable('pcb_order_old_orders')
-                ? DB::table('pcb_order_old_orders')->join('pcb_orders', 'pcb_order_old_orders.old_order_id', '=', 'pcb_orders.id')->where('pcb_order_old_orders.order_id', $order->id)->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status')->get()
+                ? DB::table('pcb_order_old_orders')
+                    ->join('pcb_orders', 'pcb_order_old_orders.old_order_id', '=', 'pcb_orders.id')
+                    ->where('pcb_order_old_orders.order_id', $order->id)
+                    ->when(Schema::hasColumn('pcb_order_old_orders', 'deleted_at'), fn($q) => $q->whereNull('pcb_order_old_orders.deleted_at'))
+                    ->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status')
+                    ->distinct()
+                    ->get()
                 : [];
             $oldOrderIds = Schema::hasTable('pcb_order_old_orders')
-                ? DB::table('pcb_order_old_orders')->where('order_id', $order->id)->pluck('old_order_id')->toArray()
+                ? DB::table('pcb_order_old_orders')
+                    ->where('order_id', $order->id)
+                    ->when(Schema::hasColumn('pcb_order_old_orders', 'deleted_at'), fn($q) => $q->whereNull('pcb_order_old_orders.deleted_at'))
+                    ->pluck('old_order_id')
+                    ->unique()
+                    ->values()
+                    ->toArray()
                 : [];
 
             $data = [
@@ -692,8 +721,25 @@ class MobileOrderController extends Controller
                 'combo' => $order->combo ?? null,
                 'combo_orders' => $comboOrders,
                 'combo_order_ids' => $comboOrderIds,
-                'combo_parent' => Schema::hasTable('pcb_order_combos') ? DB::table('pcb_order_combos')->join('pcb_orders', 'pcb_order_combos.parent_order_id', '=', 'pcb_orders.id')->where('pcb_order_combos.combo_order_id', $order->id)->pluck('pcb_orders.order_number')->filter()->implode(', ') : null,
-                'parent_combo_orders' => Schema::hasTable('pcb_order_combos') ? DB::table('pcb_order_combos')->join('pcb_orders', 'pcb_order_combos.parent_order_id', '=', 'pcb_orders.id')->where('pcb_order_combos.combo_order_id', $order->id)->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status')->get() : [],
+                'combo_parent' => Schema::hasTable('pcb_order_combos')
+                    ? DB::table('pcb_order_combos')
+                        ->join('pcb_orders', 'pcb_order_combos.parent_order_id', '=', 'pcb_orders.id')
+                        ->where('pcb_order_combos.combo_order_id', $order->id)
+                        ->when(Schema::hasColumn('pcb_order_combos', 'deleted_at'), fn($q) => $q->whereNull('pcb_order_combos.deleted_at'))
+                        ->pluck('pcb_orders.order_number')
+                        ->filter()
+                        ->unique()
+                        ->implode(', ')
+                    : null,
+                'parent_combo_orders' => Schema::hasTable('pcb_order_combos')
+                    ? DB::table('pcb_order_combos')
+                        ->join('pcb_orders', 'pcb_order_combos.parent_order_id', '=', 'pcb_orders.id')
+                        ->where('pcb_order_combos.combo_order_id', $order->id)
+                        ->when(Schema::hasColumn('pcb_order_combos', 'deleted_at'), fn($q) => $q->whereNull('pcb_order_combos.deleted_at'))
+                        ->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status')
+                        ->distinct()
+                        ->get()
+                    : [],
                 'old_order_number' => $order->old_order_number ?? null,
                 'old_orders' => $oldOrders,
                 'old_order_ids' => $oldOrderIds,

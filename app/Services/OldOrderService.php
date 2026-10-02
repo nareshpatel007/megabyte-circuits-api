@@ -81,16 +81,20 @@ class OldOrderService
             // Prevent self-selection
             $targetOrderIds = array_filter($targetOrderIds, fn($id) => $id !== $currentOrder->id);
 
-            // Remove old relationships for this order
+            // Remove old relationships for this order (hard delete to prevent zombie duplicates)
             if (Schema::hasTable('pcb_order_old_orders')) {
-                PcbOrderOldOrder::where('order_id', $currentOrder->id)->delete();
+                if (Schema::hasColumn('pcb_order_old_orders', 'deleted_at')) {
+                    PcbOrderOldOrder::withTrashed()->where('order_id', $currentOrder->id)->forceDelete();
+                } else {
+                    PcbOrderOldOrder::where('order_id', $currentOrder->id)->delete();
+                }
             }
 
             // Insert new relationships
             $oldNumbers = [];
             foreach ($targetOrderIds as $targetId) {
                 if (Schema::hasTable('pcb_order_old_orders')) {
-                    PcbOrderOldOrder::firstOrCreate([
+                    PcbOrderOldOrder::create([
                         'order_id'     => $currentOrder->id,
                         'old_order_id' => $targetId,
                     ]);
@@ -103,6 +107,7 @@ class OldOrderService
             }
 
             // Update string column if column exists
+            $oldNumbers = array_values(array_unique($oldNumbers));
             if (Schema::hasColumn('pcb_orders', 'old_order_number')) {
                 $currentOrder->old_order_number = !empty($oldNumbers) ? implode(', ', $oldNumbers) : null;
                 $currentOrder->save();

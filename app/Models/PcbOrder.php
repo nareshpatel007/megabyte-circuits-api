@@ -85,12 +85,18 @@ class PcbOrder extends Model
     // Combo Orders (Child orders under this parent order)
     public function comboOrders()
     {
-        return $this->belongsToMany(
+        $relation = $this->belongsToMany(
             PcbOrder::class,
             'pcb_order_combos',
             'parent_order_id',
             'combo_order_id'
         )->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status', 'pcb_orders.pn_number');
+
+        if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_combos', 'deleted_at')) {
+            $relation->whereNull('pcb_order_combos.deleted_at');
+        }
+
+        return $relation->distinct();
     }
 
     // Combo Parent Record
@@ -102,23 +108,35 @@ class PcbOrder extends Model
     // Old Order Numbers (Referenced previous orders for this order)
     public function oldOrders()
     {
-        return $this->belongsToMany(
+        $relation = $this->belongsToMany(
             PcbOrder::class,
             'pcb_order_old_orders',
             'order_id',
             'old_order_id'
         )->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status', 'pcb_orders.pn_number');
+
+        if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_old_orders', 'deleted_at')) {
+            $relation->whereNull('pcb_order_old_orders.deleted_at');
+        }
+
+        return $relation->distinct();
     }
 
     // Reverse relationship (Orders that reference this order as their old order)
     public function referencedAsOldOrderBy()
     {
-        return $this->belongsToMany(
+        $relation = $this->belongsToMany(
             PcbOrder::class,
             'pcb_order_old_orders',
             'old_order_id',
             'order_id'
         )->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status', 'pcb_orders.pn_number');
+
+        if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_old_orders', 'deleted_at')) {
+            $relation->whereNull('pcb_order_old_orders.deleted_at');
+        }
+
+        return $relation->distinct();
     }
 
     protected $casts = [
