@@ -35,13 +35,13 @@ class JLCPCBPriceCalculatorTest extends TestCase
         $this->assertEquals(100.00, $res['total_usd']);
         $this->assertEquals(10000.00, $res['import_purchase_value']);
         $this->assertEquals(3000.00, $res['customs_duty']);
-        $this->assertEquals(2340.00, $res['import_gst']);
+        $this->assertEquals(0.00, $res['import_gst']);
         $this->assertEquals(1000.00, $res['domestic_freight']);
-        $this->assertEquals(16340.00, $res['total_buy_cost']);
-        $this->assertEquals(3268.00, $res['margin_amount']);
-        $this->assertEquals(19608.00, $res['selling_price_before_gst']);
-        $this->assertEquals(3529.44, $res['sales_gst_amount']);
-        $this->assertEquals(23137.44, $res['final_customer_price']);
+        $this->assertEquals(14000.00, $res['total_buy_cost']);
+        $this->assertEquals(2800.00, $res['margin_amount']);
+        $this->assertEquals(16800.00, $res['selling_price_before_gst']);
+        $this->assertEquals(3024.00, $res['sales_gst_amount']);
+        $this->assertEquals(19824.00, $res['final_customer_price']);
     }
 
     public function test_zero_shipping_fallback_uses_api_shipping()

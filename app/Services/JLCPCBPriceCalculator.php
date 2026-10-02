@@ -157,9 +157,9 @@ class JLCPCBPriceCalculator
         // 3. Customs Duty (INR)
         $customsDuty = round($importPurchaseValue * ($dutyPct / 100.0), 2);
 
-        // 4. Import GST / IGST Base (goods + duty + sws + other duty)
+        // 4. Import GST / IGST Base (Import IGST removed from landed cost calculation)
         $gstBase = round($importPurchaseValue + $customsDuty + $sws + $otherDuty, 2);
-        $importGst = round($gstBase * ($importGstPct / 100.0), 2);
+        $importGst = 0.0;
 
         // 5. Local / Clearing Expenses
         $localExpenses = round($clearing + $bankCharges + $domesticFreight + $otherBuyExpenses, 2);
@@ -167,8 +167,8 @@ class JLCPCBPriceCalculator
         // 6. BUY COST — BEFORE GST
         $buyTotalExGst = round($importPurchaseValue + $customsDuty + $otherDuty + $sws + $localExpenses, 2);
 
-        // 7. TOTAL BUY COST (Including Import GST)
-        $totalBuyCost = round($buyTotalExGst + $importGst, 2);
+        // 7. TOTAL BUY COST
+        $totalBuyCost = $buyTotalExGst;
 
         // 8. Quantity Per-Unit Calculations
         $qty = max(1, $quantity);
