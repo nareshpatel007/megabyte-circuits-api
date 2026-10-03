@@ -978,6 +978,15 @@ class OrderImportService
             }
         }
 
+        // Status Validation
+        if (!empty($data['status']) && trim((string)$data['status']) !== '') {
+            $rawStatus = trim((string)$data['status']);
+            $resolvedSt = \App\Services\OrderStatusResolver::resolve($rawStatus);
+            if (!$resolvedSt && strtolower($rawStatus) !== 'move') {
+                $errors['Status'] = 'Invalid status "' . $data['status'] . '".';
+            }
+        }
+
         // Note: If combo order is not found, ignore combo adding and just add order data without combo error.
 
         return [
@@ -1009,7 +1018,14 @@ class OrderImportService
 
         $completedQty = $finalQty > 0 ? $finalQty : $orderQty;
         $rawStatus = !empty($data['status']) ? trim((string)$data['status']) : '';
-        $status = (empty($rawStatus) || strtolower($rawStatus) === 'move') ? 'Completed' : $rawStatus;
+        $resolvedStatus = \App\Services\OrderStatusResolver::resolve($rawStatus);
+        if (!$resolvedStatus) {
+            $resolvedStatus = (empty($rawStatus) || strtolower($rawStatus) === 'move')
+                ? \App\Services\OrderStatusResolver::resolve('Completed')
+                : \App\Services\OrderStatusResolver::getDefaultStatus();
+        }
+        $status = $resolvedStatus ? $resolvedStatus->name : 'Completed';
+        $statusId = $resolvedStatus ? $resolvedStatus->id : null;
         $billNumber = !empty($data['bill_number']) ? (string)$data['bill_number'] : null;
 
         // P/N Resolution -> pcb_orders.pn_number (Gerber file is NOT created for P/N)
@@ -1039,6 +1055,7 @@ class OrderImportService
             'mask'           => $mask,
             'gerber_file_id' => null,
             'status'         => $status,
+            'status_id'      => $statusId,
             'completed_qty'  => $completedQty,
             'order_qty'      => $orderQty,
             'launch_qty'     => $launchQty,
@@ -1178,7 +1195,14 @@ class OrderImportService
 
         if (!empty($data['status'])) {
             $rawStatus = trim((string)$data['status']);
-            $order->status = strtolower($rawStatus) === 'move' ? 'Completed' : $rawStatus;
+            $resolvedStatus = \App\Services\OrderStatusResolver::resolve($rawStatus);
+            if (!$resolvedStatus && strtolower($rawStatus) === 'move') {
+                $resolvedStatus = \App\Services\OrderStatusResolver::resolve('Completed');
+            }
+            if ($resolvedStatus) {
+                $order->status = $resolvedStatus->name;
+                $order->status_id = $resolvedStatus->id;
+            }
         }
 
         if (!empty($data['bill_number'])) {

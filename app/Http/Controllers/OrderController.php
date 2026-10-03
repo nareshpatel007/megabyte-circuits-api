@@ -114,6 +114,10 @@ namespace App\Http\Controllers;
 
                 $pnNumber = $request->filled('pn_number') ? trim($request->input('pn_number')) : ($gerberFileName ?: null);
 
+                $defaultStatus = \App\Services\OrderStatusResolver::getDefaultStatus();
+                $initialStatusName = $defaultStatus ? $defaultStatus->name : 'Pending';
+                $initialStatusId = $defaultStatus ? $defaultStatus->id : null;
+
                 // Create the main compact order record
                 $order = PcbOrder::create([
                     'user_id' => $userId,
@@ -124,7 +128,8 @@ namespace App\Http\Controllers;
                     'user_email' => $request->user_email,
                     'user_mobile' => $request->user_mobile,
                     'c_g' => $request->c_g ?? $cgStatus,
-                    'status' => 'pending',
+                    'status' => $initialStatusName,
+                    'status_id' => $initialStatusId,
                     'unit_price' => $request->unit_price ?? 0,
                     'order_value' => $request->order_value ?? 0,
                     'delivery_date' => $request->delivery_date,
@@ -528,9 +533,9 @@ namespace App\Http\Controllers;
                 }
 
                 $orders->transform(function ($order) {
-                    if (isset($order->statusDetails) && !empty($order->statusDetails->name)) {
+                    if (empty($order->status) && isset($order->statusDetails) && !empty($order->statusDetails->name)) {
                         $order->status = $order->statusDetails->name;
-                    } else if (empty($order->status)) {
+                    } elseif (empty($order->status)) {
                         $order->status = 'Pending';
                     }
                     if (empty($order->pn_number)) {
@@ -644,9 +649,24 @@ namespace App\Http\Controllers;
                     ->where('pcb_order_notes.pcb_order_id', $id);
 
                 if (\Illuminate\Support\Facades\Schema::hasTable('admins')) {
-                    $notesQuery->leftJoin('admins', function($join) {
-                        $join->on('admins.id', '=', \Illuminate\Support\Facades\DB::raw('COALESCE(pcb_order_notes.created_by, pcb_order_notes.admin_id)'));
-                    });
+                    $hasCreatedBy = \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_notes', 'created_by');
+                    $hasAdminId = \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_notes', 'admin_id');
+
+                    if ($hasCreatedBy && $hasAdminId) {
+                        $joinCol = \Illuminate\Support\Facades\DB::raw('COALESCE(pcb_order_notes.created_by, pcb_order_notes.admin_id)');
+                    } elseif ($hasCreatedBy) {
+                        $joinCol = 'pcb_order_notes.created_by';
+                    } elseif ($hasAdminId) {
+                        $joinCol = 'pcb_order_notes.admin_id';
+                    } else {
+                        $joinCol = null;
+                    }
+
+                    if ($joinCol) {
+                        $notesQuery->leftJoin('admins', function($join) use ($joinCol) {
+                            $join->on('admins.id', '=', $joinCol);
+                        });
+                    }
                 }
 
                 if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_notes', 'deleted_at')) {
@@ -804,6 +824,12 @@ namespace App\Http\Controllers;
                 $order->failed_qty = (int)($order->getMeta('failed_qty') ?: $order->getMeta('failed') ?: 0);
             }
 
+            if (empty($order->status) && isset($order->statusDetails) && !empty($order->statusDetails->name)) {
+                $order->status = $order->statusDetails->name;
+            } elseif (empty($order->status)) {
+                $order->status = 'Pending';
+            }
+
             return response()->json([
                 'status' => true,
                 'data' => $order
@@ -826,10 +852,32 @@ namespace App\Http\Controllers;
                 
                 $hasCustomerNameCol = \Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'customer_name');
 
+                // Resolve and validate target status if status or status_id is in request
+                $resolvedStatus = null;
+                if ($request->has('status') || $request->has('status_id')) {
+                    $reqStatus = $request->has('status') ? $request->input('status') : null;
+                    $reqStatusId = $request->has('status_id') ? $request->input('status_id') : null;
+
+                    [$resolvedStatus, $statusError] = \App\Services\OrderStatusResolver::resolveAndVerify($reqStatus, $reqStatusId);
+
+                    if ($statusError) {
+                        \Illuminate\Support\Facades\DB::rollBack();
+                        return response()->json([
+                            'success' => false,
+                            'status'  => false,
+                            'message' => $statusError,
+                            'errors'  => [
+                                'status' => [$statusError]
+                            ]
+                        ], 422);
+                    }
+                }
+
                 // Business Rule: An order cannot be changed to Completed (or kept Completed) without a valid non-empty Bill Number.
                 $completedStatuses = ['completed', 'delivered', 'order completed', 'production completed'];
-                $targetStatusStr = $request->has('status') ? trim((string)$request->status) : (string)($order->status ?? '');
-                $isTargetCompleted = in_array(strtolower($targetStatusStr), $completedStatuses);
+                $targetStatusStr = $resolvedStatus ? $resolvedStatus->name : (string)($order->status ?? '');
+                $isTargetCompleted = in_array(strtolower($targetStatusStr), $completedStatuses) ||
+                                     ($resolvedStatus && !empty($resolvedStatus->slug) && in_array(strtolower($resolvedStatus->slug), $completedStatuses));
 
                 if ($isTargetCompleted) {
                     $effectiveBillNumber = $request->has('bill_number')
@@ -964,38 +1012,30 @@ namespace App\Http\Controllers;
                 $statusChanged = false;
                 $previousStatusName = $order->status ?? 'Pending';
 
-                if ($request->has('status') && (string)$order->status !== (string)$request->status) {
-                    $oldValStr = strtolower(trim((string)($order->status ?? 'Pending')));
-                    $newValStr = strtolower(trim((string)$request->status));
+                if ($resolvedStatus) {
+                    $oldStatusCanonical = \App\Services\OrderStatusResolver::resolve($order->status_id ?: $order->status);
+                    $oldValStr = $oldStatusCanonical ? strtolower(trim((string)$oldStatusCanonical->name)) : strtolower(trim((string)($order->status ?? 'pending')));
+                    $newValStr = strtolower(trim((string)$resolvedStatus->name));
 
                     if ($oldValStr !== $newValStr) {
                         $statusChanged = true;
-                    }
+                        $oldDisplay = $order->status ?: ($oldStatusCanonical ? $oldStatusCanonical->name : 'Pending');
+                        $order->status = $resolvedStatus->name;
+                        $order->status_id = $resolvedStatus->id;
+                        $changesLog[] = "Status: '{$oldDisplay}' → '{$resolvedStatus->name}'";
 
-                    if (!in_array($oldValStr, $completedStatuses) && in_array($newValStr, $completedStatuses)) {
-                        $statusChangedToCompleted = true;
-                    }
-
-                    if ($oldValStr === 'pending' && $newValStr !== 'pending') {
-                        $statusChangedFromPendingToProduction = true;
-                    }
-
-                    $oldVal = $order->status ?? 'Pending';
-                    $order->status = $request->status;
-                    $changesLog[] = "Status: '{$oldVal}' → '{$request->status}'";
-                    if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses')) {
-                        $st = \Illuminate\Support\Facades\DB::table('pcb_order_statuses')
-                            ->whereRaw('LOWER(name) = ?', [strtolower($request->status)])
-                            ->orWhereRaw('LOWER(label) = ?', [strtolower($request->status)])
-                            ->first();
-                        if ($st) {
-                            $order->status_id = $st->id;
+                        if (!in_array($oldValStr, $completedStatuses) && in_array($newValStr, $completedStatuses)) {
+                            $statusChangedToCompleted = true;
                         }
-                    }
-                }
 
-                if ($request->has('status_id')) {
-                    $order->status_id = $request->status_id;
+                        if ($oldValStr === 'pending' && $newValStr !== 'pending') {
+                            $statusChangedFromPendingToProduction = true;
+                        }
+                    } else {
+                        // Ensure both dual fields are synchronized without marking statusChanged
+                        $order->status = $resolvedStatus->name;
+                        $order->status_id = $resolvedStatus->id;
+                    }
                 }
 
                 if ($request->has('launch_date') && $order->launch_date !== $request->launch_date) {
@@ -1395,7 +1435,9 @@ namespace App\Http\Controllers;
 
                 // Dispatch order_production_film_not_applied email if transition was Pending -> Non-Pending and film_applied != 1
                 if ($statusChangedFromPendingToProduction) {
-                    $freshFilmApplied = \Illuminate\Support\Facades\DB::table('pcb_orders')->where('id', $order->id)->value('film_applied');
+                    $freshFilmApplied = \Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'film_applied')
+                        ? \Illuminate\Support\Facades\DB::table('pcb_orders')->where('id', $order->id)->value('film_applied')
+                        : ($order->getMeta('film_applied') ?: null);
                     if ($freshFilmApplied === null && isset($order->film_applied)) {
                         $freshFilmApplied = $order->film_applied;
                     }
@@ -1422,12 +1464,12 @@ namespace App\Http\Controllers;
                     );
                 }
 
-                // 1. Create status change history log in pcb_order_status_histories
-                if ($request->has('status') && \Illuminate\Support\Facades\Schema::hasTable('pcb_order_status_histories')) {
+                // 1. Create status change history log in pcb_order_status_histories ONLY if status actually changed
+                if ($statusChanged && \Illuminate\Support\Facades\Schema::hasTable('pcb_order_status_histories')) {
                     PcbOrderStatusHistory::create([
                         'pcb_order_id' => $order->id,
                         'admin_id' => $adminId ?: 1,
-                        'status_name' => $request->status,
+                        'status_name' => $order->status,
                         'remark' => $remark,
                         'created_at' => now()
                     ]);
@@ -1498,6 +1540,14 @@ namespace App\Http\Controllers;
                     'message' => 'Order updated successfully',
                     'data' => $order->load($withRels)
                 ]);
+            } catch (\Illuminate\Validation\ValidationException $ve) {
+                \Illuminate\Support\Facades\DB::rollBack();
+                return response()->json([
+                    'status' => false,
+                    'success' => false,
+                    'message' => $ve->getMessage(),
+                    'errors' => $ve->errors()
+                ], 422);
             } catch (\Throwable $e) {
                 \Illuminate\Support\Facades\DB::rollBack();
                 return response()->json([
@@ -1848,14 +1898,10 @@ namespace App\Http\Controllers;
                         ]);
                     }
 
-                    // Find status id if available
-                    $statusId = null;
-                    if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses')) {
-                        $st = \Illuminate\Support\Facades\DB::table('pcb_order_statuses')->where('name', 'Pending')->first();
-                        if ($st) {
-                            $statusId = $st->id;
-                        }
-                    }
+                    // Resolve canonical Pending status
+                    $canonicalPending = \App\Services\OrderStatusResolver::getDefaultStatus();
+                    $statusId = $canonicalPending ? $canonicalPending->id : null;
+                    $statusName = $canonicalPending ? $canonicalPending->name : 'Pending';
 
                     $pnNumber = $request->filled('pn_number') ? trim($request->input('pn_number')) : ($gerberFileName ?: null);
 
@@ -1864,6 +1910,7 @@ namespace App\Http\Controllers;
                         'user_id' => $userId,
                         'order_number' => $orderNumber,
                         'pn_number' => $pnNumber,
+                        'status' => $statusName,
                         'status_id' => $statusId,
                         'gerber_file_id' => $gerberFileId,
                         'transaction_id' => $transactionId,

@@ -103,9 +103,10 @@ class DashboardController extends Controller
                 ->get();
 
             foreach ($recentOrders as $order) {
-                if (!empty($order->status)) {
-                    $order->status_name = $order->status;
-                }
+                $resolvedSt = \App\Services\OrderStatusResolver::resolve($order->status_id ?: $order->status);
+                $order->status = $resolvedSt ? $resolvedSt->name : ($order->status ?: 'Pending');
+                $order->status_id = $resolvedSt ? $resolvedSt->id : $order->status_id;
+                $order->status_name = $order->status;
                 $metas = DB::table('pcb_order_meta')
                     ->where('pcb_order_id', $order->id)
                     ->pluck('meta_value', 'meta_key');
@@ -217,9 +218,10 @@ class DashboardController extends Controller
                 $order->gerber_url = '/' . ltrim($order->gerber_url, '/');
             }
 
-            if (!empty($order->status)) {
-                $order->status_name = $order->status;
-            }
+            $resolvedSt = \App\Services\OrderStatusResolver::resolve($order->status_id ?: $order->status);
+            $order->status = $resolvedSt ? $resolvedSt->name : ($order->status ?: 'Pending');
+            $order->status_id = $resolvedSt ? $resolvedSt->id : $order->status_id;
+            $order->status_name = $order->status;
 
             $metas = DB::table('pcb_order_meta')
                 ->where('pcb_order_id', $order->id)
@@ -564,9 +566,10 @@ class DashboardController extends Controller
 
             // Attach meta specs for each order
             foreach ($orders as $order) {
-                if (!empty($order->status)) {
-                    $order->status_name = $order->status;
-                }
+                $resolvedSt = \App\Services\OrderStatusResolver::resolve($order->status_id ?: $order->status);
+                $order->status = $resolvedSt ? $resolvedSt->name : ($order->status ?: 'Pending');
+                $order->status_id = $resolvedSt ? $resolvedSt->id : $order->status_id;
+                $order->status_name = $order->status;
                 $metas = DB::table('pcb_order_meta')
                     ->where('pcb_order_id', $order->id)
                     ->pluck('meta_value', 'meta_key');

@@ -882,21 +882,24 @@ class MobileOrderController extends Controller
                 ], 422);
             }
 
+            $canonicalStatus = \App\Services\OrderStatusResolver::resolve($newStatus);
+            if (!$canonicalStatus) {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'status'  => false,
+                    'message' => "The order status '{$newStatus}' is invalid.",
+                    'errors'  => [
+                        'status' => ["The order status '{$newStatus}' is invalid."]
+                    ]
+                ], 422);
+            }
+
             $updateData = [
-                'status' => $newStatus,
+                'status'     => $canonicalStatus->name,
+                'status_id'  => $canonicalStatus->id,
                 'updated_at' => date('Y-m-d H:i:s')
             ];
-
-            $statusTable = Schema::hasTable('pcb_order_statuses') ? 'pcb_order_statuses' : (Schema::hasTable('pcb_statuses') ? 'pcb_statuses' : null);
-            if ($statusTable) {
-                $matchingStatus = DB::table($statusTable)
-                    ->where(DB::raw('LOWER(TRIM(name))'), $newValStr)
-                    ->orWhere(DB::raw('LOWER(TRIM(slug))'), $newValStr)
-                    ->first();
-                if ($matchingStatus) {
-                    $updateData['status_id'] = $matchingStatus->id;
-                }
-            }
 
             if ($inputBillNumber !== null) {
                 $updateData['bill_number'] = $inputBillNumber !== '' ? $inputBillNumber : null;
@@ -926,26 +929,26 @@ class MobileOrderController extends Controller
             $adminUser = $adminId ? DB::table('admins')->where('id', $adminId)->first() : null;
             $adminName = $adminUser ? $adminUser->name : 'Operator';
 
-            // Insert into pcb_order_logs
-            if (Schema::hasTable('pcb_order_logs')) {
+            // Insert into pcb_order_logs only if status changed
+            if ($oldValStr !== $newValStr && Schema::hasTable('pcb_order_logs')) {
                 DB::table('pcb_order_logs')->insert([
                     'pcb_order_id' => $order->id,
                     'order_number' => $order->order_number ?? (string)$order->id,
                     'admin_id' => $adminId,
-                    'status' => $newStatus,
-                    'action' => "Status Updated: {$newStatus}",
-                    'description' => "Order status updated from '{$oldStatus}' to '{$newStatus}' by {$adminName}.",
+                    'status' => $canonicalStatus->name,
+                    'action' => "Status Updated: {$canonicalStatus->name}",
+                    'description' => "Order status updated from '{$oldStatus}' to '{$canonicalStatus->name}' by {$adminName}.",
                     'created_at' => date('Y-m-d H:i:s'),
                     'updated_at' => date('Y-m-d H:i:s')
                 ]);
             }
 
-            if (Schema::hasTable('pcb_order_status_histories')) {
+            if ($oldValStr !== $newValStr && Schema::hasTable('pcb_order_status_histories')) {
                 DB::table('pcb_order_status_histories')->insert([
                     'pcb_order_id' => $order->id,
                     'admin_id' => $adminId ?: 1,
-                    'status_name' => $newStatus,
-                    'remark' => "Status updated to '{$newStatus}' by {$adminName}",
+                    'status_name' => $canonicalStatus->name,
+                    'remark' => "Status updated to '{$canonicalStatus->name}' by {$adminName}",
                     'created_at' => date('Y-m-d H:i:s')
                 ]);
             }

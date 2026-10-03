@@ -64,6 +64,32 @@ class PcbOrder extends Model
         return $this->belongsTo(Status::class, 'status_id');
     }
 
+    // Status details accessor ensuring status_details is always canonical
+    public function getStatusDetailsAttribute()
+    {
+        if ($this->relationLoaded('statusDetails')) {
+            return $this->getRelation('statusDetails');
+        }
+
+        if (!empty($this->status_id)) {
+            $st = \App\Services\OrderStatusResolver::resolve($this->status_id);
+            if ($st) {
+                $this->setRelation('statusDetails', $st);
+                return $st;
+            }
+        }
+
+        if (!empty($this->status)) {
+            $st = \App\Services\OrderStatusResolver::resolve($this->status);
+            if ($st) {
+                $this->setRelation('statusDetails', $st);
+                return $st;
+            }
+        }
+
+        return null;
+    }
+
     // Status Histories relationship
     public function statusHistories()
     {
@@ -154,6 +180,10 @@ class PcbOrder extends Model
         'jlcpcb_quotation_snapshot' => 'array',
     ];
 
+    protected $appends = [
+        'status_details',
+    ];
+
     public function scopeJlcpcb($query)
     {
         return $query->where('order_type', 'jlcpcb')
@@ -174,6 +204,87 @@ class PcbOrder extends Model
     protected static function boot()
     {
         parent::boot();
+
+        static::saving(function ($order) {
+            $statusDirty = $order->isDirty('status');
+            $statusIdDirty = $order->isDirty('status_id');
+
+            // If neither is dirty and model exists, nothing to sync
+            if (!$statusDirty && !$statusIdDirty && $order->exists) {
+                return;
+            }
+
+            // If creating without any status, set canonical default
+            if (!$order->exists && empty($order->status) && empty($order->status_id)) {
+                $canonical = \App\Services\OrderStatusResolver::getDefaultStatus();
+                if ($canonical) {
+                    $order->status = $canonical->name;
+                    $order->status_id = $canonical->id;
+                    if ($order->relationLoaded('statusDetails')) {
+                        $order->setRelation('statusDetails', $canonical);
+                    }
+                }
+                return;
+            }
+
+            // Both status and status_id were touched
+            if ($statusDirty && $statusIdDirty) {
+                $statusVal = $order->status;
+                $statusIdVal = $order->status_id;
+
+                [$canonical, $error] = \App\Services\OrderStatusResolver::resolveAndVerify($statusVal, $statusIdVal);
+                if ($error) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'status' => [$error],
+                    ]);
+                }
+                if ($canonical) {
+                    $order->status = $canonical->name;
+                    $order->status_id = $canonical->id;
+                    if ($order->relationLoaded('statusDetails')) {
+                        $order->setRelation('statusDetails', $canonical);
+                    }
+                }
+            } elseif ($statusDirty) {
+                $statusVal = $order->status;
+                if ($statusVal === null || trim((string)$statusVal) === '') {
+                    $canonical = \App\Services\OrderStatusResolver::getDefaultStatus();
+                } else {
+                    $canonical = \App\Services\OrderStatusResolver::resolve($statusVal);
+                }
+
+                if (!$canonical) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'status' => ["The order status '" . trim((string)$statusVal) . "' is invalid."],
+                    ]);
+                }
+
+                $order->status = $canonical->name;
+                $order->status_id = $canonical->id;
+                if ($order->relationLoaded('statusDetails')) {
+                    $order->setRelation('statusDetails', $canonical);
+                }
+            } elseif ($statusIdDirty) {
+                $statusIdVal = $order->status_id;
+                if ($statusIdVal === null || trim((string)$statusIdVal) === '') {
+                    $canonical = \App\Services\OrderStatusResolver::getDefaultStatus();
+                } else {
+                    $canonical = \App\Services\OrderStatusResolver::resolve($statusIdVal);
+                }
+
+                if (!$canonical) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'status_id' => ["The order status ID '" . trim((string)$statusIdVal) . "' is invalid."],
+                    ]);
+                }
+
+                $order->status = $canonical->name;
+                $order->status_id = $canonical->id;
+                if ($order->relationLoaded('statusDetails')) {
+                    $order->setRelation('statusDetails', $canonical);
+                }
+            }
+        });
 
         static::updating(function ($order) {
             $statusChanged = $order->isDirty('status') || $order->isDirty('status_id');
