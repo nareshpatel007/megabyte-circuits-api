@@ -151,6 +151,16 @@ namespace App\Http\Controllers;
                 $metaData['ip_address'] = $request->ip();
                 $metaData['user_agent'] = $request->userAgent();
 
+                $sf = $request->input('surface_finish', $request->input('finish', 'HASL(Leaded)'));
+                $mat = $request->input('base_material', $request->input('material', ''));
+                $isEnig = (stripos($sf, 'ENIG') !== false) || ($mat === 'Flex');
+                if ($isEnig) {
+                    $rawGt = $request->input('gold_thickness', '1 U"');
+                    $metaData['gold_thickness'] = (!empty($rawGt) && $rawGt !== 'N/A') ? ($rawGt === '1 U*' ? '1 U"' : $rawGt) : '1 U"';
+                } else {
+                    $metaData['gold_thickness'] = 'N/A';
+                }
+
                 foreach ($metaData as $key => $value) {
                     if ($value !== null && $value !== '') {
                         PcbOrderMeta::create([
@@ -1168,6 +1178,31 @@ namespace App\Http\Controllers;
                             ['meta_value' => $specVal]
                         );
                         $changesLog[] = "Spec {$specKey}: {$specVal}";
+                    }
+                }
+
+                // Enforce gold_thickness constraint: if surface finish is not ENIG (and not Flex), store as N/A
+                $currentSfMeta = \App\Models\PcbOrderMeta::where('pcb_order_id', $order->id)
+                    ->whereIn('meta_key', ['surface_finish', 'finish'])
+                    ->value('meta_value');
+                $currentMatMeta = \App\Models\PcbOrderMeta::where('pcb_order_id', $order->id)
+                    ->whereIn('meta_key', ['base_material', 'material'])
+                    ->value('meta_value');
+                $isOrderEnig = (stripos($currentSfMeta ?? '', 'ENIG') !== false) || (($currentMatMeta ?? '') === 'Flex');
+                if (!$isOrderEnig) {
+                    \App\Models\PcbOrderMeta::updateOrCreate(
+                        ['pcb_order_id' => $order->id, 'meta_key' => 'gold_thickness'],
+                        ['meta_value' => 'N/A']
+                    );
+                } else {
+                    $curGt = \App\Models\PcbOrderMeta::where('pcb_order_id', $order->id)
+                        ->where('meta_key', 'gold_thickness')
+                        ->value('meta_value');
+                    if (empty($curGt) || $curGt === 'N/A' || $curGt === '1 U*') {
+                        \App\Models\PcbOrderMeta::updateOrCreate(
+                            ['pcb_order_id' => $order->id, 'meta_key' => 'gold_thickness'],
+                            ['meta_value' => '1 U"']
+                        );
                     }
                 }
 

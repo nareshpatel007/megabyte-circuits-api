@@ -553,6 +553,13 @@ class CheckoutController extends Controller
                     ];
                 } else {
                     $baseMat = $item['baseMaterial'] ?? ($item['material'] ?? 'FR-4');
+                    $surfaceFinishVal = $item['surfaceFinish'] ?? ($item['surface_finish'] ?? 'HASL(Leaded)');
+                    $isEnigSf = (stripos($surfaceFinishVal, 'ENIG') !== false) || ($baseMat === 'Flex');
+                    $resolvedGoldThickness = 'N/A';
+                    if ($isEnigSf) {
+                        $rawGt = $item['goldThickness'] ?? ($item['gold_thickness'] ?? '1 U"');
+                        $resolvedGoldThickness = (!empty($rawGt) && $rawGt !== 'N/A') ? ($rawGt === '1 U*' ? '1 U"' : $rawGt) : '1 U"';
+                    }
                     $metaFields = [
                         'board_name' => $boardName,
                         'order_type' => $orderType,
@@ -572,7 +579,7 @@ class CheckoutController extends Controller
                         'cutting_method' => $item['cuttingMethod'] ?? '',
                         'silkscreen_on_stiffener' => $item['silkscreenOnStiffener'] ?? '',
                         'eda_software' => $item['edaSoftware'] ?? '',
-                        'gold_thickness' => $item['goldThickness'] ?? '',
+                        'gold_thickness' => $resolvedGoldThickness,
                         'gerber_file_name' => $resolvedGerberFileName ?: ($item['gerberFileName'] ?? $boardName),
                         'pcb_color' => $item['pcbColor'] ?? 'Green',
                         'layers' => $item['layers'] ?? '2',
@@ -583,7 +590,7 @@ class CheckoutController extends Controller
                         'quantity' => $itemQty,
                         'build_time' => $item['buildTime'] ?? ($item['build_time'] ?? (!empty($item['build_days']) ? ($item['build_days'] . ' days') : '3-4 days')),
                         'thickness' => $item['thickness'] ?? '1.6mm',
-                        'surface_finish' => $item['surfaceFinish'] ?? 'HASL(Leaded)',
+                        'surface_finish' => $surfaceFinishVal,
                         'silkscreen' => $item['silkscreen'] ?? 'White',
                         'copper_weight' => $item['copperWeight'] ?? '1 oz',
                         'different_design' => $item['differentDesign'] ?? '1',

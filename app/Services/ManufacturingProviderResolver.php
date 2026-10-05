@@ -150,24 +150,34 @@ class ManufacturingProviderResolver
             $reasons[] = "Blind Slots: Yes requires JLCPCB.";
         }
 
-        // 13. Via Covering: Plugged, Epoxy Filled & Capped, Copper Paste Filled & Capped force JLCPCB
+        // 13. Via Covering: Only Tented, Untented, and Not Specified qualify for In-House;
+        // Plugged, Epoxy Filled & Capped, Copper Paste Filled & Capped force JLCPCB
         $rawVc = trim((string)($data['viaCovering'] ?? $data['via_covering'] ?? ''));
         $vcLower = strtolower($rawVc);
-        if (str_contains($vcLower, 'plugged')) {
-            $reasons[] = "Via Covering: Plugged requires JLCPCB.";
-        } elseif (str_contains($vcLower, 'epoxy')) {
-            $reasons[] = "Via Covering: Epoxy Filled & Capped requires JLCPCB.";
-        } elseif (str_contains($vcLower, 'copper') && (str_contains($vcLower, 'paste') || str_contains($vcLower, 'fill'))) {
-            $reasons[] = "Via Covering: Copper Paste Filled & Capped requires JLCPCB.";
+        if ($vcLower !== '' && $vcLower !== 'not specified' && $vcLower !== 'tented' && $vcLower !== 'untented') {
+            if (str_contains($vcLower, 'plugged')) {
+                $reasons[] = "Via Covering: Plugged requires JLCPCB.";
+            } elseif (str_contains($vcLower, 'epoxy')) {
+                $reasons[] = "Via Covering: Epoxy Filled & Capped requires JLCPCB.";
+            } elseif (str_contains($vcLower, 'copper') || (str_contains($vcLower, 'paste') && str_contains($vcLower, 'fill'))) {
+                $reasons[] = "Via Covering: Copper Paste Filled & Capped requires JLCPCB.";
+            } else {
+                $reasons[] = "Via Covering: '{$rawVc}' requires JLCPCB.";
+            }
         }
 
-        // 14. Via Plating Method: Conductive Adhesive, Horizontal Electroless Copper force JLCPCB
+        // 14. Via Plating Method: Only Not Specified qualifies for In-House;
+        // Conductive Adhesive, Horizontal Electroless Copper Plating force JLCPCB
         $rawVp = trim((string)($data['viaPlating'] ?? $data['via_plating'] ?? $data['viaPlatingMethod'] ?? ''));
         $vpLower = strtolower($rawVp);
-        if (str_contains($vpLower, 'conductive') && str_contains($vpLower, 'adhesive')) {
-            $reasons[] = "Via Plating: Conductive Adhesive requires JLCPCB.";
-        } elseif (str_contains($vpLower, 'horizontal') || str_contains($vpLower, 'electroless')) {
-            $reasons[] = "Via Plating: Horizontal Electroless Copper Plating requires JLCPCB.";
+        if ($vpLower !== '' && $vpLower !== 'not specified') {
+            if (str_contains($vpLower, 'conductive') && str_contains($vpLower, 'adhesive')) {
+                $reasons[] = "Via Plating: Conductive Adhesive requires JLCPCB.";
+            } elseif (str_contains($vpLower, 'horizontal') || str_contains($vpLower, 'electroless')) {
+                $reasons[] = "Via Plating: Horizontal Electroless Copper Plating requires JLCPCB.";
+            } else {
+                $reasons[] = "Via Plating: '{$rawVp}' requires JLCPCB.";
+            }
         }
 
         $isEligible = empty($reasons);

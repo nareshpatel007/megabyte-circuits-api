@@ -746,7 +746,9 @@ class MobileOrderController extends Controller
                 'solder_mask' => $this->resolveMaskColor($order, $metaMap),
                 'silkscreen' => $metaMap['silkscreen'] ?? $metaMap['silkscreen_color'] ?? 'White',
                 'surface_finish' => $metaMap['surface_finish'] ?? $metaMap['finish'] ?? 'HASL(Leaded)',
-                'gold_thickness' => $metaMap['gold_thickness'] ?? 'N/A',
+                'gold_thickness' => ((stripos($metaMap['surface_finish'] ?? $metaMap['finish'] ?? '', 'ENIG') !== false) || (($metaMap['base_material'] ?? '') === 'Flex'))
+                    ? (($metaMap['gold_thickness'] ?? '1 U"') === '1 U*' ? '1 U"' : ($metaMap['gold_thickness'] ?? '1 U"'))
+                    : 'N/A',
                 'copper_weight' => $metaMap['copper_weight'] ?? $metaMap['copper_thickness'] ?? '1 oz',
                 'via_covering' => $metaMap['via_covering'] ?? 'N/A',
                 'via_plating' => $metaMap['via_plating'] ?? 'N/A',
