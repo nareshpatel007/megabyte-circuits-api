@@ -567,7 +567,7 @@ class CheckoutController extends Controller
                         'dimensions_width' => $item['width'] ?? ($item['dimensions_width'] ?? '100'),
                         'dimension_unit' => $item['unit'] ?? ($item['dimension_unit'] ?? 'mm'),
                         'quantity' => $itemQty,
-                        'build_time' => $item['buildTime'] ?? '3-4 days',
+                        'build_time' => $item['buildTime'] ?? ($item['build_time'] ?? (!empty($item['build_days']) ? ($item['build_days'] . ' days') : '3-4 days')),
                         'thickness' => $item['thickness'] ?? '1.6mm',
                         'surface_finish' => $item['surfaceFinish'] ?? 'HASL(Leaded)',
                         'silkscreen' => $item['silkscreen'] ?? 'White',
@@ -600,7 +600,15 @@ class CheckoutController extends Controller
                         'parent_order_number' => $parentOrderNumber,
                         'source_order_id' => $sourceOrderId,
                         'is_reorder' => $isReorder ? '1' : '0',
-                        'preview_data' => $previewData
+                        'preview_data' => $previewData,
+                        'pcb_price' => $item['pcb_price'] ?? ($item['base_price'] ?? null),
+                        'shipping_charge' => $item['shipping_charge'] ?? ($item['shipping_fee'] ?? 0),
+                        'shipping_option' => $item['shipping_option'] ?? ($item['shippingMethod'] ?? 'Standard'),
+                        'gst_rate' => $item['gst_rate'] ?? 18,
+                        'gst_amount' => $item['gst_amount'] ?? null,
+                        'subtotal' => $item['subtotal'] ?? null,
+                        'delivery_date' => $resolvedDeliveryDate,
+                        'build_days' => $item['build_days'] ?? null,
                     ];
                 }
 
