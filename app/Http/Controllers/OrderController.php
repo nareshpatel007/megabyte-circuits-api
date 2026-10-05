@@ -2828,11 +2828,15 @@ namespace App\Http\Controllers;
                 $baseMaterial = $metas['base_material'] ?? 'FR-4';
                 $silkscreen = $metas['silkscreen'] ?? 'White';
                 $productType = $metas['product_type'] ?? 'pcb';
-                $sourceResolution = \App\Services\OrderPricingService::resolveOrderSource([
+                $sourceResolution = \App\Services\OrderPricingService::resolveOrderSource(array_merge($metas, [
                     'layers' => $layers,
                     'base_material' => $baseMaterial,
                     'product_type' => $productType,
-                ]);
+                    'surface_finish' => $surfaceFinish,
+                    'thickness' => $thickness,
+                    'pcb_color' => $pcbColor,
+                    'copper_weight' => $copperWeight,
+                ]));
                 $orderType = $sourceResolution['order_type'];
                 $quotationSource = $sourceResolution['quotation_source'];
 
