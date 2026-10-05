@@ -107,7 +107,7 @@ namespace App\Http\Controllers;
                     $customerGst = trim($request->gstin);
                 }
 
-                $cgStatus = (!empty($customerGst) && strtolower($customerGst) !== 'null' && strtolower($customerGst) !== 'undefined') ? 'GST' : 'Cash';
+                $cgStatus = (!empty($customerGst) && strtolower($customerGst) !== 'null' && strtolower($customerGst) !== 'undefined') ? 'GST' : 'CASH';
 
                 $pnNumber = $request->filled('pn_number') ? trim($request->input('pn_number')) : ($gerberFileName ?: null);
 

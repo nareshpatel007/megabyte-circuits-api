@@ -236,7 +236,64 @@ class EmailTemplateService
             $orderDateStr = $order->created_at ? $order->created_at->format('d M Y') : Carbon::now()->format('d M Y');
             $deliveryDateStr = $order->delivery_date ? Carbon::parse($order->delivery_date)->format('d M Y') : 'N/A';
             $orderTotalStr = '₹' . number_format($order->order_value ?? 0, 2);
-            $boardName = $order->board_name ?? $order->gerber_file_name ?? $order->gerber_filename ?? 'PCB Design';
+
+            // Robust Gerber File Name & Board Name resolution
+            $gerberFileName = !empty($overrideVars['gerber_file_name']) ? $overrideVars['gerber_file_name'] : null;
+            $boardName = !empty($overrideVars['board_name']) ? $overrideVars['board_name'] : null;
+
+            // 1. Resolve from linked gerber_files record if gerber_file_id is set
+            if ((!$gerberFileName || !$boardName) && !empty($order->gerber_file_id)) {
+                try {
+                    $gf = $order->relationLoaded('gerberFile') 
+                        ? $order->getRelation('gerberFile') 
+                        : \App\Models\GerberFile::find($order->gerber_file_id);
+                    if ($gf) {
+                        if (!$gerberFileName) {
+                            $gerberFileName = $gf->original_name ?: ($gf->file_name ?: $gf->board_name);
+                        }
+                        if (!$boardName) {
+                            $boardName = $gf->board_name ?: ($gf->original_name ?: $gf->file_name);
+                        }
+                    }
+                } catch (\Throwable $e) {}
+            }
+
+            // 2. Resolve from pcb_order_meta table
+            if ((!$gerberFileName || !$boardName) && !empty($order->id)) {
+                try {
+                    $metaRows = \Illuminate\Support\Facades\DB::table('pcb_order_meta')
+                        ->where('pcb_order_id', $order->id)
+                        ->whereIn('meta_key', ['gerber_file_name', 'board_name'])
+                        ->pluck('meta_value', 'meta_key');
+                    if (!$gerberFileName && !empty($metaRows['gerber_file_name'])) {
+                        $gerberFileName = $metaRows['gerber_file_name'];
+                    }
+                    if (!$boardName && !empty($metaRows['board_name'])) {
+                        $boardName = $metaRows['board_name'];
+                    }
+                } catch (\Throwable $e) {}
+            }
+
+            // 3. Resolve from order fields (pn_number, board_name)
+            if (!$gerberFileName) {
+                $gerberFileName = $order->pn_number ?: ($order->board_name ?? null);
+            }
+            if (!$boardName) {
+                $boardName = $order->board_name ?: ($order->pn_number ?? null);
+            }
+
+            // 4. Fallback checks to prevent generic 'PCB Design' if pn_number exists
+            if (empty($gerberFileName) || in_array($gerberFileName, ['PCB Design', 'Standard PCB', 'PCB_Board'])) {
+                if (!empty($order->pn_number)) {
+                    $gerberFileName = $order->pn_number;
+                }
+            }
+            if (empty($gerberFileName)) {
+                $gerberFileName = $boardName ?: 'PCB Design';
+            }
+            if (empty($boardName)) {
+                $boardName = $gerberFileName ?: 'PCB Design';
+            }
 
             $filmAppliedVal = isset($order->film_applied) ? ((int)$order->film_applied === 1 ? 'Yes' : 'No') : 'No';
 
@@ -252,7 +309,7 @@ class EmailTemplateService
                 'order_total'            => $orderTotalStr,
                 'order_url'              => rtrim($cartBaseUrl, '/') . '/orders',
                 'board_name'             => $boardName,
-                'gerber_file_name'       => $boardName,
+                'gerber_file_name'       => $gerberFileName,
                 'delivery_date'          => $deliveryDateStr,
             ]);
         }

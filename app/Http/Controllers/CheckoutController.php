@@ -388,7 +388,7 @@ class CheckoutController extends Controller
                 $customerGst = trim($input['gst']);
             }
 
-            $cgStatus = (!empty($customerGst) && strtolower($customerGst) !== 'null' && strtolower($customerGst) !== 'undefined') ? 'GST' : 'Cash';
+            $cgStatus = (!empty($customerGst) && strtolower($customerGst) !== 'null' && strtolower($customerGst) !== 'undefined') ? 'GST' : 'CASH';
 
             // 2. Create SEPARATE Orders in pcb_orders linked STRICTLY via IDs (status_id = Pending, gerber_file_id)
             $createdOrders = [];
@@ -411,7 +411,26 @@ class CheckoutController extends Controller
                 $sourceOrderId = $item['source_order_id'] ?? null;
                 $isReorder = !empty($item['is_reorder']) || !empty($parentOrderNumber);
 
-                $boardName = $item['gerberFileName'] ?? $item['boardName'] ?? ($item['productType'] === 'stencil' ? 'SMT Stencil' : 'Standard PCB');
+                $gerberFileId = $item['gerber_file_id'] ?? null;
+                $previewData = $item['gerberPreview'] ?? $item['preview_data'] ?? null;
+
+                $resolvedGerberFileName = !empty($item['gerberFileName']) 
+                    ? trim($item['gerberFileName']) 
+                    : (!empty($item['gerber_file_name']) 
+                        ? trim($item['gerber_file_name']) 
+                        : (!empty($item['pn_number']) 
+                            ? trim($item['pn_number']) 
+                            : (!empty($item['boardName']) && $item['boardName'] !== 'Standard PCB' && $item['boardName'] !== 'PCB_Board' 
+                                ? trim($item['boardName']) 
+                                : null)));
+
+                if (!$resolvedGerberFileName && $gerberFileId) {
+                    try {
+                        $resolvedGerberFileName = DB::table('gerber_files')->where('id', $gerberFileId)->value('original_name');
+                    } catch (\Throwable $e) {}
+                }
+
+                $boardName = $resolvedGerberFileName ?: ($item['boardName'] ?? ($item['productType'] === 'stencil' ? 'SMT Stencil' : 'Standard PCB'));
                 $itemPrice = $item['price'] ?? 0;
                 $itemQty = $item['qty'] ?? 1;
                 $unitPrice = $itemQty > 0 ? round($itemPrice / $itemQty, 2) : $itemPrice;
@@ -420,16 +439,11 @@ class CheckoutController extends Controller
                     ? trim($item['pn_number']) 
                     : (!empty($item['part_number']) 
                         ? trim($item['part_number']) 
-                        : (!empty($item['gerberFileName']) 
-                            ? trim($item['gerberFileName']) 
-                            : (!empty($item['boardName']) && $item['boardName'] !== 'Standard PCB' && $item['boardName'] !== 'SMT Stencil' 
-                                ? trim($item['boardName']) 
-                                : null)));
+                        : ($resolvedGerberFileName ?: (!empty($item['boardName']) && $item['boardName'] !== 'Standard PCB' && $item['boardName'] !== 'SMT Stencil' 
+                            ? trim($item['boardName']) 
+                            : null)));
 
                 // Resolve Gerber File Entry (only link if real gerber file was uploaded)
-                $gerberFileId = $item['gerber_file_id'] ?? null;
-                $previewData = $item['gerberPreview'] ?? $item['preview_data'] ?? null;
-
                 if ($gerberFileId && $previewData) {
                     DB::table('gerber_files')->where('id', $gerberFileId)->whereNull('preview_data')->update(['preview_data' => $previewData]);
                 }
@@ -559,7 +573,7 @@ class CheckoutController extends Controller
                         'silkscreen_on_stiffener' => $item['silkscreenOnStiffener'] ?? '',
                         'eda_software' => $item['edaSoftware'] ?? '',
                         'gold_thickness' => $item['goldThickness'] ?? '',
-                        'gerber_file_name' => $item['gerberFileName'] ?? '',
+                        'gerber_file_name' => $resolvedGerberFileName ?: ($item['gerberFileName'] ?? $boardName),
                         'pcb_color' => $item['pcbColor'] ?? 'Green',
                         'layers' => $item['layers'] ?? '2',
                         'dimensions' => $item['dimensions'] ?? ((($item['width'] ?? '100') . 'x' . ($item['height'] ?? '100')) . ($item['unit'] ?? 'mm')),
@@ -655,6 +669,7 @@ class CheckoutController extends Controller
                     'order_id' => $orderId,
                     'order_number' => $orderNumber,
                     'board_name' => $boardName,
+                    'gerber_file_name' => $resolvedGerberFileName ?: $boardName,
                     'status' => 'Pending',
                     'price' => $itemPrice
                 ];
@@ -664,7 +679,10 @@ class CheckoutController extends Controller
 
             // Dispatch order_placed email notifications safely AFTER transaction commit
             foreach ($createdOrders as $cOrder) {
-                \App\Services\EmailTemplateService::sendOrderEmail('order_placed', $cOrder['order_id']);
+                \App\Services\EmailTemplateService::sendOrderEmail('order_placed', $cOrder['order_id'], null, [
+                    'gerber_file_name' => $cOrder['gerber_file_name'],
+                    'board_name' => $cOrder['board_name']
+                ]);
 
                 // Real-time notifications for Client & Admin
                 if ($userId) {
