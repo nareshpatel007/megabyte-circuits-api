@@ -751,6 +751,9 @@ class JlcpcbService
                     $ctcOpt = 'PI:12.5um/AD:15um';
                 }
 
+                // Flexible PCB (FPC) only supports Flying Probe Test (2)
+                $pcbParam['flyingProbeTest'] = 2;
+
                 // Ensure Coverlay Thickness (CTC) is present for Flex
                 $hasCtc = false;
                 if (!empty($pcbParam['serviceConfigVos']) && is_array($pcbParam['serviceConfigVos'])) {
@@ -803,9 +806,22 @@ class JlcpcbService
             unset($pcbParam['cascadeStructure']);
         }
 
-        // 6. HASL (surfaceFinish = 0) is not available for 6-layer or higher PCBs on JLCPCB
-        if (isset($pcbParam['layer']) && (int)$pcbParam['layer'] >= 6 && isset($pcbParam['surfaceFinish']) && (int)$pcbParam['surfaceFinish'] === 0) {
+        // 6. Flex PCBs (plateType = 7) and 6+ layer PCBs only support ENIG (surfaceFinish = 2)
+        if (
+            (isset($pcbParam['plateType']) && (int)$pcbParam['plateType'] === 7) ||
+            (isset($pcbParam['layer']) && (int)$pcbParam['layer'] >= 6 && isset($pcbParam['surfaceFinish']) && (int)$pcbParam['surfaceFinish'] === 0)
+        ) {
             $pcbParam['surfaceFinish'] = 2; // ENIG
+        }
+
+        // 7. Gold Thickness (goldThickness): JLCPCB accepts integer 1 (1 U") or 2 (2 U")
+        if (isset($pcbParam['goldThickness'])) {
+            $gtStr = (string)$pcbParam['goldThickness'];
+            if ($gtStr !== '' && $gtStr !== 'N/A') {
+                $pcbParam['goldThickness'] = str_contains($gtStr, '2') ? 2 : 1;
+            } else {
+                unset($pcbParam['goldThickness']);
+            }
         }
 
         return [

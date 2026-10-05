@@ -167,6 +167,13 @@ Route::middleware('verify.admin.token')->group(function () {
         Route::get('settings/jlcpcb-settings', [\App\Http\Controllers\Admin\JlcpcbSettingsController::class, 'index']);
         Route::post('settings/jlcpcb-settings', [\App\Http\Controllers\Admin\JlcpcbSettingsController::class, 'update']);
 
+        // PCB Quotation Provider Routing Rules Management
+        Route::get('provider-rules/fields', [\App\Http\Controllers\Admin\PcbProviderRulesController::class, 'getFields']);
+        Route::post('provider-rules/preview', [\App\Http\Controllers\Admin\PcbProviderRulesController::class, 'preview']);
+        Route::post('provider-rules/reset', [\App\Http\Controllers\Admin\PcbProviderRulesController::class, 'resetToDefault']);
+        Route::put('provider-rules/{id}/toggle', [\App\Http\Controllers\Admin\PcbProviderRulesController::class, 'toggleStatus']);
+        Route::apiResource('provider-rules', \App\Http\Controllers\Admin\PcbProviderRulesController::class);
+
         // Holiday Management
         Route::get('holidays', [\App\Http\Controllers\HolidayController::class, 'index']);
         Route::post('holidays', [\App\Http\Controllers\HolidayController::class, 'store']);

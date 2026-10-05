@@ -36,6 +36,20 @@ Route::prefix('jlcpcb')->group(function () {
 Route::get('pcb-pricing', [\App\Http\Controllers\PcbPricingController::class, 'getPricingConfig']);
 Route::get('delivery/holidays', [\App\Http\Controllers\HolidayController::class, 'getPublicHolidays']);
 
+// Provider Routing Rules (Public for Quotation Sync & Evaluation)
+Route::get('provider-rules/active', function () {
+    return response()->json([
+        'success' => true,
+        'data' => \App\Services\ManufacturingProviderResolver::getActiveRules(),
+    ]);
+});
+Route::post('provider-rules/resolve', function (\Illuminate\Http\Request $request) {
+    return response()->json([
+        'success' => true,
+        'data' => \App\Services\ManufacturingProviderResolver::resolve($request->all()),
+    ]);
+});
+
 // PCB Orders
 Route::prefix('orders/')->group(function () {
     Route::post('submit', [OrderController::class, 'store']);
