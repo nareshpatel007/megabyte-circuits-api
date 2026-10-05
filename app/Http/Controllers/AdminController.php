@@ -1930,6 +1930,28 @@ class AdminController extends Controller
         try {
             $file = DB::table('gerber_files')->where('id', $id)->first();
             if (!$file) {
+                // If not found by gerber_files.id, check if $id is an order_id or order_number in pcb_orders
+                $order = DB::table('pcb_orders')->where('id', $id)->orWhere('order_number', $id)->first();
+                if ($order) {
+                    if (!empty($order->gerber_file_id)) {
+                        $file = DB::table('gerber_files')->where('id', $order->gerber_file_id)->first();
+                    }
+                    if (!$file) {
+                        // Check if file details exist in order metas
+                        $metaUrl = DB::table('pcb_order_metas')->where('pcb_order_id', $order->id)->whereIn('meta_key', ['gerber_file_url', 'gerber_url', 'gerber_path'])->value('meta_value');
+                        $metaName = DB::table('pcb_order_metas')->where('pcb_order_id', $order->id)->whereIn('meta_key', ['gerber_file_name', 'gerber_name'])->value('meta_value');
+                        if ($metaUrl) {
+                            $filePath = str_starts_with($metaUrl, '/storage/') ? substr($metaUrl, 9) : (str_starts_with($metaUrl, 'storage/') ? substr($metaUrl, 8) : $metaUrl);
+                            $file = (object)[
+                                'original_name' => $metaName ?: basename($metaUrl),
+                                'file_name' => basename($metaUrl),
+                                'file_path' => $filePath,
+                            ];
+                        }
+                    }
+                }
+            }
+            if (!$file) {
                 return response()->json([
                     'status' => false,
                     'message' => 'Gerber file record not found'
@@ -1949,8 +1971,10 @@ class AdminController extends Controller
                 storage_path('app/public/' . ltrim($file->file_path ?? '', '/')),
                 storage_path('app/public/gerber-files/' . ($file->file_name ?? '')),
                 storage_path('app/' . ltrim($file->file_path ?? '', '/')),
+                storage_path('app/gerber-files/' . ($file->file_name ?? '')),
                 public_path('storage/' . ltrim($file->file_path ?? '', '/')),
-                public_path('storage/gerber-files/' . ($file->file_name ?? ''))
+                public_path('storage/gerber-files/' . ($file->file_name ?? '')),
+                public_path(ltrim($file->file_path ?? '', '/'))
             ];
 
             foreach ($candidatePaths as $path) {
