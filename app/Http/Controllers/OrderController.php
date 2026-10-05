@@ -434,15 +434,14 @@ namespace App\Http\Controllers;
                 $totalFiltered = (clone $query)->count();
 
                 // Compute aggregated summary stats across ALL filtered orders matching the query & status
-                $statsBuilder = (clone $query)->getQuery();
-                $statsBuilder->orders = null;
+                $statsQuery = (clone $query)->reorder();
 
                 $hasStatusesTable = \Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses');
                 $statusExpr = $hasStatusesTable
                     ? "LOWER(TRIM(COALESCE((SELECT name FROM pcb_order_statuses WHERE pcb_order_statuses.id = pcb_orders.status_id LIMIT 1), pcb_orders.status, 'pending')))"
                     : "LOWER(TRIM(COALESCE(pcb_orders.status, 'pending')))";
 
-                $statsAgg = $statsBuilder->selectRaw("
+                $statsAgg = $statsQuery->selectRaw("
                     COUNT(*) as total_orders,
                     COALESCE(SUM(CASE WHEN {$statusExpr} NOT IN ('completed', 'shipped', 'delivered', 'cancelled', 'canceled') THEN 1 ELSE 0 END), 0) as active_orders,
                     COALESCE(SUM(CASE WHEN {$statusExpr} IN ('completed', 'shipped', 'delivered') THEN 1 ELSE 0 END), 0) as completed_orders,
