@@ -396,90 +396,14 @@ class CheckoutController extends Controller
             foreach ($items as $index => $item) {
                 $parentOrderNumber = $item['parent_order_number'] ?? $item['repeat_parent'] ?? null;
 
-                $quotationSource = strtolower(trim((string)($item['quotation_source'] ?? $item['order_type'] ?? $item['source'] ?? '')));
-                
-                // Check if any JLCPCB triggering option was chosen
-                $isJlcpcbOption = false;
-                $layersNum = (int) preg_replace('/[^0-9]/', '', (string)($item['layers'] ?? '2'));
-                if ($layersNum > 2) {
-                    $isJlcpcbOption = true;
-                }
-
-                $mat = strtolower((string)($item['baseMaterial'] ?? ($item['material'] ?? ($item['base_material'] ?? ''))));
-                if (str_contains($mat, 'flex') || str_contains($mat, 'roger') || str_contains($mat, 'ptfe') || str_contains($mat, 'teflon')) {
-                    $isJlcpcbOption = true;
-                }
-
-                $w = (float)($item['width'] ?? 0);
-                $h = (float)($item['height'] ?? ($item['length'] ?? 0));
-                if ((!$w || !$h) && !empty($item['dimensions'])) {
-                    if (preg_match('/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i', (string)$item['dimensions'], $dm)) {
-                        $w = (float)$dm[1];
-                        $h = (float)$dm[2];
-                    }
-                }
-                if ($w >= 350 || $h >= 350) {
-                    $isJlcpcbOption = true;
-                }
-
-                $thick = (float) preg_replace('/[^0-9.]/', '', (string)($item['thickness'] ?? '1.6'));
-                if (abs($thick - 0.6) < 0.05) {
-                    $isJlcpcbOption = true;
-                }
-
-                $sf = strtolower((string)($item['surfaceFinish'] ?? ($item['surface_finish'] ?? '')));
-                if (str_contains($sf, 'leadfree') || str_contains($sf, 'lead-free') || str_contains($sf, 'enig') || str_contains($sf, 'osp')) {
-                    $isJlcpcbOption = true;
-                }
-
-                $vc = strtolower((string)($item['viaCovering'] ?? ($item['via_covering'] ?? '')));
-                if (str_contains($vc, 'plugged') || str_contains($vc, 'epoxy') || str_contains($vc, 'copper paste') || str_contains($vc, 'copper_paste')) {
-                    $isJlcpcbOption = true;
-                }
-
-                $vp = strtolower((string)($item['viaPlating'] ?? ($item['via_plating'] ?? '')));
-                if (str_contains($vp, 'conductive') || str_contains($vp, 'electroless')) {
-                    $isJlcpcbOption = true;
-                }
-
-                $mh = strtolower((string)($item['minHole'] ?? ($item['min_hole'] ?? '')));
-                if (str_contains($mh, '0.25') || str_contains($mh, '0.2mm') || str_contains($mh, '0.15')) {
-                    $isJlcpcbOption = true;
-                }
-
-                $gf = strtolower((string)($item['goldFingers'] ?? ($item['gold_fingers'] ?? '')));
-                if ($gf === 'yes' || $gf === 'true' || $gf === '1') {
-                    $isJlcpcbOption = true;
-                }
-
-                $ch = strtolower((string)($item['castellated'] ?? ($item['castellatedHoles'] ?? ($item['castellated_holes'] ?? ''))));
-                if ($ch === 'yes' || $ch === 'true' || $ch === '1') {
-                    $isJlcpcbOption = true;
-                }
-
-                $ep = strtolower((string)($item['edgePlating'] ?? ($item['edge_plating'] ?? '')));
-                if ($ep === 'yes' || $ep === 'true' || $ep === '1') {
-                    $isJlcpcbOption = true;
-                }
-
-                $bs = strtolower((string)($item['blindSlots'] ?? ($item['blind_slots'] ?? '')));
-                if ($bs === 'yes' || $bs === 'true' || $bs === '1') {
-                    $isJlcpcbOption = true;
-                }
-
-                if (!empty($item['jlcpcb_file_key']) || !empty($item['jlcpcbFileKey']) || !empty($item['fileKey'])) {
-                    $isJlcpcbOption = true;
-                }
-
-                if ($quotationSource === 'jlcpcb' || $isJlcpcbOption) {
-                    $quotationSource = 'jlcpcb';
-                    $orderType = 'jlcpcb';
-                    $series = 'JL';
-                } else {
-                    $quotationSource = 'internal';
-                    $orderType = 'normal';
-                    $series = 'M';
-                }
+                // Canonical business rule resolution:
+                // 1-2 layer FR-4 -> Local ('internal', 'normal', 'M' series)
+                // > 2 layers -> JLCPCB ('jlcpcb', 'jlcpcb', 'JL' series)
+                // Backend strictly derives source from PCB specs, never blindly trusting stale flags or file keys.
+                $sourceResolution = \App\Services\OrderPricingService::resolveOrderSource($item);
+                $quotationSource = $sourceResolution['quotation_source'];
+                $orderType = $sourceResolution['order_type'];
+                $series = $sourceResolution['series'];
 
                 // Always generate next clean sequential Order Number (e.g. JL0001 or M00002) via atomic OrderNumberService
                 $orderNumber = \App\Services\OrderNumberService::generateOrderNumber($series);
@@ -527,8 +451,8 @@ class CheckoutController extends Controller
                     ? \Carbon\Carbon::parse($itemDeliveryDate)->format('Y-m-d')
                     : \App\Services\DeliveryCalendarService::addDeliveryDays(now(), 5)->format('Y-m-d');
 
-                $jlcFileKey = $item['jlcpcb_file_key'] ?? $item['jlcpcbFileKey'] ?? $item['fileKey'] ?? null;
-                $rawSnapshot = $item['jlcpcb_quote'] ?? $item['jlcpcb_quotation_snapshot'] ?? $item['jlcpcbQuote'] ?? null;
+                $jlcFileKey = ($orderType === 'jlcpcb') ? ($item['jlcpcb_file_key'] ?? $item['jlcpcbFileKey'] ?? null) : null;
+                $rawSnapshot = ($orderType === 'jlcpcb') ? ($item['jlcpcb_quote'] ?? $item['jlcpcb_quotation_snapshot'] ?? $item['jlcpcbQuote'] ?? null) : null;
                 $jlcSnapshotJson = $rawSnapshot ? (is_array($rawSnapshot) || is_object($rawSnapshot) ? json_encode($rawSnapshot) : (string)$rawSnapshot) : null;
 
                 $orderData = [

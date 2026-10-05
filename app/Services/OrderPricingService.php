@@ -138,4 +138,85 @@ class OrderPricingService
             'qty' => $qty,
         ];
     }
+
+    /**
+     * Determine authoritatively whether a PCB configuration requires JLCPCB manufacturing / pricing.
+     *
+     * Canonical Business Rules:
+     * 1. Stencils and Parts are strictly Local (never JLCPCB).
+     * 2. Standard FR-4 with 1 or 2 layers ALWAYS uses LOCAL quotation & manufacturing.
+     * 3. More than 2 layers (> 2: 4, 6, 8, 10, etc.) MUST use JLCPCB.
+     * 4. Non-FR-4 base materials (Flex, Rogers, PTFE Teflon, Aluminum, etc.) use JLCPCB.
+     * 5. Uploaded Gerber files (fileKey / jlcpcb_file_key) NEVER force JLCPCB for 1 or 2 layer FR-4.
+     *
+     * @param array $data PCB specifications or request payload
+     * @return bool
+     */
+    public static function isJlcpcbRequired(array $data): bool
+    {
+        $productType = strtolower(trim((string)($data['productType'] ?? $data['product_type'] ?? 'pcb')));
+        if ($productType === 'part' || $productType === 'stencil') {
+            return false;
+        }
+
+        // Parse numeric layer count
+        $rawLayers = (string)($data['layers'] ?? $data['layer'] ?? '2');
+        $layers = (int) preg_replace('/[^0-9]/', '', $rawLayers);
+        if ($layers <= 0) {
+            $layers = 2;
+        }
+
+        // Base material check
+        $mat = strtolower(trim((string)($data['baseMaterial'] ?? $data['base_material'] ?? $data['material'] ?? 'FR-4')));
+        $isFr4 = empty($mat) || $mat === 'fr-4' || $mat === 'fr4' || $mat === 'fr_4' ||
+                 str_contains($mat, 'fr-4') || str_contains($mat, 'fr4') || str_contains($mat, 'fr_4') ||
+                 str_contains($mat, 'standard') || str_contains($mat, 'tg135') || str_contains($mat, 'tg140') ||
+                 str_contains($mat, 'tg150') || str_contains($mat, 'tg170');
+
+        // Canonical Business Rule:
+        // FR-4 for 1 and 2 layers always calculates from the LOCAL PRICING METHOD.
+        if ($isFr4 && $layers <= 2) {
+            return false;
+        }
+
+        // 1. Multilayer PCB (> 2 layers: 4, 6, 8, 10...) must use JLCPCB
+        if ($layers > 2) {
+            return true;
+        }
+
+        // 2. Base Material other than FR-4 must use JLCPCB (Flex, Rogers, PTFE, Aluminum, etc.)
+        if (!$isFr4) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Authoritatively resolve quotation source, order type, and series for an order or cart item.
+     * The backend derives the source strictly from the PCB configuration, never blindly trusting
+     * stale frontend flags.
+     *
+     * @param array $data PCB specifications or request payload
+     * @return array ['quotation_source' => 'internal'|'jlcpcb', 'order_type' => 'normal'|'jlcpcb', 'series' => 'M'|'JL']
+     */
+    public static function resolveOrderSource(array $data): array
+    {
+        $requiresJlcpcb = self::isJlcpcbRequired($data);
+
+        if ($requiresJlcpcb) {
+            return [
+                'quotation_source' => 'jlcpcb',
+                'order_type' => 'jlcpcb',
+                'series' => 'JL',
+            ];
+        }
+
+        return [
+            'quotation_source' => 'internal',
+            'order_type' => 'normal',
+            'series' => 'M',
+        ];
+    }
 }
+

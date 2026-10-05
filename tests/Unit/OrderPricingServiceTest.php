@@ -88,4 +88,91 @@ class OrderPricingServiceTest extends TestCase
         $this->assertEquals(round(0.010323, 4), round($pricing['area_per_board_sqm'], 4));
         $this->assertEquals(round(1.0323, 2), round($pricing['total_area_sqm'], 2));
     }
+
+    public function test_1_and_2_layer_fr4_use_local_pricing_and_m_series(): void
+    {
+        // 1 layer FR-4
+        $res1 = OrderPricingService::resolveOrderSource(['layers' => 1, 'base_material' => 'FR-4']);
+        $this->assertFalse(OrderPricingService::isJlcpcbRequired(['layers' => 1, 'base_material' => 'FR-4']));
+        $this->assertEquals('internal', $res1['quotation_source']);
+        $this->assertEquals('normal', $res1['order_type']);
+        $this->assertEquals('M', $res1['series']);
+
+        // 2 layer FR-4
+        $res2 = OrderPricingService::resolveOrderSource(['layers' => '2 Layers', 'base_material' => 'FR-4']);
+        $this->assertFalse(OrderPricingService::isJlcpcbRequired(['layers' => '2 Layers', 'base_material' => 'FR-4']));
+        $this->assertEquals('internal', $res2['quotation_source']);
+        $this->assertEquals('normal', $res2['order_type']);
+        $this->assertEquals('M', $res2['series']);
+    }
+
+    public function test_multilayer_boards_greater_than_2_layers_use_jlcpcb_and_jl_series(): void
+    {
+        // 4 layers
+        $res4 = OrderPricingService::resolveOrderSource(['layers' => 4, 'base_material' => 'FR-4']);
+        $this->assertTrue(OrderPricingService::isJlcpcbRequired(['layers' => 4, 'base_material' => 'FR-4']));
+        $this->assertEquals('jlcpcb', $res4['quotation_source']);
+        $this->assertEquals('jlcpcb', $res4['order_type']);
+        $this->assertEquals('JL', $res4['series']);
+
+        // 6 layers
+        $res6 = OrderPricingService::resolveOrderSource(['layers' => '6', 'base_material' => 'FR-4']);
+        $this->assertTrue(OrderPricingService::isJlcpcbRequired(['layers' => '6', 'base_material' => 'FR-4']));
+        $this->assertEquals('jlcpcb', $res6['quotation_source']);
+        $this->assertEquals('jlcpcb', $res6['order_type']);
+        $this->assertEquals('JL', $res6['series']);
+    }
+
+    public function test_stale_jlcpcb_flag_and_file_keys_cannot_override_2_layer_local_order(): void
+    {
+        // CRITICAL REGRESSION TEST:
+        // User had 4 layers (got JLCPCB quote + file key), then changed to 2 layers.
+        // Frontend sends stale quotation_source: jlcpcb and jlcpcb_file_key:
+        $stalePayload = [
+            'layers' => 2,
+            'base_material' => 'FR-4',
+            'quotation_source' => 'jlcpcb',
+            'order_type' => 'jlcpcb',
+            'fileKey' => 'uploaded_file_key_123',
+            'jlcpcb_file_key' => 'jlc_key_abc',
+        ];
+
+        $this->assertFalse(OrderPricingService::isJlcpcbRequired($stalePayload));
+        $res = OrderPricingService::resolveOrderSource($stalePayload);
+        $this->assertEquals('internal', $res['quotation_source']);
+        $this->assertEquals('normal', $res['order_type']);
+        $this->assertEquals('M', $res['series']);
+    }
+
+    public function test_stale_internal_flag_cannot_override_4_layer_jlcpcb_order(): void
+    {
+        $staleInternalPayload = [
+            'layers' => 4,
+            'base_material' => 'FR-4',
+            'quotation_source' => 'internal',
+            'order_type' => 'normal',
+        ];
+
+        $this->assertTrue(OrderPricingService::isJlcpcbRequired($staleInternalPayload));
+        $res = OrderPricingService::resolveOrderSource($staleInternalPayload);
+        $this->assertEquals('jlcpcb', $res['quotation_source']);
+        $this->assertEquals('jlcpcb', $res['order_type']);
+        $this->assertEquals('JL', $res['series']);
+    }
+
+    public function test_non_fr4_and_stencil_rules(): void
+    {
+        // Flex PCB (even with 2 layers) requires JLCPCB
+        $flexRes = OrderPricingService::resolveOrderSource(['layers' => 2, 'base_material' => 'Flex']);
+        $this->assertTrue(OrderPricingService::isJlcpcbRequired(['layers' => 2, 'base_material' => 'Flex']));
+        $this->assertEquals('jlcpcb', $flexRes['quotation_source']);
+        $this->assertEquals('JL', $flexRes['series']);
+
+        // Stencil (even with 4 layers) is Local
+        $stencilRes = OrderPricingService::resolveOrderSource(['layers' => 4, 'product_type' => 'stencil']);
+        $this->assertFalse(OrderPricingService::isJlcpcbRequired(['layers' => 4, 'product_type' => 'stencil']));
+        $this->assertEquals('internal', $stencilRes['quotation_source']);
+        $this->assertEquals('M', $stencilRes['series']);
+    }
 }
+

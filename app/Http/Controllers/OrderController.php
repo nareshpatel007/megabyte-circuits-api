@@ -71,13 +71,10 @@ namespace App\Http\Controllers;
                     $userId = $user->id;
                 }
 
-                $reqSource = strtolower(trim((string)($request->input('quotation_source') ?? $request->input('order_type') ?? '')));
-                if (empty($reqSource)) {
-                    $layersNum = (int) preg_replace('/[^0-9]/', '', (string)($request->input('layers') ?? '2'));
-                    $reqSource = ($layersNum > 2 || $request->filled('jlcpcb_file_key')) ? 'jlcpcb' : 'internal';
-                }
-                $reqOrderType = ($reqSource === 'jlcpcb') ? 'jlcpcb' : 'normal';
-                $series = ($reqOrderType === 'jlcpcb') ? 'JL' : 'M';
+                $sourceResolution = \App\Services\OrderPricingService::resolveOrderSource($request->all());
+                $reqSource = $sourceResolution['quotation_source'];
+                $reqOrderType = $sourceResolution['order_type'];
+                $series = $sourceResolution['series'];
                 $orderNumber = \App\Services\OrderNumberService::generateOrderNumber($series);
 
                 // Handle file upload
@@ -130,6 +127,10 @@ namespace App\Http\Controllers;
                     'c_g' => $request->c_g ?? $cgStatus,
                     'status' => $initialStatusName,
                     'status_id' => $initialStatusId,
+                    'order_type' => $reqOrderType,
+                    'quotation_source' => $reqSource,
+                    'jlcpcb_file_key' => ($reqOrderType === 'jlcpcb') ? ($request->input('jlcpcb_file_key') ?: null) : null,
+                    'jlcpcb_quotation_snapshot' => ($reqOrderType === 'jlcpcb') ? ($request->input('jlcpcb_quotation_snapshot') ?: null) : null,
                     'unit_price' => $request->unit_price ?? 0,
                     'order_value' => $request->order_value ?? 0,
                     'delivery_date' => $request->delivery_date,
@@ -1817,13 +1818,10 @@ namespace App\Http\Controllers;
                         $userId = null;
                     }
 
-                    $reqSource = strtolower(trim((string)($request->input('quotation_source') ?? $request->input('order_type') ?? '')));
-                    if (empty($reqSource)) {
-                        $layersNum = (int) preg_replace('/[^0-9]/', '', (string)($request->input('layers') ?? '2'));
-                        $reqSource = ($layersNum > 2 || $request->filled('jlcpcb_file_key')) ? 'jlcpcb' : 'internal';
-                    }
-                    $reqOrderType = ($reqSource === 'jlcpcb') ? 'jlcpcb' : 'normal';
-                    $series = ($reqOrderType === 'jlcpcb') ? 'JL' : 'M';
+                    $sourceResolution = \App\Services\OrderPricingService::resolveOrderSource($request->all());
+                    $reqSource = $sourceResolution['quotation_source'];
+                    $reqOrderType = $sourceResolution['order_type'];
+                    $series = $sourceResolution['series'];
                     $orderNumber = \App\Services\OrderNumberService::generateOrderNumber($series);
 
                     // Handle Gerber file upload
@@ -1909,6 +1907,10 @@ namespace App\Http\Controllers;
                     $orderData = [
                         'user_id' => $userId,
                         'order_number' => $orderNumber,
+                        'order_type' => $reqOrderType,
+                        'quotation_source' => $reqSource,
+                        'jlcpcb_file_key' => ($reqOrderType === 'jlcpcb') ? ($request->input('jlcpcb_file_key') ?: null) : null,
+                        'jlcpcb_quotation_snapshot' => ($reqOrderType === 'jlcpcb') ? ($request->input('jlcpcb_quotation_snapshot') ?: null) : null,
                         'pn_number' => $pnNumber,
                         'status' => $statusName,
                         'status_id' => $statusId,
@@ -2825,9 +2827,14 @@ namespace App\Http\Controllers;
                 $copperWeight = $metas['copper_weight'] ?? '1 oz';
                 $baseMaterial = $metas['base_material'] ?? 'FR-4';
                 $silkscreen = $metas['silkscreen'] ?? 'White';
-                $orderType = $order->order_type ?? ($metas['order_type'] ?? 'normal');
-                $quotationSource = $order->quotation_source ?? ($metas['quotation_source'] ?? ($orderType === 'jlcpcb' ? 'jlcpcb' : 'internal'));
                 $productType = $metas['product_type'] ?? 'pcb';
+                $sourceResolution = \App\Services\OrderPricingService::resolveOrderSource([
+                    'layers' => $layers,
+                    'base_material' => $baseMaterial,
+                    'product_type' => $productType,
+                ]);
+                $orderType = $sourceResolution['order_type'];
+                $quotationSource = $sourceResolution['quotation_source'];
 
                 // 5. Recalculate CURRENT Pricing
                 $currentPrice = 0;
@@ -2955,8 +2962,8 @@ namespace App\Http\Controllers;
                     'pcbRemark' => $metas['pcb_remark'] ?? '',
                     'price' => $currentPrice,
                     'unitPrice' => $unitPrice,
-                    'jlcpcb_file_key' => $order->jlcpcb_file_key ?? ($metas['jlcpcb_file_key'] ?? null),
-                    'jlcpcb_quotation_snapshot' => $jlcSnapshot ?? $order->jlcpcb_quotation_snapshot ?? null,
+                    'jlcpcb_file_key' => ($orderType === 'jlcpcb') ? ($order->jlcpcb_file_key ?? ($metas['jlcpcb_file_key'] ?? null)) : null,
+                    'jlcpcb_quotation_snapshot' => ($orderType === 'jlcpcb') ? ($jlcSnapshot ?? $order->jlcpcb_quotation_snapshot ?? null) : null,
                 ];
 
                 return response()->json([
