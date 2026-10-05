@@ -20,6 +20,7 @@ class OrderDataService
         'unit_price',
         'order_value',
         'gerber_file_id',
+        'delivery_method',
     ];
 
     /**

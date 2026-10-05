@@ -111,6 +111,9 @@ class DashboardController extends Controller
                     ->where('pcb_order_id', $order->id)
                     ->pluck('meta_value', 'meta_key');
                 $order->meta = $metas;
+                $m = $order->delivery_method ?? ($metas['shipping_option'] ?? null);
+                $order->delivery_method = $m ? strtolower(trim((string)$m)) : null;
+                $order->delivery_method_label = $order->delivery_method ? ucfirst($order->delivery_method) : null;
             }
 
             // Recent 5 Payments (Only success & failed transactions)
@@ -227,6 +230,10 @@ class DashboardController extends Controller
                 ->where('pcb_order_id', $order->id)
                 ->pluck('meta_value', 'meta_key');
             $order->meta = $metas;
+
+            $m = $order->delivery_method ?? ($metas['shipping_option'] ?? null);
+            $order->delivery_method = $m ? strtolower(trim((string)$m)) : null;
+            $order->delivery_method_label = $order->delivery_method ? ucfirst($order->delivery_method) : null;
 
             if (empty($order->gerber_preview_data) && isset($metas['preview_data'])) {
                 $order->gerber_preview_data = $metas['preview_data'];
@@ -574,6 +581,9 @@ class DashboardController extends Controller
                     ->where('pcb_order_id', $order->id)
                     ->pluck('meta_value', 'meta_key');
                 $order->meta = $metas;
+                $m = $order->delivery_method ?? ($metas['shipping_option'] ?? null);
+                $order->delivery_method = $m ? strtolower(trim((string)$m)) : null;
+                $order->delivery_method_label = $order->delivery_method ? ucfirst($order->delivery_method) : null;
             }
 
             return response()->json(['status' => true, 'orders' => $orders]);

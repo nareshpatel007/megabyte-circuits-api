@@ -276,6 +276,70 @@ class CheckoutController extends Controller
         }
     }
 
+    public static function getAllowedDeliveryMethods(): array
+    {
+        $shippingOptions = null;
+        if (\Illuminate\Support\Facades\Schema::hasTable('pcb_pricing_settings')) {
+            $row = \App\Models\PcbPricingSetting::where('key', 'shipping_options')->first();
+            if ($row && !empty($row->value) && is_array($row->value)) {
+                $shippingOptions = $row->value;
+            }
+        }
+        if (!$shippingOptions) {
+            $shippingOptions = \App\Http\Controllers\PcbPricingController::getDefaultShippingOptions();
+        }
+
+        $allowed = [];
+        foreach ($shippingOptions as $opt) {
+            if (!empty($opt['key'])) {
+                $k = strtolower(trim((string)$opt['key']));
+                $allowed[$k] = $k;
+                if (!empty($opt['method'])) {
+                    $allowed[strtolower(trim((string)$opt['method']))] = $k;
+                }
+                if (!empty($opt['location'])) {
+                    $allowed[strtolower(trim((string)$opt['location']))] = $k;
+                }
+            }
+        }
+        return $allowed;
+    }
+
+    public static function resolveAndValidateDeliveryMethod($item): ?string
+    {
+        $productType = $item['productType'] ?? ($item['product_type'] ?? 'pcb');
+        $raw = $item['delivery_method']
+            ?? $item['deliveryMethod']
+            ?? $item['shippingOptionKey']
+            ?? $item['shipping_option_key']
+            ?? $item['shipping_option']
+            ?? $item['shippingOption']
+            ?? $item['shippingMethod']
+            ?? null;
+
+        if (empty($raw)) {
+            if ($productType === 'part') {
+                return null;
+            }
+            return 'standard';
+        }
+
+        $clean = strtolower(trim((string)$raw));
+        $allowed = self::getAllowedDeliveryMethods();
+
+        if (isset($allowed[$clean])) {
+            return $allowed[$clean];
+        }
+
+        foreach ($allowed as $name => $key) {
+            if (str_contains($clean, $name)) {
+                return $key;
+            }
+        }
+
+        return null;
+    }
+
     // Verify Payment & Create Separate Orders Linked to Pending Status & Gerber File ID
     public function verifyPaymentAndCreateOrders(Request $request)
     {
@@ -301,7 +365,7 @@ class CheckoutController extends Controller
                 ], 400);
             }
 
-            // Re-validate delivery dates for all items
+            // Re-validate delivery dates and delivery methods for all items
             foreach ($items as $item) {
                 $deliveryDate = $item['delivery_date'] ?? $item['deliveryDate'] ?? null;
                 if ($deliveryDate) {
@@ -310,6 +374,18 @@ class CheckoutController extends Controller
                         return response()->json([
                             'status' => false,
                             'message' => $validation['reason']
+                        ], 400);
+                    }
+                }
+
+                $productType = $item['productType'] ?? ($item['product_type'] ?? 'pcb');
+                if ($productType !== 'part') {
+                    $resolvedMethod = self::resolveAndValidateDeliveryMethod($item);
+                    if (!$resolvedMethod) {
+                        $rawMethod = $item['delivery_method'] ?? $item['deliveryMethod'] ?? $item['shippingOption'] ?? $item['shipping_option'] ?? 'Unknown';
+                        return response()->json([
+                            'status' => false,
+                            'message' => "Invalid or deactivated delivery method selected: '{$rawMethod}'"
                         ], 400);
                     }
                 }
@@ -470,6 +546,8 @@ class CheckoutController extends Controller
                 $rawSnapshot = ($orderType === 'jlcpcb') ? ($item['jlcpcb_quote'] ?? $item['jlcpcb_quotation_snapshot'] ?? $item['jlcpcbQuote'] ?? null) : null;
                 $jlcSnapshotJson = $rawSnapshot ? (is_array($rawSnapshot) || is_object($rawSnapshot) ? json_encode($rawSnapshot) : (string)$rawSnapshot) : null;
 
+                $resolvedDeliveryMethod = self::resolveAndValidateDeliveryMethod($item);
+
                 $orderData = [
                     'order_number' => $orderNumber,
                     'order_type' => $orderType,
@@ -487,6 +565,7 @@ class CheckoutController extends Controller
                     'unit_price' => $unitPrice,
                     'order_value' => $itemPrice,
                     'delivery_date' => $resolvedDeliveryDate,
+                    'delivery_method' => $resolvedDeliveryMethod,
                     'created_at' => date('Y-m-d H:i:s'),
                     'updated_at' => date('Y-m-d H:i:s')
                 ];
@@ -623,7 +702,7 @@ class CheckoutController extends Controller
                         'preview_data' => $previewData,
                         'pcb_price' => $item['pcb_price'] ?? ($item['base_price'] ?? null),
                         'shipping_charge' => $item['shipping_charge'] ?? ($item['shipping_fee'] ?? 0),
-                        'shipping_option' => $item['shipping_option'] ?? ($item['shippingMethod'] ?? 'Standard'),
+                        'shipping_option' => $resolvedDeliveryMethod ? ucfirst($resolvedDeliveryMethod) : ($item['shipping_option'] ?? ($item['shippingMethod'] ?? 'Standard')),
                         'gst_rate' => $item['gst_rate'] ?? 18,
                         'gst_amount' => $item['gst_amount'] ?? null,
                         'subtotal' => $item['subtotal'] ?? null,

@@ -47,10 +47,42 @@ class PcbOrder extends Model
         'order_value',
         'launch_date',
         'delivery_date',
+        'delivery_method',
         'bill_number',
         'film_applied',
         'created_at',
     ];
+
+    // Ensure delivery_method is stored lowercase or null
+    public function setDeliveryMethodAttribute($value)
+    {
+        $this->attributes['delivery_method'] = ($value !== null && trim((string)$value) !== '') ? strtolower(trim((string)$value)) : null;
+    }
+
+    // Delivery method accessor with fallback to metas if loaded
+    public function getDeliveryMethodAttribute($value)
+    {
+        if (!empty($value)) {
+            return strtolower(trim((string)$value));
+        }
+        if ($this->relationLoaded('metas')) {
+            $meta = $this->metas->firstWhere('meta_key', 'shipping_option');
+            if ($meta && !empty($meta->meta_value)) {
+                return strtolower(trim((string)$meta->meta_value));
+            }
+        }
+        return null;
+    }
+
+    // Delivery method label accessor (e.g. 'Standard', 'Plus', 'Fasttrack')
+    public function getDeliveryMethodLabelAttribute()
+    {
+        $method = $this->delivery_method;
+        if (empty($method)) {
+            return null;
+        }
+        return ucfirst(strtolower($method));
+    }
 
     // Ensure c_g is stored uppercase or null
     public function setCGAttribute($value)
@@ -182,6 +214,7 @@ class PcbOrder extends Model
 
     protected $appends = [
         'status_details',
+        'delivery_method_label',
     ];
 
     public function scopeJlcpcb($query)

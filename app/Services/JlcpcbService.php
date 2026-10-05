@@ -505,6 +505,8 @@ class JlcpcbService
                             'pcb_price_inr' => $customerDateBasePrice,
                             'shipping_charge' => $dateShippingInr,
                             'subtotal' => $dateSubtotal,
+                            'with_gst_amount' => $dateFinalTotal,
+                            'with_gst' => $dateFinalTotal,
                             'gst_amount' => $dateGst,
                             'final_total' => $dateFinalTotal,
                             'checked' => ($opt['achieveChecked'] ?? '') === 'checked',

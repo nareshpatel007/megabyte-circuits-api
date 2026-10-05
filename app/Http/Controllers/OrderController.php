@@ -1972,6 +1972,7 @@ namespace App\Http\Controllers;
                         'unit_price' => $pricing['unit_price'],
                         'order_value' => $pricing['total_amount'],
                         'delivery_date' => $request->input('delivery_date') ?: null,
+                        'delivery_method' => $request->filled('delivery_method') ? CheckoutController::resolveAndValidateDeliveryMethod(['delivery_method' => $request->input('delivery_method')]) : null,
                         'created_at' => date('Y-m-d H:i:s'),
                         'updated_at' => date('Y-m-d H:i:s')
                     ];
