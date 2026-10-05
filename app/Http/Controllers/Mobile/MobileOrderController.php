@@ -106,10 +106,13 @@ class MobileOrderController extends Controller
 
             // 1. In mobile, do not show completed orders at all
             $completedStatuses = ['completed', 'delivered', 'order completed', 'production completed', 'shipped'];
-            $query->where(function ($q) use ($completedStatuses) {
-                $q->whereNull('pcb_orders.status')
-                  ->orWhereNotIn(DB::raw('LOWER(TRIM(pcb_orders.status))'), $completedStatuses);
-            });
+            $hasStatusCol = Schema::hasColumn('pcb_orders', 'status');
+            if ($hasStatusCol) {
+                $query->where(function ($q) use ($completedStatuses) {
+                    $q->whereNull('pcb_orders.status')
+                      ->orWhereNotIn(DB::raw('LOWER(TRIM(pcb_orders.status))'), $completedStatuses);
+                });
+            }
 
             if ($statusTable) {
                 $query->leftJoin($statusTable, 'pcb_orders.status_id', '=', "{$statusTable}.id")
@@ -279,14 +282,17 @@ class MobileOrderController extends Controller
                 // When searching in 'in_production', search ONLY within in_production orders!
                 $excluded = ['pending', 'completed', 'shipped', 'delivered', 'cancelled', 'canceled', 'archived'];
 
-                $query->where(function ($q) use ($excluded, $statusTable) {
-                    $q->where(function ($sq) use ($excluded) {
-                        $sq->whereNotNull('pcb_orders.status')
-                           ->whereNotIn(DB::raw('LOWER(TRIM(pcb_orders.status))'), $excluded);
-                    });
+                $query->where(function ($q) use ($excluded, $statusTable, $hasStatusCol) {
+                    if ($hasStatusCol) {
+                        $q->where(function ($sq) use ($excluded) {
+                            $sq->whereNotNull('pcb_orders.status')
+                               ->whereNotIn(DB::raw('LOWER(TRIM(pcb_orders.status))'), $excluded);
+                        });
+                    }
 
                     if ($statusTable) {
-                        $q->orWhere(function ($sq) use ($excluded, $statusTable) {
+                        $method = $hasStatusCol ? 'orWhere' : 'where';
+                        $q->$method(function ($sq) use ($excluded, $statusTable) {
                             $sq->whereNotNull("{$statusTable}.name")
                                ->whereNotIn(DB::raw("LOWER(TRIM({$statusTable}.name))"), $excluded)
                                ->whereNotIn(DB::raw("LOWER(TRIM(COALESCE({$statusTable}.slug, '')))"), $excluded);
@@ -296,13 +302,16 @@ class MobileOrderController extends Controller
             } else {
                 // Specific status requested (e.g. "Pending", "Traveler", "Drilling", "Outside Drill", etc.)
                 // When searching, only search within this selected status!
-                $query->where(function ($q) use ($statusLower, $cleanStatus, $normStatus, $statusTable) {
-                    $q->where(DB::raw('LOWER(TRIM(COALESCE(pcb_orders.status, "")))'), $statusLower)
-                      ->orWhere('pcb_orders.status', 'LIKE', "%{$cleanStatus}%")
-                      ->orWhereRaw("LOWER(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(pcb_orders.status, ''), ' ', ''), '-', ''), '_', ''), '/', '')) = ?", [$normStatus]);
+                $query->where(function ($q) use ($statusLower, $cleanStatus, $normStatus, $statusTable, $hasStatusCol) {
+                    if ($hasStatusCol) {
+                        $q->where(DB::raw('LOWER(TRIM(COALESCE(pcb_orders.status, "")))'), $statusLower)
+                          ->orWhere('pcb_orders.status', 'LIKE', "%{$cleanStatus}%")
+                          ->orWhereRaw("LOWER(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(pcb_orders.status, ''), ' ', ''), '-', ''), '_', ''), '/', '')) = ?", [$normStatus]);
+                    }
 
                     if ($statusTable) {
-                        $q->orWhere(function ($sq) use ($statusLower, $cleanStatus, $normStatus, $statusTable) {
+                        $method = $hasStatusCol ? 'orWhere' : 'where';
+                        $q->$method(function ($sq) use ($statusLower, $cleanStatus, $normStatus, $statusTable) {
                             $sq->whereNotNull("{$statusTable}.name")
                                ->where(function ($ssq) use ($statusLower, $cleanStatus, $normStatus, $statusTable) {
                                    $ssq->where(DB::raw("LOWER(TRIM({$statusTable}.name))"), $statusLower)
@@ -640,9 +649,10 @@ class MobileOrderController extends Controller
             $comboOrders = Schema::hasTable('pcb_order_combos')
                 ? DB::table('pcb_order_combos')
                     ->join('pcb_orders', 'pcb_order_combos.combo_order_id', '=', 'pcb_orders.id')
+                    ->leftJoin('pcb_order_statuses', 'pcb_orders.status_id', '=', 'pcb_order_statuses.id')
                     ->where('pcb_order_combos.parent_order_id', $order->id)
                     ->when(Schema::hasColumn('pcb_order_combos', 'deleted_at'), fn($q) => $q->whereNull('pcb_order_combos.deleted_at'))
-                    ->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status')
+                    ->select('pcb_orders.id', 'pcb_orders.order_number', DB::raw("COALESCE(pcb_order_statuses.name, 'Pending') as status"))
                     ->distinct()
                     ->get()
                 : [];
@@ -659,9 +669,10 @@ class MobileOrderController extends Controller
             $oldOrders = Schema::hasTable('pcb_order_old_orders')
                 ? DB::table('pcb_order_old_orders')
                     ->join('pcb_orders', 'pcb_order_old_orders.old_order_id', '=', 'pcb_orders.id')
+                    ->leftJoin('pcb_order_statuses', 'pcb_orders.status_id', '=', 'pcb_order_statuses.id')
                     ->where('pcb_order_old_orders.order_id', $order->id)
                     ->when(Schema::hasColumn('pcb_order_old_orders', 'deleted_at'), fn($q) => $q->whereNull('pcb_order_old_orders.deleted_at'))
-                    ->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status')
+                    ->select('pcb_orders.id', 'pcb_orders.order_number', DB::raw("COALESCE(pcb_order_statuses.name, 'Pending') as status"))
                     ->distinct()
                     ->get()
                 : [];
@@ -734,9 +745,10 @@ class MobileOrderController extends Controller
                 'parent_combo_orders' => Schema::hasTable('pcb_order_combos')
                     ? DB::table('pcb_order_combos')
                         ->join('pcb_orders', 'pcb_order_combos.parent_order_id', '=', 'pcb_orders.id')
+                        ->leftJoin('pcb_order_statuses', 'pcb_orders.status_id', '=', 'pcb_order_statuses.id')
                         ->where('pcb_order_combos.combo_order_id', $order->id)
                         ->when(Schema::hasColumn('pcb_order_combos', 'deleted_at'), fn($q) => $q->whereNull('pcb_order_combos.deleted_at'))
-                        ->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status')
+                        ->select('pcb_orders.id', 'pcb_orders.order_number', DB::raw("COALESCE(pcb_order_statuses.name, 'Pending') as status"))
                         ->distinct()
                         ->get()
                     : [],
@@ -896,10 +908,12 @@ class MobileOrderController extends Controller
             }
 
             $updateData = [
-                'status'     => $canonicalStatus->name,
                 'status_id'  => $canonicalStatus->id,
                 'updated_at' => date('Y-m-d H:i:s')
             ];
+            if (Schema::hasColumn('pcb_orders', 'status')) {
+                $updateData['status'] = $canonicalStatus->name;
+            }
 
             if ($inputBillNumber !== null) {
                 $updateData['bill_number'] = $inputBillNumber !== '' ? $inputBillNumber : null;
@@ -1236,17 +1250,13 @@ class MobileOrderController extends Controller
                     if (Schema::hasColumn('pcb_orders', 'launch_qty')) {
                         $updatedFields['launch_qty'] = $newVal;
                     }
-                    DB::table('pcb_order_meta')->updateOrInsert(
-                        ['pcb_order_id' => $id, 'meta_key' => 'launch_qty'],
-                        ['meta_value' => (string)$newVal, 'updated_at' => $now]
-                    );
                     $logMessages[] = "Launched Qty: {$oldVal} → {$newVal}";
                 }
             }
 
             // 2. Final / Completed Qty
-            if ($request->has('final_qty')) {
-                $newVal = (int) $request->input('final_qty');
+            if ($request->has('final_qty') || $request->has('completed_qty')) {
+                $newVal = (int) $request->input('final_qty', $request->input('completed_qty'));
                 $oldVal = (int) ($order->final_qty ?? $order->completed_qty ?? 0);
                 if ($newVal !== $oldVal) {
                     if (Schema::hasColumn('pcb_orders', 'final_qty')) {
@@ -1255,10 +1265,6 @@ class MobileOrderController extends Controller
                     if (Schema::hasColumn('pcb_orders', 'completed_qty')) {
                         $updatedFields['completed_qty'] = $newVal;
                     }
-                    DB::table('pcb_order_meta')->updateOrInsert(
-                        ['pcb_order_id' => $id, 'meta_key' => 'final_qty'],
-                        ['meta_value' => (string)$newVal, 'updated_at' => $now]
-                    );
                     $logMessages[] = "Final Qty: {$oldVal} → {$newVal}";
                 }
             }
@@ -1271,10 +1277,6 @@ class MobileOrderController extends Controller
                     if (Schema::hasColumn('pcb_orders', 'failed_qty')) {
                         $updatedFields['failed_qty'] = $newVal;
                     }
-                    DB::table('pcb_order_meta')->updateOrInsert(
-                        ['pcb_order_id' => $id, 'meta_key' => 'failed_qty'],
-                        ['meta_value' => (string)$newVal, 'updated_at' => $now]
-                    );
                     $logMessages[] = "Failed Qty: {$oldVal} → {$newVal}";
                 }
             }
@@ -1401,15 +1403,34 @@ class MobileOrderController extends Controller
             $quantity = (int) $request->input('quantity', 100);
             $status = trim($request->input('status', 'In Production'));
 
-            $orderId = DB::table('pcb_orders')->insertGetId([
-                'customer_name' => $customerName,
-                'board_name' => $boardName,
+            $canonicalStatus = \App\Services\OrderStatusResolver::resolve($status) ?: \App\Services\OrderStatusResolver::getDefaultStatus();
+
+            $insertData = [
                 'order_qty' => $quantity,
                 'launch_qty' => $quantity,
-                'status' => $status,
+                'status_id' => $canonicalStatus ? $canonicalStatus->id : null,
                 'created_at' => date('Y-m-d H:i:s'),
                 'updated_at' => date('Y-m-d H:i:s')
-            ]);
+            ];
+
+            if (Schema::hasColumn('pcb_orders', 'status') && $canonicalStatus) {
+                $insertData['status'] = $canonicalStatus->name;
+            }
+            if (Schema::hasColumn('pcb_orders', 'customer_name')) {
+                $insertData['customer_name'] = $customerName;
+            }
+            if (Schema::hasColumn('pcb_orders', 'board_name')) {
+                $insertData['board_name'] = $boardName;
+            }
+
+            $orderId = DB::table('pcb_orders')->insertGetId($insertData);
+
+            if (Schema::hasTable('pcb_order_meta')) {
+                DB::table('pcb_order_meta')->insert([
+                    ['pcb_order_id' => $orderId, 'meta_key' => 'customer_name', 'meta_value' => $customerName, 'created_at' => now(), 'updated_at' => now()],
+                    ['pcb_order_id' => $orderId, 'meta_key' => 'board_name', 'meta_value' => $boardName, 'created_at' => now(), 'updated_at' => now()],
+                ]);
+            }
 
             $orderNumber = 'M' . str_pad($orderId, 4, '0', STR_PAD_LEFT);
             DB::table('pcb_orders')->where('id', $orderId)->update(['order_number' => $orderNumber]);

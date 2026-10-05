@@ -92,6 +92,8 @@ class OrderStatusResolver
             $query = 'completed';
         } elseif ($query === 'canceled') {
             $query = 'cancelled';
+        } elseif ($query === 'processing') {
+            $query = 'under process';
         }
 
         // 1. Exact match on name

@@ -168,12 +168,14 @@ class AdminController extends Controller
                     })
                     ->count();
 
-                $mfgRuns = DB::table('pcb_orders')
-                    ->whereNull('deleted_at')
-                    ->whereNotIn(DB::raw("LOWER(TRIM(COALESCE(status, '')))"), ['cancelled', 'canceled', 'completed', 'shipped', 'delivered'])
-                    ->count();
+                $mfgRunsQuery = DB::table('pcb_orders')->whereNull('pcb_orders.deleted_at');
+                if ($statusTable) {
+                    $mfgRunsQuery->leftJoin($statusTable, 'pcb_orders.status_id', '=', "{$statusTable}.id")
+                        ->whereNotIn(DB::raw("LOWER(TRIM(COALESCE({$statusTable}.name, '')))"), ['cancelled', 'canceled', 'completed', 'shipped', 'delivered']);
+                }
+                $mfgRuns = $mfgRunsQuery->count();
 
-                $joinClause = $statusTable ? "COALESCE(NULLIF(TRIM(pcb_orders.status), ''), {$statusTable}.name, 'Pending')" : "COALESCE(NULLIF(TRIM(pcb_orders.status), ''), 'Pending')";
+                $joinClause = $statusTable ? "COALESCE({$statusTable}.name, 'Pending')" : "'Pending'";
 
                 $query = DB::table('pcb_orders');
                 if ($statusTable) {
@@ -584,9 +586,10 @@ class AdminController extends Controller
 
             $orders = $ordersQuery->select($selectFields)->orderBy('pcb_orders.created_at', 'desc')->get();
 
-            if ($orders->isNotEmpty() && Schema::hasTable('pcb_order_metas')) {
+            $metaTable = Schema::hasTable('pcb_order_meta') ? 'pcb_order_meta' : (Schema::hasTable('pcb_order_metas') ? 'pcb_order_metas' : null);
+            if ($orders->isNotEmpty() && $metaTable) {
                 $orderIds = $orders->pluck('id')->toArray();
-                $metas = DB::table('pcb_order_metas')
+                $metas = DB::table($metaTable)
                     ->whereIn('pcb_order_id', $orderIds)
                     ->whereIn('meta_key', ['pn_number', 'p_n', 'part_number', 'board_name'])
                     ->get()
@@ -1938,8 +1941,9 @@ class AdminController extends Controller
                     }
                     if (!$file) {
                         // Check if file details exist in order metas
-                        $metaUrl = DB::table('pcb_order_metas')->where('pcb_order_id', $order->id)->whereIn('meta_key', ['gerber_file_url', 'gerber_url', 'gerber_path'])->value('meta_value');
-                        $metaName = DB::table('pcb_order_metas')->where('pcb_order_id', $order->id)->whereIn('meta_key', ['gerber_file_name', 'gerber_name'])->value('meta_value');
+                        $metaTable = DB::getSchemaBuilder()->hasTable('pcb_order_meta') ? 'pcb_order_meta' : 'pcb_order_metas';
+                        $metaUrl = DB::table($metaTable)->where('pcb_order_id', $order->id)->whereIn('meta_key', ['gerber_file_url', 'gerber_url', 'gerber_path'])->value('meta_value');
+                        $metaName = DB::table($metaTable)->where('pcb_order_id', $order->id)->whereIn('meta_key', ['gerber_file_name', 'gerber_name'])->value('meta_value');
                         if ($metaUrl) {
                             $filePath = str_starts_with($metaUrl, '/storage/') ? substr($metaUrl, 9) : (str_starts_with($metaUrl, 'storage/') ? substr($metaUrl, 8) : $metaUrl);
                             $file = (object)[

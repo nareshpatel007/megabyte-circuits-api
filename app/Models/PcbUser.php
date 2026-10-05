@@ -27,4 +27,9 @@ class PcbUser extends Model
     {
         return $this->hasMany(PcbOrder::class, 'user_id');
     }
+
+    public function addresses()
+    {
+        return $this->hasMany(UserAddress::class, 'user_id');
+    }
 }
