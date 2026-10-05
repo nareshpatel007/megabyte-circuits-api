@@ -83,38 +83,14 @@ class OrderExportService
         // Status filter
         if (!empty($filters['status']) && strtolower($filters['status']) !== 'all') {
             $statusVal = $filters['status'];
-            $hasStatusCol = \Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'status');
             if ($statusVal === 'In Production') {
-                $query->where(function ($q) use ($hasStatusCol) {
-                    if ($hasStatusCol) {
-                        $q->where('status', 'move')
-                          ->orWhere('status', 'LIKE', '%production%')
-                          ->orWhere('status', 'LIKE', '%pending%');
-                    }
-                    if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses')) {
-                        $method = $hasStatusCol ? 'orWhereHas' : 'whereHas';
-                        $q->$method('statusDetails', function ($sq) {
-                            $sq->where('name', 'move')
-                               ->orWhere('name', 'LIKE', '%production%')
-                               ->orWhere('name', 'LIKE', '%pending%');
-                        });
-                    }
+                $query->where(function ($q) {
+                    $q->where('status', 'move')
+                      ->orWhere('status', 'LIKE', '%production%')
+                      ->orWhere('status', 'LIKE', '%pending%');
                 });
             } else {
-                $canonicalStatus = \App\Services\OrderStatusResolver::resolve($statusVal);
-                $query->where(function ($q) use ($statusVal, $canonicalStatus, $hasStatusCol) {
-                    if ($canonicalStatus) {
-                        $q->where('status_id', $canonicalStatus->id);
-                    }
-                    if ($hasStatusCol) {
-                        $q->orWhere('status', $statusVal);
-                    }
-                    if (!$canonicalStatus && \Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses')) {
-                        $q->orWhereHas('statusDetails', function ($sq) use ($statusVal) {
-                            $sq->where('name', $statusVal)->orWhere('slug', $statusVal);
-                        });
-                    }
-                });
+                $query->where('status', $statusVal);
             }
         }
 

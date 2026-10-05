@@ -14,7 +14,6 @@ class PcbOrder extends Model
 
     protected $fillable = [
         'user_id',
-        'client_id',
         'transaction_id',
         'shipping_address_id',
         'billing_address_id',
@@ -32,9 +31,13 @@ class PcbOrder extends Model
         'old_order_number',
         'layers',
         'mask',
+        'board_name',
+        'customer_name',
         'user_email',
         'user_mobile',
+        'status',
         'unit_price',
+        'completed_qty',
         'order_qty',
         'launch_qty',
         'panel_qty',
@@ -46,9 +49,6 @@ class PcbOrder extends Model
         'delivery_date',
         'bill_number',
         'film_applied',
-        'source_order_id',
-        'source_order_number',
-        'is_reorder',
         'created_at',
     ];
 
@@ -56,101 +56,6 @@ class PcbOrder extends Model
     public function setCGAttribute($value)
     {
         $this->attributes['c_g'] = ($value !== null && trim((string)$value) !== '') ? strtoupper(trim((string)$value)) : null;
-    }
-
-    // Status accessor ensuring status is dynamically resolved from canonical status_id / statusDetails
-    public function getStatusAttribute($value = null)
-    {
-        if ($this->relationLoaded('statusDetails') && $this->getRelation('statusDetails')) {
-            return $this->getRelation('statusDetails')->name;
-        }
-
-        if (!empty($this->status_id)) {
-            $st = \App\Services\OrderStatusResolver::resolve($this->status_id);
-            if ($st) {
-                return $st->name;
-            }
-        }
-
-        return $value ?: 'Pending';
-    }
-
-    // Status mutator setting canonical status_id dynamically
-    public function setStatusAttribute($value)
-    {
-        if (!empty($value)) {
-            $canonical = \App\Services\OrderStatusResolver::resolve($value);
-            if ($canonical) {
-                $this->attributes['status_id'] = $canonical->id;
-                $this->setRelation('statusDetails', $canonical);
-            }
-        }
-    }
-
-    // Customer Name mutator ensuring NO writes to physical pcb_orders and preserving guest snapshot in meta
-    public function setCustomerNameAttribute($value)
-    {
-        if ($this->exists && !empty($value) && empty($this->user_id)) {
-            \Illuminate\Support\Facades\DB::table('pcb_order_meta')->updateOrInsert(
-                ['pcb_order_id' => $this->id, 'meta_key' => 'customer_name'],
-                ['meta_value' => trim((string)$value), 'updated_at' => now(), 'created_at' => now()]
-            );
-        }
-    }
-
-    // Customer Name accessor resolving registered user, or guest/historical meta snapshot
-    public function getCustomerNameAttribute($value = null)
-    {
-        if (!empty($this->user_id)) {
-            if ($this->relationLoaded('user') && $this->user) {
-                $name = $this->user->company_name ?: ($this->user->name ?: (isset($this->user->first_name) ? trim("{$this->user->first_name} {$this->user->last_name}") : null));
-                if (!empty($name)) {
-                    return $name;
-                }
-            } else {
-                $u = $this->user;
-                if ($u) {
-                    $name = $u->company_name ?: ($u->name ?: (isset($u->first_name) ? trim("{$u->first_name} {$u->last_name}") : null));
-                    if (!empty($name)) {
-                        return $name;
-                    }
-                }
-            }
-        }
-
-        $metaCust = $this->relationLoaded('metas')
-            ? ($this->getMeta('customer_name') ?: $this->getMeta('client'))
-            : (\Illuminate\Support\Facades\DB::table('pcb_order_meta')->where('pcb_order_id', $this->id)->whereIn('meta_key', ['customer_name', 'client'])->value('meta_value'));
-
-        if (!empty($metaCust)) {
-            return trim((string)$metaCust);
-        }
-
-        if (!empty($value)) {
-            return $value;
-        }
-
-        if (!empty($this->user_email)) {
-            return strtok($this->user_email, '@');
-        }
-
-        return 'Guest Customer';
-    }
-
-    // Completed Qty alias/fallback to final_qty
-    public function getCompletedQtyAttribute($value = null)
-    {
-        return ($value !== null && (int)$value > 0) ? (int)$value : (int)($this->final_qty ?? 0);
-    }
-
-    // Completed Qty mutator syncing canonical final_qty dynamically
-    public function setCompletedQtyAttribute($value)
-    {
-        $intVal = (int)$value;
-        $this->attributes['final_qty'] = $intVal;
-        if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'completed_qty')) {
-            $this->attributes['completed_qty'] = $intVal;
-        }
     }
 
     // Status relationship
@@ -197,56 +102,10 @@ class PcbOrder extends Model
         return $this->belongsTo(PcbUser::class, 'user_id');
     }
 
-    // Canonical Client relationship alias (Section 2 & 16)
-    public function client()
-    {
-        return $this->user();
-    }
-
-    public function getClientIdAttribute()
-    {
-        return $this->user_id;
-    }
-
-    public function setClientIdAttribute($value)
-    {
-        $this->attributes['user_id'] = $value ? (int)$value : null;
-    }
-
     // Gerber File relationship
     public function gerberFile()
     {
         return $this->belongsTo(GerberFile::class, 'gerber_file_id');
-    }
-
-    // Payment Transaction relationship
-    public function transaction()
-    {
-        return $this->belongsTo(PaymentTransaction::class, 'transaction_id');
-    }
-
-    // Shipping Address relationship
-    public function shippingAddress()
-    {
-        return $this->belongsTo(UserAddress::class, 'shipping_address_id');
-    }
-
-    // Billing Address relationship
-    public function billingAddress()
-    {
-        return $this->belongsTo(UserAddress::class, 'billing_address_id');
-    }
-
-    // Source / Parent Order relationship (for Reorders)
-    public function sourceOrder()
-    {
-        return $this->belongsTo(PcbOrder::class, 'source_order_id');
-    }
-
-    // Child Reorders created from this order
-    public function reorderChildren()
-    {
-        return $this->hasMany(PcbOrder::class, 'source_order_id');
     }
 
     // Combo Orders (Child orders under this parent order)
@@ -257,7 +116,7 @@ class PcbOrder extends Model
             'pcb_order_combos',
             'parent_order_id',
             'combo_order_id'
-        )->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status_id', 'pcb_orders.pn_number');
+        )->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status', 'pcb_orders.pn_number');
 
         if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_combos', 'deleted_at')) {
             $relation->whereNull('pcb_order_combos.deleted_at');
@@ -280,7 +139,7 @@ class PcbOrder extends Model
             'pcb_order_old_orders',
             'order_id',
             'old_order_id'
-        )->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status_id', 'pcb_orders.pn_number');
+        )->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status', 'pcb_orders.pn_number');
 
         if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_old_orders', 'deleted_at')) {
             $relation->whereNull('pcb_order_old_orders.deleted_at');
@@ -297,7 +156,7 @@ class PcbOrder extends Model
             'pcb_order_old_orders',
             'old_order_id',
             'order_id'
-        )->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status_id', 'pcb_orders.pn_number');
+        )->select('pcb_orders.id', 'pcb_orders.order_number', 'pcb_orders.status', 'pcb_orders.pn_number');
 
         if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_old_orders', 'deleted_at')) {
             $relation->whereNull('pcb_order_old_orders.deleted_at');
@@ -318,16 +177,11 @@ class PcbOrder extends Model
         'launch_date' => 'date:Y-m-d',
         'delivery_date' => 'date:Y-m-d',
         'film_applied' => 'boolean',
-        'is_reorder'  => 'boolean',
         'jlcpcb_quotation_snapshot' => 'array',
     ];
 
     protected $appends = [
         'status_details',
-        'customer_name',
-        'status',
-        'completed_qty',
-        'client_id',
     ];
 
     public function scopeJlcpcb($query)
@@ -352,23 +206,65 @@ class PcbOrder extends Model
         parent::boot();
 
         static::saving(function ($order) {
-            // If statuses table is empty (e.g. test environment without seeders), skip strict validation
-            if (\App\Services\OrderStatusResolver::getAllStatuses()->isEmpty()) {
+            $statusDirty = $order->isDirty('status');
+            $statusIdDirty = $order->isDirty('status_id');
+
+            // If neither is dirty and model exists, nothing to sync
+            if (!$statusDirty && !$statusIdDirty && $order->exists) {
                 return;
             }
 
             // If creating without any status, set canonical default
-            if (!$order->exists && empty($order->status_id)) {
+            if (!$order->exists && empty($order->status) && empty($order->status_id)) {
                 $canonical = \App\Services\OrderStatusResolver::getDefaultStatus();
                 if ($canonical) {
+                    $order->status = $canonical->name;
                     $order->status_id = $canonical->id;
-                    $order->setRelation('statusDetails', $canonical);
+                    if ($order->relationLoaded('statusDetails')) {
+                        $order->setRelation('statusDetails', $canonical);
+                    }
                 }
                 return;
             }
 
-            // If status_id is dirty, validate against canonical status table
-            if ($order->isDirty('status_id')) {
+            // Both status and status_id were touched
+            if ($statusDirty && $statusIdDirty) {
+                $statusVal = $order->status;
+                $statusIdVal = $order->status_id;
+
+                [$canonical, $error] = \App\Services\OrderStatusResolver::resolveAndVerify($statusVal, $statusIdVal);
+                if ($error) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'status' => [$error],
+                    ]);
+                }
+                if ($canonical) {
+                    $order->status = $canonical->name;
+                    $order->status_id = $canonical->id;
+                    if ($order->relationLoaded('statusDetails')) {
+                        $order->setRelation('statusDetails', $canonical);
+                    }
+                }
+            } elseif ($statusDirty) {
+                $statusVal = $order->status;
+                if ($statusVal === null || trim((string)$statusVal) === '') {
+                    $canonical = \App\Services\OrderStatusResolver::getDefaultStatus();
+                } else {
+                    $canonical = \App\Services\OrderStatusResolver::resolve($statusVal);
+                }
+
+                if (!$canonical) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'status' => ["The order status '" . trim((string)$statusVal) . "' is invalid."],
+                    ]);
+                }
+
+                $order->status = $canonical->name;
+                $order->status_id = $canonical->id;
+                if ($order->relationLoaded('statusDetails')) {
+                    $order->setRelation('statusDetails', $canonical);
+                }
+            } elseif ($statusIdDirty) {
                 $statusIdVal = $order->status_id;
                 if ($statusIdVal === null || trim((string)$statusIdVal) === '') {
                     $canonical = \App\Services\OrderStatusResolver::getDefaultStatus();
@@ -382,21 +278,19 @@ class PcbOrder extends Model
                     ]);
                 }
 
+                $order->status = $canonical->name;
                 $order->status_id = $canonical->id;
-                $order->setRelation('statusDetails', $canonical);
+                if ($order->relationLoaded('statusDetails')) {
+                    $order->setRelation('statusDetails', $canonical);
+                }
             }
         });
 
         static::updating(function ($order) {
-            if ($order->isDirty('status_id')) {
-                $oldStatusId = $order->getOriginal('status_id');
-                $newStatusId = $order->status_id;
-
-                $oldStatusObj = $oldStatusId ? \App\Services\OrderStatusResolver::resolve($oldStatusId) : null;
-                $newStatusObj = $newStatusId ? \App\Services\OrderStatusResolver::resolve($newStatusId) : null;
-
-                $oldStatus = strtolower(trim((string)($oldStatusObj ? $oldStatusObj->name : '')));
-                $newStatus = strtolower(trim((string)($newStatusObj ? $newStatusObj->name : '')));
+            $statusChanged = $order->isDirty('status') || $order->isDirty('status_id');
+            if ($statusChanged) {
+                $oldStatus = strtolower(trim((string)$order->getOriginal('status')));
+                $newStatus = strtolower(trim((string)$order->status));
 
                 $wasPending = empty($oldStatus) || $oldStatus === 'pending' || $oldStatus === 'move';
                 $isNowPending = empty($newStatus) || $newStatus === 'pending' || $newStatus === 'move';
@@ -410,8 +304,7 @@ class PcbOrder extends Model
         });
 
         static::creating(function ($order) {
-            $statusObj = !empty($order->status_id) ? \App\Services\OrderStatusResolver::resolve($order->status_id) : null;
-            $status = strtolower(trim((string)($statusObj ? $statusObj->name : '')));
+            $status = strtolower(trim((string)($order->status ?? '')));
             $isPending = empty($status) || $status === 'pending' || $status === 'move';
             if (!$isPending && empty($order->launch_date)) {
                 $order->launch_date = now()->toDateString();
@@ -575,10 +468,10 @@ class PcbOrder extends Model
         return $meta ? $meta->meta_value : $default;
     }
 
-    // Meta relationship alias
-    public function meta()
+    // Job Card Documents relationship
+    public function jobCardDocuments()
     {
-        return $this->metas();
+        return $this->hasMany(JobCardDocument::class, 'pcb_order_id')->orderBy('sort_order', 'asc');
     }
 }
 

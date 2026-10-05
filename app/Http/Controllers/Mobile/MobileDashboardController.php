@@ -150,10 +150,7 @@ class MobileDashboardController extends Controller
             };
 
             // Department load calculation from status counts with master status table join
-            $hasStatusCol = Schema::hasColumn('pcb_orders', 'status');
-            $joinClause = $statusTable
-                ? ($hasStatusCol ? "COALESCE(NULLIF(TRIM({$statusTable}.name), ''), NULLIF(TRIM(pcb_orders.status), ''), 'Pending')" : "COALESCE(NULLIF(TRIM({$statusTable}.name), ''), 'Pending')")
-                : ($hasStatusCol ? "COALESCE(NULLIF(TRIM(pcb_orders.status), ''), 'Pending')" : "'Pending'");
+            $joinClause = $statusTable ? "COALESCE(NULLIF(TRIM(pcb_orders.status), ''), {$statusTable}.name, 'Pending')" : "COALESCE(NULLIF(TRIM(pcb_orders.status), ''), 'Pending')";
             $query = DB::table('pcb_orders');
             if ($statusTable) {
                 $query->leftJoin($statusTable, 'pcb_orders.status_id', '=', "{$statusTable}.id");
@@ -171,21 +168,19 @@ class MobileDashboardController extends Controller
             }
 
             // Also check direct pcb_orders.status values if any orders had orphaned status_id
-            if ($hasStatusCol) {
-                $directCounts = DB::table('pcb_orders')
-                    ->whereNull('deleted_at')
-                    ->whereNotNull('status')
-                    ->where('status', '!=', '')
-                    ->select('status', DB::raw('count(*) as total'))
-                    ->groupBy('status')
-                    ->get();
+            $directCounts = DB::table('pcb_orders')
+                ->whereNull('deleted_at')
+                ->whereNotNull('status')
+                ->where('status', '!=', '')
+                ->select('status', DB::raw('count(*) as total'))
+                ->groupBy('status')
+                ->get();
 
-                foreach ($directCounts as $dc) {
-                    $k = $normalizeKey($dc->status);
-                    // If this status wasn't covered in rawCounts, add it
-                    if (!isset($countsByKey[$k])) {
-                        $countsByKey[$k] = intval($dc->total);
-                    }
+            foreach ($directCounts as $dc) {
+                $k = $normalizeKey($dc->status);
+                // If this status wasn't covered in rawCounts, add it
+                if (!isset($countsByKey[$k])) {
+                    $countsByKey[$k] = intval($dc->total);
                 }
             }
 
@@ -244,11 +239,8 @@ class MobileDashboardController extends Controller
             // Mask colors breakdown for active manufacturing runs
             $hasMaskCol = Schema::hasColumn('pcb_orders', 'mask');
             $activeOrdersQuery = DB::table('pcb_orders')
-                ->whereNull('pcb_orders.deleted_at');
-
-            if ($hasStatusCol) {
-                $activeOrdersQuery->whereNotIn(DB::raw("LOWER(TRIM(COALESCE(pcb_orders.status, '')))"), $completedStatuses);
-            }
+                ->whereNull('pcb_orders.deleted_at')
+                ->whereNotIn(DB::raw("LOWER(TRIM(COALESCE(pcb_orders.status, '')))"), $completedStatuses);
 
             if ($statusTable) {
                 $activeOrdersQuery->leftJoin($statusTable, 'pcb_orders.status_id', '=', "{$statusTable}.id")

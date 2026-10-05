@@ -1054,7 +1054,9 @@ class OrderImportService
             'layers'         => $layers,
             'mask'           => $mask,
             'gerber_file_id' => null,
+            'status'         => $status,
             'status_id'      => $statusId,
+            'completed_qty'  => $completedQty,
             'order_qty'      => $orderQty,
             'launch_qty'     => $launchQty,
             'panel_qty'      => $panelQty,
@@ -1259,7 +1261,15 @@ class OrderImportService
             'tool'             => 'tool',
             'combo'            => 'combo',
             'customer_name'    => 'customer_name',
+            'layer'            => 'layer',
+            'mask'             => 'solder_mask',
             'production_noted' => 'production_noted',
+            'qty'              => 'qty',
+            'launch_qty'       => 'launch_qty',
+            'panel_qty'        => 'panel_qty',
+            'ups'              => 'ups',
+            'final_qty'        => 'final_qty',
+            'status'           => 'status',
             'bill_number'      => 'bill_number',
         ];
 
@@ -1288,10 +1298,38 @@ class OrderImportService
             }
         }
 
+        $launchQtyVal = isset($data['launch_qty']) && is_numeric($data['launch_qty']) ? (int)$data['launch_qty'] : 0;
+        $finalQtyVal = isset($data['final_qty']) && is_numeric($data['final_qty']) ? (int)$data['final_qty'] : 0;
+        $failedQtyVal = max(0, $launchQtyVal - $finalQtyVal);
+
+        if (!isset($addedKeys['failed_qty'])) {
+            $addedKeys['failed_qty'] = true;
+            $metaRows[] = [
+                'pcb_order_id' => $orderId,
+                'meta_key'     => 'failed_qty',
+                'meta_value'   => (string)$failedQtyVal,
+                'created_at'   => $now,
+                'updated_at'   => $now,
+            ];
+        }
+
+        if (!empty($data['mask'])) {
+            foreach (['mask', 'pcb_color'] as $aliasKey) {
+                if (!isset($addedKeys[$aliasKey])) {
+                    $addedKeys[$aliasKey] = true;
+                    $metaRows[] = [
+                        'pcb_order_id' => $orderId,
+                        'meta_key'     => $aliasKey,
+                        'meta_value'   => (string)$data['mask'],
+                        'created_at'   => $now,
+                        'updated_at'   => $now,
+                    ];
+                }
+            }
+        }
+
         if (!empty($metaRows)) {
-            PcbOrderMeta::where('pcb_order_id', $orderId)
-                ->whereIn('meta_key', array_keys($addedKeys))
-                ->delete();
+            PcbOrderMeta::where('pcb_order_id', $orderId)->delete();
             PcbOrderMeta::insert($metaRows);
         }
     }

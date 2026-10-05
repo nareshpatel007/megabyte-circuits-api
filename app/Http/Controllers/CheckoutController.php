@@ -390,10 +390,6 @@ class CheckoutController extends Controller
 
             $cgStatus = (!empty($customerGst) && strtolower($customerGst) !== 'null' && strtolower($customerGst) !== 'undefined') ? 'GST' : 'CASH';
 
-            // Resolve canonical Pending status record
-            $pendingStatus = \App\Services\OrderStatusResolver::getDefaultStatus();
-            $statusId = $pendingStatus ? $pendingStatus->id : (\Illuminate\Support\Facades\DB::table('pcb_order_statuses')->where('name', 'Pending')->value('id') ?? 39);
-
             // 2. Create SEPARATE Orders in pcb_orders linked STRICTLY via IDs (status_id = Pending, gerber_file_id)
             $createdOrders = [];
 
@@ -490,9 +486,6 @@ class CheckoutController extends Controller
                     'c_g' => $cgStatus,
                     'unit_price' => $unitPrice,
                     'order_value' => $itemPrice,
-                    'order_qty' => (int) $itemQty,
-                    'layers' => (string) ($item['layers'] ?? '2'),
-                    'mask' => (string) ($item['pcbColor'] ?? ($item['mask'] ?? ($item['solder_mask'] ?? 'Green'))),
                     'delivery_date' => $resolvedDeliveryDate,
                     'created_at' => date('Y-m-d H:i:s'),
                     'updated_at' => date('Y-m-d H:i:s')

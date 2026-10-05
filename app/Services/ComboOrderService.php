@@ -132,7 +132,7 @@ class ComboOrderService
      * Synchronize status of parent order to all its child combo orders.
      * Creates status history logs and audit entries.
      */
-    public static function syncComboStatus(PcbOrder $parentOrder, $newStatusOrStatusId = null, ?int $adminId = null, string $updaterName = 'Operator'): void
+    public static function syncComboStatus(PcbOrder $parentOrder, string $newStatus, ?int $adminId = null, string $updaterName = 'Operator'): void
     {
         if (!Schema::hasTable('pcb_order_combos')) {
             return;
@@ -148,36 +148,33 @@ class ComboOrderService
 
         $now = date('Y-m-d H:i:s');
 
-        // Resolve canonical status
-        $canonicalStatus = null;
-        if (!empty($newStatusOrStatusId)) {
-            $canonicalStatus = \App\Services\OrderStatusResolver::resolve($newStatusOrStatusId);
-        }
-        if (!$canonicalStatus && !empty($parentOrder->status_id)) {
-            $canonicalStatus = \App\Services\OrderStatusResolver::resolve($parentOrder->status_id);
-        }
-
-        $statusName = $canonicalStatus ? $canonicalStatus->name : (string)($parentOrder->status ?? 'Pending');
-        $statusId = $canonicalStatus ? $canonicalStatus->id : $parentOrder->status_id;
-
         foreach ($comboMemberIds as $childId) {
             $childOrder = PcbOrder::find($childId);
             if (!$childOrder) continue;
 
             $oldStatus = $childOrder->status ?? 'Pending';
-            $statusDiffers = (int)($childOrder->status_id ?? 0) !== (int)($statusId ?? 0);
+            $statusDiffers = strtolower(trim((string)$oldStatus)) !== strtolower(trim((string)$newStatus));
             $billDiffers = !empty($parentOrder->bill_number) && (string)$childOrder->bill_number !== (string)$parentOrder->bill_number;
 
             if (!$statusDiffers && !$billDiffers) {
                 continue;
             }
 
-            if ($statusId) {
-                $childOrder->status_id = $statusId;
-            }
+            $childOrder->status = $newStatus;
 
             if (!empty($parentOrder->bill_number)) {
                 $childOrder->bill_number = $parentOrder->bill_number;
+            }
+
+            // Map status_id if pcb_order_statuses table exists
+            if (Schema::hasTable('pcb_order_statuses')) {
+                $st = DB::table('pcb_order_statuses')
+                    ->whereRaw('LOWER(name) = ?', [strtolower($newStatus)])
+                    ->orWhereRaw('LOWER(label) = ?', [strtolower($newStatus)])
+                    ->first();
+                if ($st) {
+                    $childOrder->status_id = $st->id;
+                }
             }
 
             $childOrder->save();
@@ -188,9 +185,9 @@ class ComboOrderService
                     'pcb_order_id' => $childOrder->id,
                     'order_number' => $childOrder->order_number ?? (string)$childOrder->id,
                     'admin_id'     => $adminId,
-                    'status'       => $statusName,
-                    'action'       => "Combo Status Synced: {$statusName}",
-                    'description'  => "Status automatically synchronized from main combo order '{$parentOrder->order_number}' from '{$oldStatus}' to '{$statusName}' by {$updaterName}.",
+                    'status'       => $newStatus,
+                    'action'       => "Combo Status Synced: {$newStatus}",
+                    'description'  => "Status automatically synchronized from main combo order '{$parentOrder->order_number}' from '{$oldStatus}' to '{$newStatus}' by {$updaterName}.",
                     'created_at'   => $now,
                     'updated_at'   => $now,
                 ]);
@@ -200,9 +197,8 @@ class ComboOrderService
             if (Schema::hasTable('pcb_order_status_histories')) {
                 PcbOrderStatusHistory::create([
                     'pcb_order_id' => $childOrder->id,
-                    'status_id'    => $statusId,
                     'admin_id'     => $adminId ?: 1,
-                    'status_name'  => $statusName,
+                    'status_name'  => $newStatus,
                     'remark'       => "Status synchronized from parent combo order '{$parentOrder->order_number}' by {$updaterName}",
                 ]);
             }

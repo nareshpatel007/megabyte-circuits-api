@@ -119,18 +119,18 @@ namespace App\Http\Controllers;
                 $order = PcbOrder::create([
                     'user_id' => $userId,
                     'order_number' => $orderNumber,
+                    'board_name' => $request->board_name ?: ($pnNumber ?: 'Standard PCB'),
                     'pn_number' => $pnNumber,
+                    'customer_name' => $request->customer_name,
                     'user_email' => $request->user_email,
                     'user_mobile' => $request->user_mobile,
                     'c_g' => $request->c_g ?? $cgStatus,
+                    'status' => $initialStatusName,
                     'status_id' => $initialStatusId,
                     'order_type' => $reqOrderType,
                     'quotation_source' => $reqSource,
                     'jlcpcb_file_key' => ($reqOrderType === 'jlcpcb') ? ($request->input('jlcpcb_file_key') ?: null) : null,
                     'jlcpcb_quotation_snapshot' => ($reqOrderType === 'jlcpcb') ? ($request->input('jlcpcb_quotation_snapshot') ?: null) : null,
-                    'order_qty' => max(1, (int)($request->input('order_qty') ?: ($request->input('quantity') ?: ($request->input('qty') ?: 1)))),
-                    'layers' => (int)($request->input('layers') ?: ($request->input('layer') ?: 2)),
-                    'mask' => trim((string)($request->input('mask') ?: ($request->input('pcb_color') ?: ($request->input('solder_mask') ?: 'Green')))),
                     'unit_price' => $request->unit_price ?? 0,
                     'order_value' => $request->order_value ?? 0,
                     'delivery_date' => $request->delivery_date,
@@ -138,15 +138,9 @@ namespace App\Http\Controllers;
 
                 // Save all additional specification attributes into pcb_order_meta
                 $metaData = $request->except([
-                    'user_id', 'client_id', 'order_number', 'board_name', 'pn_number', 'customer_name', 'user_email', 'user_mobile',
-                    'status', 'status_id', 'unit_price', 'order_value', 'delivery_date', 'gerber_file',
-                    'order_qty', 'layers', 'mask', 'layer', 'qty', 'quantity', 'pcb_color', 'solder_mask'
+                    'user_id', 'order_number', 'board_name', 'pn_number', 'customer_name', 'user_email', 'user_mobile',
+                    'status', 'unit_price', 'order_value', 'delivery_date', 'gerber_file'
                 ]);
-
-                // Preserve customer_name in order meta for guest / audit snapshot
-                if (!empty($request->customer_name)) {
-                    $metaData['customer_name'] = trim((string)$request->customer_name);
-                }
 
                 if ($gerberFileUrl) {
                     $metaData['gerber_file_url'] = $gerberFileUrl;
@@ -272,7 +266,6 @@ namespace App\Http\Controllers;
                     'silkscreen_side', 'legend_side', 'route', 'routing',
                     'v_cut', 'fpt_program', 'second_stage', 'copper_area',
                     'tool', 'quote_number', 'p_n', 'pn_number', 'part_number', 'board_name', 'gerber_file_id', 'ups', 'panels',
-                    'customer_name', 'client',
                     'jlcpcb_file_key', 'quotation_source', 'order_type', 'jlcpcb_price', 'jlcpcb_quote_id', 'jlcpcb_quotation_snapshot', 'jlcpcb_quote'
                 ];
 
@@ -301,42 +294,22 @@ namespace App\Http\Controllers;
                 // Status Filter (Main order status only)
                 if ($request->filled('status')) {
                     $statusParam = trim($request->input('status'));
-                    $hasStatusCol = \Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'status');
-                    $hasStatusTable = \Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses') || \Illuminate\Support\Facades\Schema::hasTable('pcb_statuses');
-
-                    if (strtolower($statusParam) === 'in production') {
-                        $excluded = ['pending', 'completed', 'shipped', 'delivered', 'cancelled', 'canceled'];
-                        $query->where(function ($q) use ($excluded, $hasStatusCol, $hasStatusTable) {
-                            if ($hasStatusCol) {
-                                $q->where(function ($sq) use ($excluded, $hasStatusTable) {
-                                    $sq->whereNotIn(\Illuminate\Support\Facades\DB::raw('LOWER(TRIM(pcb_orders.status))'), $excluded);
-                                    if ($hasStatusTable) {
-                                        $sq->whereDoesntHave('statusDetails');
-                                    }
-                                });
-                            }
-                            if ($hasStatusTable) {
-                                $method = $hasStatusCol ? 'orWhereHas' : 'whereHas';
-                                $q->$method('statusDetails', function ($stq) use ($excluded) {
-                                    $stq->whereNotIn(\Illuminate\Support\Facades\DB::raw('LOWER(TRIM(name))'), $excluded)
-                                        ->whereNotIn(\Illuminate\Support\Facades\DB::raw('LOWER(TRIM(slug))'), $excluded);
-                                });
-                            }
-                        });
+                    if (in_array(strtolower($statusParam), ['in production', 'in_production'])) {
+                        $excluded = \App\Services\OrderStatusResolver::NON_PRODUCTION_STATUSES;
+                        $query->whereNotNull('pcb_orders.status')
+                              ->whereRaw("TRIM(pcb_orders.status) != ''")
+                              ->whereNotIn(\Illuminate\Support\Facades\DB::raw('LOWER(TRIM(pcb_orders.status))'), $excluded);
                     } else if (strtolower($statusParam) !== 'all') {
                         $statusLower = strtolower($statusParam);
-                        $query->where(function ($q) use ($statusLower, $hasStatusCol, $hasStatusTable) {
-                            if ($hasStatusCol) {
-                                $q->where(function ($sq) use ($statusLower, $hasStatusTable) {
-                                    $sq->whereRaw('LOWER(TRIM(pcb_orders.status)) = ?', [$statusLower]);
-                                    if ($hasStatusTable) {
-                                        $sq->whereDoesntHave('statusDetails');
-                                    }
-                                });
-                            }
-                            if ($hasStatusTable) {
-                                $method = $hasStatusCol ? 'orWhereHas' : 'whereHas';
-                                $q->$method('statusDetails', function ($stq) use ($statusLower) {
+                        $query->where(function ($q) use ($statusLower) {
+                            $q->where(function ($sq) use ($statusLower) {
+                                $sq->whereRaw('LOWER(TRIM(pcb_orders.status)) = ?', [$statusLower]);
+                                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses') || \Illuminate\Support\Facades\Schema::hasTable('pcb_statuses')) {
+                                    $sq->whereDoesntHave('statusDetails');
+                                }
+                            });
+                            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses') || \Illuminate\Support\Facades\Schema::hasTable('pcb_statuses')) {
+                                $q->orWhereHas('statusDetails', function ($stq) use ($statusLower) {
                                     $stq->whereRaw('LOWER(TRIM(name)) = ?', [$statusLower])
                                         ->orWhereRaw('LOWER(TRIM(slug)) = ?', [$statusLower]);
                                 });
@@ -455,15 +428,9 @@ namespace App\Http\Controllers;
                 $statsBuilder->orders = null;
 
                 $hasStatusesTable = \Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses');
-                $hasStatusCol = \Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'status');
-                $hasCompletedCol = \Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'completed_qty');
-                $completedFallback = $hasCompletedCol ? "NULLIF(completed_qty, 0), " : "";
-
                 $statusExpr = $hasStatusesTable
-                    ? ($hasStatusCol
-                        ? "LOWER(TRIM(COALESCE((SELECT name FROM pcb_order_statuses WHERE pcb_order_statuses.id = pcb_orders.status_id LIMIT 1), pcb_orders.status, 'pending')))"
-                        : "LOWER(TRIM(COALESCE((SELECT name FROM pcb_order_statuses WHERE pcb_order_statuses.id = pcb_orders.status_id LIMIT 1), 'pending')))")
-                    : ($hasStatusCol ? "LOWER(TRIM(COALESCE(pcb_orders.status, 'pending')))" : "'pending'");
+                    ? "LOWER(TRIM(COALESCE((SELECT name FROM pcb_order_statuses WHERE pcb_order_statuses.id = pcb_orders.status_id LIMIT 1), pcb_orders.status, 'pending')))"
+                    : "LOWER(TRIM(COALESCE(pcb_orders.status, 'pending')))";
 
                 $statsAgg = $statsBuilder->selectRaw("
                     COUNT(*) as total_orders,
@@ -491,7 +458,7 @@ namespace App\Http\Controllers;
                             pcb_orders.order_type = 'part' 
                             OR EXISTS (SELECT 1 FROM pcb_order_meta WHERE pcb_order_meta.pcb_order_id = pcb_orders.id AND pcb_order_meta.meta_key = 'product_type' AND LOWER(pcb_order_meta.meta_value) = 'part')
                         ) THEN 0 
-                        ELSE COALESCE(NULLIF(final_qty, 0), {$completedFallback}(SELECT CAST(meta_value AS SIGNED) FROM pcb_order_meta WHERE pcb_order_id = pcb_orders.id AND meta_key IN ('final_qty', 'completed_qty') LIMIT 1), CASE WHEN {$statusExpr} IN ('completed', 'shipped', 'delivered') THEN COALESCE(NULLIF(order_qty, 0), (SELECT CAST(meta_value AS SIGNED) FROM pcb_order_meta WHERE pcb_order_id = pcb_orders.id AND meta_key IN ('qty', 'quantity') LIMIT 1), 0) ELSE 0 END)
+                        ELSE COALESCE(NULLIF(final_qty, 0), NULLIF(completed_qty, 0), (SELECT CAST(meta_value AS SIGNED) FROM pcb_order_meta WHERE pcb_order_id = pcb_orders.id AND meta_key IN ('final_qty', 'completed_qty') LIMIT 1), CASE WHEN {$statusExpr} IN ('completed', 'shipped', 'delivered') THEN COALESCE(NULLIF(order_qty, 0), (SELECT CAST(meta_value AS SIGNED) FROM pcb_order_meta WHERE pcb_order_id = pcb_orders.id AND meta_key IN ('qty', 'quantity') LIMIT 1), 0) ELSE 0 END)
                         END
                     ), 0) as final_qty,
                     COALESCE(SUM(
@@ -522,24 +489,11 @@ namespace App\Http\Controllers;
                 } else if ($sortBy === 'created_at' || $sortBy === 'order_date') {
                     $query->orderBy('created_at', $sortOrder)->orderBy('id', $sortOrder);
                 } else if ($sortBy === 'customer_name' || $sortBy === 'customer') {
-                    if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'customer_name')) {
-                        $query->orderBy('customer_name', $sortOrder)->orderBy('user_email', $sortOrder);
-                    } else {
-                        $query->orderBy(
-                            \App\Models\PcbUser::selectRaw("COALESCE(NULLIF(company_name, ''), NULLIF(name, ''), email)")
-                                ->whereColumn('users.id', 'pcb_orders.user_id')
-                                ->limit(1),
-                            $sortOrder
-                        );
-                    }
+                    $query->orderBy('customer_name', $sortOrder)->orderBy('user_email', $sortOrder);
                 } else if ($sortBy === 'order_number' || $sortBy === 'number') {
                     $query->orderBy('order_number', $sortOrder);
                 } else if ($sortBy === 'status') {
-                    if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'status')) {
-                        $query->orderBy('status', $sortOrder);
-                    } else {
-                        $query->orderByRaw("COALESCE((SELECT name FROM pcb_order_statuses WHERE pcb_order_statuses.id = pcb_orders.status_id LIMIT 1), '') {$sortOrder}");
-                    }
+                    $query->orderBy('status', $sortOrder);
                 } else if ($sortBy === 'layers' || $sortBy === 'layer') {
                     $query->orderBy('layers', $sortOrder);
                 } else if ($sortBy === 'film_applied' || $sortBy === 'film') {
@@ -1022,21 +976,25 @@ namespace App\Http\Controllers;
                     }
                 }
 
-                $inputClientId = $request->input('user_id', $request->input('client_id'));
-                if (($request->has('user_id') || $request->has('client_id')) && (string)$order->user_id !== (string)$inputClientId) {
+                if ($request->has('user_id') && (string)$order->user_id !== (string)$request->user_id) {
                     $oldUserId = $order->user_id ?? 'N/A';
-                    $order->user_id = $inputClientId ?: null;
-                    $changesLog[] = "Client ID: '{$oldUserId}' → '{$inputClientId}'";
+                    $order->user_id = $request->user_id ?: null;
+                    $changesLog[] = "Customer ID: '{$oldUserId}' → '{$request->user_id}'";
+                    if ($request->user_id && $hasCustomerNameCol) {
+                        $userObj = \App\Models\PcbUser::find($request->user_id) ?: (\Illuminate\Support\Facades\Schema::hasTable('users') ? \App\Models\User::find($request->user_id) : null);
+                        if ($userObj) {
+                            $newCustName = $userObj->company_name ?: ($userObj->name ?: (isset($userObj->first_name) ? trim("{$userObj->first_name} {$userObj->last_name}") : null));
+                            if ($newCustName && !$request->has('customer_name')) {
+                                $order->customer_name = $newCustName;
+                            }
+                        }
+                    }
                 }
 
-                if ($request->has('customer_name')) {
-                    $cleanCust = trim((string)$request->customer_name);
-                    if (!empty($cleanCust) && \Illuminate\Support\Facades\Schema::hasTable('pcb_order_meta')) {
-                        \App\Models\PcbOrderMeta::updateOrCreate(
-                            ['pcb_order_id' => $order->id, 'meta_key' => 'customer_name'],
-                            ['meta_value' => $cleanCust]
-                        );
-                    }
+                if ($hasCustomerNameCol && $request->has('customer_name') && (string)$order->customer_name !== (string)$request->customer_name) {
+                    $oldVal = $order->customer_name ?? 'N/A';
+                    $order->customer_name = $request->customer_name;
+                    $changesLog[] = "Customer: '{$oldVal}' → '{$request->customer_name}'";
                 }
 
                 $statusChangedToCompleted = false;
@@ -1045,13 +1003,14 @@ namespace App\Http\Controllers;
                 $previousStatusName = $order->status ?? 'Pending';
 
                 if ($resolvedStatus) {
-                    $oldStatusCanonical = \App\Services\OrderStatusResolver::resolve($order->status_id);
-                    $oldValStr = $oldStatusCanonical ? strtolower(trim((string)$oldStatusCanonical->name)) : 'pending';
+                    $oldStatusCanonical = \App\Services\OrderStatusResolver::resolve($order->status_id ?: $order->status);
+                    $oldValStr = $oldStatusCanonical ? strtolower(trim((string)$oldStatusCanonical->name)) : strtolower(trim((string)($order->status ?? 'pending')));
                     $newValStr = strtolower(trim((string)$resolvedStatus->name));
 
                     if ($oldValStr !== $newValStr) {
                         $statusChanged = true;
-                        $oldDisplay = $oldStatusCanonical ? $oldStatusCanonical->name : 'Pending';
+                        $oldDisplay = $order->status ?: ($oldStatusCanonical ? $oldStatusCanonical->name : 'Pending');
+                        $order->status = $resolvedStatus->name;
                         $order->status_id = $resolvedStatus->id;
                         $changesLog[] = "Status: '{$oldDisplay}' → '{$resolvedStatus->name}'";
 
@@ -1063,6 +1022,8 @@ namespace App\Http\Controllers;
                             $statusChangedFromPendingToProduction = true;
                         }
                     } else {
+                        // Ensure both dual fields are synchronized without marking statusChanged
+                        $order->status = $resolvedStatus->name;
                         $order->status_id = $resolvedStatus->id;
                     }
                 }
@@ -1098,6 +1059,10 @@ namespace App\Http\Controllers;
                     if (abs($newVal - $oldVal) > 0.001) {
                         $order->order_value = $newVal;
                         $changesLog[] = "Order Value: ₹{$oldVal} → ₹{$newVal}";
+                        \App\Models\PcbOrderMeta::updateOrCreate(
+                            ['pcb_order_id' => $order->id, 'meta_key' => 'order_value'],
+                            ['meta_value' => (string)$newVal]
+                        );
                     }
                 }
 
@@ -1107,6 +1072,10 @@ namespace App\Http\Controllers;
                     if (abs($newUnit - $oldUnit) > 0.001) {
                         $order->unit_price = $newUnit;
                         $changesLog[] = "Unit Price: ₹{$oldUnit} → ₹{$newUnit}";
+                        \App\Models\PcbOrderMeta::updateOrCreate(
+                            ['pcb_order_id' => $order->id, 'meta_key' => 'unit_price'],
+                            ['meta_value' => (string)$newUnit]
+                        );
                     }
                 }
 
@@ -1124,6 +1093,14 @@ namespace App\Http\Controllers;
                     if (intval($order->layers) !== $newLayers) {
                         $order->layers = $newLayers;
                         $changesLog[] = "Layers: {$newLayers}";
+                        \App\Models\PcbOrderMeta::updateOrCreate(
+                            ['pcb_order_id' => $order->id, 'meta_key' => 'layers'],
+                            ['meta_value' => (string)$newLayers]
+                        );
+                        \App\Models\PcbOrderMeta::updateOrCreate(
+                            ['pcb_order_id' => $order->id, 'meta_key' => 'layer'],
+                            ['meta_value' => (string)$newLayers]
+                        );
                     }
                 }
 
@@ -1132,6 +1109,10 @@ namespace App\Http\Controllers;
                     if ((string)$order->board_name !== $newBoard) {
                         $order->board_name = $newBoard;
                         $changesLog[] = "Board Name: {$newBoard}";
+                        \App\Models\PcbOrderMeta::updateOrCreate(
+                            ['pcb_order_id' => $order->id, 'meta_key' => 'board_name'],
+                            ['meta_value' => $newBoard]
+                        );
                     }
                 }
 
@@ -1140,6 +1121,14 @@ namespace App\Http\Controllers;
                     if ((string)$order->mask !== $maskVal) {
                         $order->mask = $maskVal;
                         $changesLog[] = "Mask Color: {$maskVal}";
+                        \App\Models\PcbOrderMeta::updateOrCreate(
+                            ['pcb_order_id' => $order->id, 'meta_key' => 'pcb_color'],
+                            ['meta_value' => $maskVal]
+                        );
+                        \App\Models\PcbOrderMeta::updateOrCreate(
+                            ['pcb_order_id' => $order->id, 'meta_key' => 'solder_mask'],
+                            ['meta_value' => $maskVal]
+                        );
                     }
                 }
 
@@ -1313,6 +1302,14 @@ namespace App\Http\Controllers;
                     $oldVal = intval($order->order_qty);
                     $order->order_qty = intval($request->order_qty);
                     $changesLog[] = "Order Qty: {$oldVal} → {$order->order_qty} Pcs";
+                    \App\Models\PcbOrderMeta::updateOrCreate(
+                        ['pcb_order_id' => $order->id, 'meta_key' => 'order_qty'],
+                        ['meta_value' => (string)$order->order_qty]
+                    );
+                    \App\Models\PcbOrderMeta::updateOrCreate(
+                        ['pcb_order_id' => $order->id, 'meta_key' => 'qty'],
+                        ['meta_value' => (string)$order->order_qty]
+                    );
                 }
 
                 if ($request->has('launch_qty') && intval($order->launch_qty) !== intval($request->launch_qty)) {
@@ -1336,16 +1333,16 @@ namespace App\Http\Controllers;
                 if ($request->has('final_qty') && intval($order->final_qty) !== intval($request->final_qty)) {
                     $oldVal = intval($order->final_qty);
                     $order->final_qty = intval($request->final_qty);
-                    $order->completed_qty = $order->final_qty;
                     $changesLog[] = "Final Qty: {$oldVal} → {$order->final_qty} Pcs";
                 }
 
                 $oldCompletedQty = $order->completed_qty ?? 0;
-                if ($request->has('completed_qty') && !$request->has('final_qty')) {
+                $qtyUpdated = false;
+                if ($request->has('completed_qty')) {
                     $newCompletedQty = intval($request->completed_qty);
                     if ($newCompletedQty !== $oldCompletedQty) {
                         $order->completed_qty = $newCompletedQty;
-                        $order->final_qty = $newCompletedQty;
+                        $qtyUpdated = true;
                         $changesLog[] = "Completed Qty: {$oldCompletedQty} → {$newCompletedQty} Pcs";
                     }
                 }
@@ -1356,6 +1353,10 @@ namespace App\Http\Controllers;
                         $oldVal = intval($order->failed_qty ?? 0);
                         $order->failed_qty = $newFailedQty;
                         $changesLog[] = "Failed Qty: {$oldVal} → {$newFailedQty} Pcs";
+                        PcbOrderMeta::updateOrCreate(
+                            ['pcb_order_id' => $order->id, 'meta_key' => 'failed_qty'],
+                            ['meta_value' => (string)$newFailedQty]
+                        );
                     }
                 }
 
@@ -1383,7 +1384,7 @@ namespace App\Http\Controllers;
                 $adminId = $request->attributes->get('admin_id') ?? $request->admin_id ?? 1;
                 $adminUser = $adminId ? \Illuminate\Support\Facades\DB::table('admins')->where('id', $adminId)->first() : null;
                 $adminName = $adminUser ? $adminUser->name : 'Admin';
-                \App\Services\ComboOrderService::syncComboStatus($order, $order->status_id, (int)$adminId, (string)$adminName);
+                \App\Services\ComboOrderService::syncComboStatus($order, (string)$order->status, (int)$adminId, (string)$adminName);
 
                 // Dispatch order_status_updated email & in-app notification when status changes (previous != new)
                 if ($statusChanged) {
@@ -1900,30 +1901,16 @@ namespace App\Http\Controllers;
                         'jlcpcb_file_key' => ($reqOrderType === 'jlcpcb') ? ($request->input('jlcpcb_file_key') ?: null) : null,
                         'jlcpcb_quotation_snapshot' => ($reqOrderType === 'jlcpcb') ? ($request->input('jlcpcb_quotation_snapshot') ?: null) : null,
                         'pn_number' => $pnNumber,
+                        'status' => $statusName,
                         'status_id' => $statusId,
                         'gerber_file_id' => $gerberFileId,
                         'transaction_id' => $transactionId,
-                        'order_qty' => max(1, (int)($request->input('order_qty') ?: ($request->input('quantity') ?: ($request->input('qty') ?: 1)))),
-                        'layers' => (int)($request->input('layers') ?: ($request->input('layer') ?: 2)),
-                        'mask' => trim((string)($request->input('mask') ?: ($request->input('pcb_color') ?: ($request->input('solder_mask') ?: 'Green')))),
-                        'launch_qty' => (int)$request->input('launch_qty', 0),
-                        'panel_qty' => (int)$request->input('panel_qty', 0),
-                        'ups_qty' => (int)$request->input('ups_qty', 0),
-                        'final_qty' => (int)$request->input('final_qty', (int)$request->input('completed_qty', 0)),
-                        'failed_qty' => (int)$request->input('failed_qty', 0),
                         'unit_price' => $pricing['unit_price'],
                         'order_value' => $pricing['total_amount'],
                         'delivery_date' => $request->input('delivery_date') ?: null,
                         'created_at' => date('Y-m-d H:i:s'),
                         'updated_at' => date('Y-m-d H:i:s')
                     ];
-
-                    if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'status')) {
-                        $orderData['status'] = $statusName;
-                    }
-                    if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'completed_qty')) {
-                        $orderData['completed_qty'] = (int)$request->input('final_qty', (int)$request->input('completed_qty', 0));
-                    }
 
                     if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'board_name')) {
                         $orderData['board_name'] = $request->input('board_name') ?: ($pnNumber ?: 'Standard PCB');
@@ -1940,18 +1927,10 @@ namespace App\Http\Controllers;
 
                     $orderId = \Illuminate\Support\Facades\DB::table('pcb_orders')->insertGetId($orderData);
 
-                    // Store Metadata (excluding redundant core order fields)
+                    // Store Metadata
                     $allParams = $request->all();
-                    $redundantKeys = [
-                        'gerber_file', 'pn_number', 'order_number', 'status', 'status_id',
-                        'order_qty', 'quantity', 'qty', 'layers', 'layer', 'mask', 'pcb_color', 'solder_mask',
-                        'launch_qty', 'panel_qty', 'ups_qty', 'final_qty', 'completed_qty', 'failed_qty',
-                        'unit_price', 'order_value', 'total_amount', 'gerber_file_id', 'transaction_id',
-                        'user_id', 'delivery_date', 'user_email', 'user_mobile', 'customer_name', 'board_name'
-                    ];
-                    foreach ($redundantKeys as $rk) {
-                        unset($allParams[$rk]);
-                    }
+                    unset($allParams['gerber_file']);
+                    unset($allParams['pn_number']);
 
                     if ($gerberFileUrl) {
                         $allParams['gerber_file_url'] = $gerberFileUrl;
@@ -1967,6 +1946,7 @@ namespace App\Http\Controllers;
                     $allParams['subtotal'] = $pricing['subtotal'];
                     $allParams['gst_rate'] = $pricing['gst_rate'];
                     $allParams['gst_amount'] = $pricing['gst_amount'];
+                    $allParams['total_amount'] = $pricing['total_amount'];
                     $allParams['payment_method'] = $payMethod;
 
                     foreach ($allParams as $key => $value) {
@@ -2044,10 +2024,27 @@ namespace App\Http\Controllers;
                     // Replicate order
                     $newOrder = $originalOrder->replicate(['created_at', 'updated_at', 'deleted_at']);
                     $newOrder->order_number = $newOrderNumber;
+                    $newOrder->status = 'Pending';
 
-                    // Assign canonical Pending status_id
-                    $defaultSt = \App\Services\OrderStatusResolver::getDefaultStatus();
-                    $newOrder->status_id = $defaultSt ? $defaultSt->id : 1;
+                    // Find and assign Pending status_id
+                    $statusId = null;
+                    if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses')) {
+                        $st = \Illuminate\Support\Facades\DB::table('pcb_order_statuses')->where('name', 'Pending')->first();
+                        if ($st) {
+                            $statusId = $st->id;
+                        }
+                    } elseif (\Illuminate\Support\Facades\Schema::hasTable('pcb_statuses')) {
+                        $st = \Illuminate\Support\Facades\DB::table('pcb_statuses')->where('name', 'Pending')->first();
+                        if ($st) {
+                            $statusId = $st->id;
+                        }
+                    } elseif (\Illuminate\Support\Facades\Schema::hasTable('statuses')) {
+                        $st = \Illuminate\Support\Facades\DB::table('statuses')->where('name', 'Pending')->first();
+                        if ($st) {
+                            $statusId = $st->id;
+                        }
+                    }
+                    $newOrder->status_id = $statusId;
 
                     if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'is_reorder')) {
                         $newOrder->is_reorder = true;
@@ -2164,23 +2161,25 @@ namespace App\Http\Controllers;
                         $updatedMetas['payment_notes'] = $request->input('payment_notes');
                     }
 
-                    $redundantReorderKeys = [
-                        'film_datetime', 'film_date', 'status', 'order_status', 'pcb_status',
-                        'order_number', 'unit_price', 'order_value', 'total_price', 'total',
-                        'gerber_file_id', 'quantity', 'qty', 'order_qty'
-                    ];
-
                     foreach ($originalOrder->metas as $meta) {
-                        if (in_array($meta->meta_key, $redundantReorderKeys)) {
+                        if (in_array($meta->meta_key, ['film_datetime', 'film_date'])) {
                             continue;
                         }
 
                         $metaValue = $meta->meta_value;
-                        if ($meta->meta_key === 'delivery_date') {
+                        if (in_array($meta->meta_key, ['status', 'order_status', 'pcb_status'])) {
+                            $hasStatusMeta = true;
+                            $metaValue = 'Pending';
+                        } elseif ($meta->meta_key === 'quantity') {
+                            $hasQtyMeta = true;
+                            $metaValue = (string) $newOrder->order_qty;
+                        } elseif ($meta->meta_key === 'delivery_date') {
                             $hasDeliveryDateMeta = true;
                             if ($newOrder->delivery_date) {
                                 $metaValue = (string) $newOrder->delivery_date;
                             }
+                        } elseif (in_array($meta->meta_key, ['order_value', 'total_price', 'total'])) {
+                            $metaValue = (string) $newOrder->order_value;
                         } elseif (array_key_exists($meta->meta_key, $updatedMetas)) {
                             $metaValue = (string) $updatedMetas[$meta->meta_key];
                             unset($updatedMetas[$meta->meta_key]);
@@ -2199,6 +2198,22 @@ namespace App\Http\Controllers;
                             'pcb_order_id' => $newOrder->id,
                             'meta_key' => $uKey,
                             'meta_value' => (string) $uVal,
+                        ]);
+                    }
+
+                    if (!$hasStatusMeta) {
+                        PcbOrderMeta::create([
+                            'pcb_order_id' => $newOrder->id,
+                            'meta_key' => 'status',
+                            'meta_value' => 'Pending',
+                        ]);
+                    }
+
+                    if (!$hasQtyMeta && $newOrder->order_qty) {
+                        PcbOrderMeta::create([
+                            'pcb_order_id' => $newOrder->id,
+                            'meta_key' => 'quantity',
+                            'meta_value' => (string) $newOrder->order_qty,
                         ]);
                     }
 

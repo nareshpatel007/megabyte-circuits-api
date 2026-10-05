@@ -60,19 +60,23 @@ class DailyReportService
         // Query status histories / movements today
         $statusMovements = [];
         if (Schema::hasTable('pcb_order_status_histories')) {
+            $selectCols = [
+                'pcb_order_status_histories.*',
+                'pcb_orders.order_number',
+                'admins.name as admin_name',
+            ];
+            if (Schema::hasColumn('pcb_orders', 'customer_name')) {
+                $selectCols[] = 'pcb_orders.customer_name';
+            }
+            if (Schema::hasColumn('pcb_orders', 'user_email')) {
+                $selectCols[] = 'pcb_orders.user_email';
+            }
+
             $statusMovements = DB::table('pcb_order_status_histories')
                 ->join('pcb_orders', 'pcb_order_status_histories.pcb_order_id', '=', 'pcb_orders.id')
                 ->leftJoin('admins', 'pcb_order_status_histories.admin_id', '=', 'admins.id')
-                ->leftJoin('users', 'pcb_orders.user_id', '=', 'users.id')
                 ->whereBetween('pcb_order_status_histories.created_at', [$start, $end])
-                ->select([
-                    'pcb_order_status_histories.*',
-                    'pcb_orders.order_number',
-                    'admins.name as admin_name',
-                    'users.name as client_name',
-                    'users.company_name as client_company',
-                    'users.email as client_email',
-                ])
+                ->select($selectCols)
                 ->orderBy('pcb_order_status_histories.id', 'desc')
                 ->get();
         }
@@ -82,50 +86,41 @@ class DailyReportService
         $newOrdersCount = $newOrders->count();
         
         // Completed orders today
-        $completedOrders = PcbOrder::with(['user', 'statusDetails'])
-            ->whereHas('statusDetails', function ($sq) {
-                $sq->whereIn(DB::raw('LOWER(name)'), ['completed', 'delivered', 'order completed']);
-            })
+        $completedOrders = PcbOrder::with('user')
+            ->whereIn(DB::raw('LOWER(status)'), ['completed', 'delivered', 'order completed'])
             ->whereBetween('updated_at', [$start, $end])
             ->get();
         $completedCount = $completedOrders->count();
 
         // Cancelled orders today
-        $cancelledOrders = PcbOrder::with(['user', 'statusDetails'])
-            ->whereHas('statusDetails', function ($sq) {
-                $sq->whereIn(DB::raw('LOWER(name)'), ['cancelled', 'canceled', 'rejected']);
-            })
+        $cancelledOrders = PcbOrder::with('user')
+            ->whereIn(DB::raw('LOWER(status)'), ['cancelled', 'canceled', 'rejected'])
             ->whereBetween('updated_at', [$start, $end])
             ->get();
         $cancelledCount = $cancelledOrders->count();
 
         // Production orders currently active
-        $productionOrders = PcbOrder::with(['user', 'statusDetails'])
-            ->whereHas('statusDetails', function ($sq) {
-                $sq->whereIn(DB::raw('LOWER(name)'), ['in production', 'processing', 'manufacturing', 'production', 'traveler']);
-            })
+        $productionOrders = PcbOrder::with('user')
+            ->whereIn(DB::raw('LOWER(status)'), ['in production', 'processing', 'manufacturing', 'production', 'traveler'])
             ->orderBy('id', 'desc')
             ->get();
         $productionCount = $productionOrders->count();
 
         // Pending orders currently active
-        $pendingOrders = PcbOrder::with(['user', 'statusDetails'])
+        $pendingOrders = PcbOrder::with('user')
             ->where(function($q) {
-                $q->whereNull('status_id')
-                  ->orWhereHas('statusDetails', function ($sq) {
-                      $sq->whereIn(DB::raw('LOWER(name)'), ['pending', 'move']);
-                  });
+                $q->whereNull('status')
+                  ->orWhere(DB::raw('LOWER(status)'), 'pending')
+                  ->orWhere(DB::raw('LOWER(status)'), 'move');
             })
             ->orderBy('id', 'desc')
             ->get();
         $pendingCount = $pendingOrders->count();
 
         // Film not applied alerts
-        $filmNotAppliedOrders = PcbOrder::with(['user', 'statusDetails'])
+        $filmNotAppliedOrders = PcbOrder::with('user')
             ->where('film_applied', '!=', 1)
-            ->whereHas('statusDetails', function ($sq) {
-                $sq->whereIn(DB::raw('LOWER(name)'), ['in production', 'processing', 'manufacturing', 'production', 'traveler']);
-            })
+            ->whereIn(DB::raw('LOWER(status)'), ['in production', 'processing', 'manufacturing', 'production', 'traveler'])
             ->get();
 
         // Total order value & average order value
@@ -158,7 +153,7 @@ class DailyReportService
             'headers' => ['Order #', 'Customer', 'Status Name / Remark', 'Changed At'],
             'rows' => collect($statusMovements)->map(function (object $m) {
                 $m = (object)$m;
-                $cName = $m->client_company ?: ($m->client_name ?: (strtok($m->client_email ?? '', '@') ?: 'Valued Customer'));
+                $cName = $m->customer_name ?: (strtok($m->user_email ?? '', '@') ?: 'Valued Customer');
                 return [
                     "<strong>" . htmlspecialchars($m->order_number ?? "ORD-{$m->pcb_order_id}") . "</strong>",
                     htmlspecialchars($cName),

@@ -16,7 +16,6 @@ class PcbOrderStatusHistory extends Model
 
     protected $fillable = [
         'pcb_order_id',
-        'status_id',
         'admin_id',
         'status_name',
         'remark',
@@ -28,29 +27,8 @@ class PcbOrderStatusHistory extends Model
         return $this->belongsTo(PcbOrder::class, 'pcb_order_id');
     }
 
-    public function statusDetails()
-    {
-        return $this->belongsTo(Status::class, 'status_id');
-    }
-
     public function admin()
     {
         return $this->belongsTo(PcbUser::class, 'admin_id');
-    }
-
-    public function getStatusNameAttribute($value)
-    {
-        if ($this->relationLoaded('statusDetails') && $this->getRelation('statusDetails')) {
-            return $this->getRelation('statusDetails')->name;
-        }
-
-        if (!empty($this->status_id)) {
-            $st = \App\Services\OrderStatusResolver::resolve($this->status_id);
-            if ($st) {
-                return $st->name;
-            }
-        }
-
-        return $value;
     }
 }
