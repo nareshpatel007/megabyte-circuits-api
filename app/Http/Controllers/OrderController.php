@@ -299,30 +299,52 @@ namespace App\Http\Controllers;
                     $withRelations[] = 'gerberFile';
                 }
 
-                $query = PcbOrder::with($withRelations);
+                $statusParam = $request->filled('status') ? trim($request->input('status')) : null;
+                $isDeletedFilter = $statusParam && in_array(strtolower($statusParam), ['deleted', 'trash', 'trashed']);
+                $isSearchActive = $request->filled('search');
+
+                if ($isDeletedFilter) {
+                    $query = PcbOrder::onlyTrashed()->with($withRelations);
+                } elseif ($isSearchActive) {
+                    $query = PcbOrder::withTrashed()->with($withRelations);
+                } else {
+                    $query = PcbOrder::with($withRelations);
+                }
 
                 // Status Filter (Main order status only)
-                if ($request->filled('status')) {
+                if ($request->filled('status') && !$isDeletedFilter) {
                     $statusParam = trim($request->input('status'));
                     if (in_array(strtolower($statusParam), ['in production', 'in_production'])) {
                         $excluded = \App\Services\OrderStatusResolver::NON_PRODUCTION_STATUSES;
-                        $query->whereNotNull('pcb_orders.status')
-                              ->whereRaw("TRIM(pcb_orders.status) != ''")
-                              ->whereNotIn(\Illuminate\Support\Facades\DB::raw('LOWER(TRIM(pcb_orders.status))'), $excluded);
+                        $query->where(function ($q) use ($excluded, $isSearchActive) {
+                            $q->where(function ($sub) use ($excluded) {
+                                $sub->whereNotNull('pcb_orders.status')
+                                    ->whereRaw("TRIM(pcb_orders.status) != ''")
+                                    ->whereNotIn(\Illuminate\Support\Facades\DB::raw('LOWER(TRIM(pcb_orders.status))'), $excluded);
+                            });
+                            if ($isSearchActive) {
+                                $q->orWhereNotNull('pcb_orders.deleted_at');
+                            }
+                        });
                     } else if (strtolower($statusParam) !== 'all') {
                         $statusLower = strtolower($statusParam);
-                        $query->where(function ($q) use ($statusLower) {
+                        $query->where(function ($q) use ($statusLower, $isSearchActive) {
                             $q->where(function ($sq) use ($statusLower) {
-                                $sq->whereRaw('LOWER(TRIM(pcb_orders.status)) = ?', [$statusLower]);
+                                $sq->where(function ($subQ) use ($statusLower) {
+                                    $subQ->whereRaw('LOWER(TRIM(pcb_orders.status)) = ?', [$statusLower]);
+                                    if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses') || \Illuminate\Support\Facades\Schema::hasTable('pcb_statuses')) {
+                                        $subQ->whereDoesntHave('statusDetails');
+                                    }
+                                });
                                 if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses') || \Illuminate\Support\Facades\Schema::hasTable('pcb_statuses')) {
-                                    $sq->whereDoesntHave('statusDetails');
+                                    $sq->orWhereHas('statusDetails', function ($stq) use ($statusLower) {
+                                        $stq->whereRaw('LOWER(TRIM(name)) = ?', [$statusLower])
+                                            ->orWhereRaw('LOWER(TRIM(slug)) = ?', [$statusLower]);
+                                    });
                                 }
                             });
-                            if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_statuses') || \Illuminate\Support\Facades\Schema::hasTable('pcb_statuses')) {
-                                $q->orWhereHas('statusDetails', function ($stq) use ($statusLower) {
-                                    $stq->whereRaw('LOWER(TRIM(name)) = ?', [$statusLower])
-                                        ->orWhereRaw('LOWER(TRIM(slug)) = ?', [$statusLower]);
-                                });
+                            if ($isSearchActive) {
+                                $q->orWhereNotNull('pcb_orders.deleted_at');
                             }
                         });
                     }
@@ -430,7 +452,7 @@ namespace App\Http\Controllers;
                 }
 
                 // Calculate total counts and summary stats before applying sorting & pagination limit/offset
-                $totalRecords = PcbOrder::count();
+                $totalRecords = $isDeletedFilter ? PcbOrder::onlyTrashed()->count() : PcbOrder::count();
                 $totalFiltered = (clone $query)->count();
 
                 // Compute aggregated summary stats across ALL filtered orders matching the query & status
@@ -532,10 +554,14 @@ namespace App\Http\Controllers;
                 }
 
                 $orders->transform(function ($order) {
+                    $order->is_deleted = $order->trashed();
+                    if ($order->trashed()) {
+                        $order->deleted_at = $order->deleted_at ? $order->deleted_at->toDateTimeString() : null;
+                    }
                     if (empty($order->status) && isset($order->statusDetails) && !empty($order->statusDetails->name)) {
                         $order->status = $order->statusDetails->name;
                     } elseif (empty($order->status)) {
-                        $order->status = 'Pending';
+                        $order->status = $order->trashed() ? 'Deleted' : 'Pending';
                     }
                     if (empty($order->pn_number)) {
                         $gf = $order->gerberFile;
@@ -606,7 +632,7 @@ namespace App\Http\Controllers;
                 $withRelations[] = 'gerberFile';
             }
 
-            $orderQuery = PcbOrder::with($withRelations)
+            $orderQuery = PcbOrder::withTrashed()->with($withRelations)
                 ->leftJoin('user_addresses as ship', 'pcb_orders.shipping_address_id', '=', 'ship.id')
                 ->leftJoin('user_addresses as bill', 'pcb_orders.billing_address_id', '=', 'bill.id')
                 ->where(function ($q) use ($id) {
@@ -641,6 +667,10 @@ namespace App\Http\Controllers;
                 );
 
             $order = $orderQuery->firstOrFail();
+            $order->is_deleted = $order->trashed();
+            if ($order->trashed()) {
+                $order->deleted_at = $order->deleted_at ? $order->deleted_at->toDateTimeString() : null;
+            }
             
             // Also load internal notes if table exists
             if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_notes')) {
@@ -3149,9 +3179,150 @@ namespace App\Http\Controllers;
                 ]);
 
             } catch (\Throwable $th) {
+                \Illuminate\Support\Facades\DB::rollBack();
                 return response()->json([
                     'success' => false,
                     'message' => 'Error deleting order: ' . $th->getMessage()
+                ], 500);
+            }
+        }
+
+        public function restore(Request $request, $id)
+        {
+            $adminId = $request->attributes->get('admin_id');
+            $admin = $adminId ? (\Illuminate\Support\Facades\DB::table('admins')->where('id', $adminId)->first() ?: \Illuminate\Support\Facades\DB::table('users')->where('id', $adminId)->first()) : null;
+
+            if (!$admin) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthenticated or invalid admin session.'
+                ], 401);
+            }
+
+            $permissions = \App\Http\Controllers\Mobile\MobileAuthController::fetchPermissionsForAdmin($admin);
+
+            if (!in_array('*', $permissions) && !in_array('orders.delete', $permissions) && !in_array('orders.manage', $permissions) && !in_array('orders.edit', $permissions)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized access: You do not have permission to recover orders.'
+                ], 403);
+            }
+
+            try {
+                $order = PcbOrder::withTrashed()->where(function ($q) use ($id) {
+                    if (is_numeric($id)) {
+                        $q->where('id', $id)->orWhere('order_number', $id);
+                    } else {
+                        $q->where('order_number', $id);
+                    }
+                })->first();
+
+                if (!$order) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Order not found.'
+                    ], 404);
+                }
+
+                if (!$order->trashed()) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Order is not deleted.'
+                    ], 400);
+                }
+
+                $orderNumber = $order->order_number;
+                $orderId = $order->id;
+
+                \Illuminate\Support\Facades\DB::beginTransaction();
+
+                // Restore soft-deleted order (clears deleted_at)
+                $order->restore();
+
+                // Restore associated records that were soft-deleted
+                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_meta') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_meta', 'deleted_at')) {
+                    \Illuminate\Support\Facades\DB::table('pcb_order_meta')
+                        ->where('pcb_order_id', $orderId)
+                        ->whereNotNull('deleted_at')
+                        ->update(['deleted_at' => null]);
+                }
+
+                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_status_histories') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_status_histories', 'deleted_at')) {
+                    \Illuminate\Support\Facades\DB::table('pcb_order_status_histories')
+                        ->where('pcb_order_id', $orderId)
+                        ->whereNotNull('deleted_at')
+                        ->update(['deleted_at' => null]);
+                }
+
+                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_notes') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_notes', 'deleted_at')) {
+                    \Illuminate\Support\Facades\DB::table('pcb_order_notes')
+                        ->where('pcb_order_id', $orderId)
+                        ->whereNotNull('deleted_at')
+                        ->update(['deleted_at' => null]);
+                }
+
+                if (\Illuminate\Support\Facades\Schema::hasTable('job_card_documents') && \Illuminate\Support\Facades\Schema::hasColumn('job_card_documents', 'deleted_at')) {
+                    \Illuminate\Support\Facades\DB::table('job_card_documents')
+                        ->where('pcb_order_id', $orderId)
+                        ->whereNotNull('deleted_at')
+                        ->update(['deleted_at' => null]);
+                }
+
+                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_combos') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_combos', 'deleted_at')) {
+                    \Illuminate\Support\Facades\DB::table('pcb_order_combos')
+                        ->where(function ($q) use ($orderId) {
+                            $q->where('parent_order_id', $orderId)
+                              ->orWhere('combo_order_id', $orderId);
+                        })
+                        ->whereNotNull('deleted_at')
+                        ->update(['deleted_at' => null]);
+                }
+
+                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_old_orders') && \Illuminate\Support\Facades\Schema::hasColumn('pcb_order_old_orders', 'deleted_at')) {
+                    \Illuminate\Support\Facades\DB::table('pcb_order_old_orders')
+                        ->where(function ($q) use ($orderId) {
+                            $q->where('order_id', $orderId)
+                              ->orWhere('old_order_id', $orderId);
+                        })
+                        ->whereNotNull('deleted_at')
+                        ->update(['deleted_at' => null]);
+                }
+
+                if (!empty($order->transaction_id) && \Illuminate\Support\Facades\Schema::hasTable('payment_transactions') && \Illuminate\Support\Facades\Schema::hasColumn('payment_transactions', 'deleted_at')) {
+                    \Illuminate\Support\Facades\DB::table('payment_transactions')
+                        ->where('id', $order->transaction_id)
+                        ->whereNotNull('deleted_at')
+                        ->update(['deleted_at' => null]);
+                }
+
+                // Audit Log in pcb_order_logs table
+                if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_logs')) {
+                    $adminName = $request->attributes->get('admin_name') ?: ($admin->name ?? "Admin #{$adminId}");
+                    \Illuminate\Support\Facades\DB::table('pcb_order_logs')->insert([
+                        'pcb_order_id' => $orderId,
+                        'order_number' => $orderNumber,
+                        'admin_id'     => $adminId,
+                        'action'       => 'Order Restored',
+                        'description'  => "Order #{$orderNumber} and its associated metadata, payments, status histories, notes, and documents were recovered/restored by {$adminName}",
+                        'created_at'   => date('Y-m-d H:i:s'),
+                        'updated_at'   => date('Y-m-d H:i:s'),
+                    ]);
+                }
+
+                \Illuminate\Support\Facades\DB::commit();
+
+                return response()->json([
+                    'success' => true,
+                    'status' => true,
+                    'message' => "Order #{$orderNumber} recovered successfully.",
+                    'data' => $order->fresh()
+                ]);
+
+            } catch (\Throwable $th) {
+                \Illuminate\Support\Facades\DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Error recovering order: ' . $th->getMessage()
                 ], 500);
             }
         }

@@ -288,7 +288,7 @@ class CheckoutController extends Controller
             $razorpayPaymentId = $input['razorpay_payment_id'] ?? null;
             $razorpayOrderId = $input['razorpay_order_id'] ?? null;
             $razorpaySignature = $input['razorpay_signature'] ?? null;
-            
+
             $userId = $this->resolveUserId($request);
             $shippingAddressId = $input['shipping_address_id'] ?? ($input['address_id'] ?? null);
             $billingAddressId = $input['billing_address_id'] ?? $shippingAddressId;
@@ -349,7 +349,7 @@ class CheckoutController extends Controller
             // 1. Audit Log Payment Transaction Record
             $totalAmount = $input['total_amount'] ?? array_sum(array_column($items, 'price'));
             $transactionNumber = 'TXN_' . strtoupper(Str::random(10));
-            
+
             $transactionId = DB::table('payment_transactions')->insertGetId([
                 'user_id' => $userId,
                 'transaction_number' => $transactionNumber,
@@ -414,20 +414,21 @@ class CheckoutController extends Controller
                 $gerberFileId = $item['gerber_file_id'] ?? null;
                 $previewData = $item['gerberPreview'] ?? $item['preview_data'] ?? null;
 
-                $resolvedGerberFileName = !empty($item['gerberFileName']) 
-                    ? trim($item['gerberFileName']) 
-                    : (!empty($item['gerber_file_name']) 
-                        ? trim($item['gerber_file_name']) 
-                        : (!empty($item['pn_number']) 
-                            ? trim($item['pn_number']) 
-                            : (!empty($item['boardName']) && $item['boardName'] !== 'Standard PCB' && $item['boardName'] !== 'PCB_Board' 
-                                ? trim($item['boardName']) 
+                $resolvedGerberFileName = !empty($item['gerberFileName'])
+                    ? trim($item['gerberFileName'])
+                    : (!empty($item['gerber_file_name'])
+                        ? trim($item['gerber_file_name'])
+                        : (!empty($item['pn_number'])
+                            ? trim($item['pn_number'])
+                            : (!empty($item['boardName']) && $item['boardName'] !== 'Standard PCB' && $item['boardName'] !== 'PCB_Board'
+                                ? trim($item['boardName'])
                                 : null)));
 
                 if (!$resolvedGerberFileName && $gerberFileId) {
                     try {
                         $resolvedGerberFileName = DB::table('gerber_files')->where('id', $gerberFileId)->value('original_name');
-                    } catch (\Throwable $e) {}
+                    } catch (\Throwable $e) {
+                    }
                 }
 
                 $boardName = $resolvedGerberFileName ?: ($item['boardName'] ?? ($item['productType'] === 'stencil' ? 'SMT Stencil' : 'Standard PCB'));
@@ -435,12 +436,12 @@ class CheckoutController extends Controller
                 $itemQty = $item['qty'] ?? 1;
                 $unitPrice = $itemQty > 0 ? round($itemPrice / $itemQty, 2) : $itemPrice;
 
-                $pnNumber = !empty($item['pn_number']) 
-                    ? trim($item['pn_number']) 
-                    : (!empty($item['part_number']) 
-                        ? trim($item['part_number']) 
-                        : ($resolvedGerberFileName ?: (!empty($item['boardName']) && $item['boardName'] !== 'Standard PCB' && $item['boardName'] !== 'SMT Stencil' 
-                            ? trim($item['boardName']) 
+                $pnNumber = !empty($item['pn_number'])
+                    ? trim($item['pn_number'])
+                    : (!empty($item['part_number'])
+                        ? trim($item['part_number'])
+                        : ($resolvedGerberFileName ?: (!empty($item['boardName']) && $item['boardName'] !== 'Standard PCB' && $item['boardName'] !== 'SMT Stencil'
+                            ? trim($item['boardName'])
                             : null)));
 
                 // Resolve Gerber File Entry (only link if real gerber file was uploaded)
@@ -474,7 +475,6 @@ class CheckoutController extends Controller
                     'order_type' => $orderType,
                     'quotation_source' => $quotationSource,
                     'jlcpcb_file_key' => $jlcFileKey,
-                    'jlcpcb_quotation_snapshot' => $jlcSnapshotJson,
                     'user_id' => $userId,
                     'transaction_id' => $transactionId,
                     'shipping_address_id' => $shippingAddressId,
@@ -566,7 +566,6 @@ class CheckoutController extends Controller
                         'quotation_source' => $quotationSource,
                         'jlcpcb_file_key' => $jlcFileKey,
                         'jlcpcb_price' => $item['jlcpcb_price'] ?? null,
-                        'jlcpcb_quotation_snapshot' => $jlcSnapshotJson,
                         'product_type' => $productType,
                         'base_material' => $baseMat,
                         'material_type' => $item['materialType'] ?? ($baseMat === "Flex" ? "Polyimide (PI)" : ($baseMat === "Rogers" ? "RO4350B(Dk=3.48,Df=0.0037)" : ($baseMat === "PTFE Teflon" ? "ZYF300CA-P(Dk=3.0,Df=0.0016)" : "FR4-TG135"))),
@@ -732,7 +731,6 @@ class CheckoutController extends Controller
                 'transaction_id' => $transactionId,
                 'transaction_number' => $transactionNumber
             ]);
-
         } catch (\Throwable $th) {
             DB::rollBack();
             return response()->json([

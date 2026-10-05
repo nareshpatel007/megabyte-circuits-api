@@ -355,32 +355,18 @@ class JlcpcbService
                 if ($code === 200) {
                     $rawResultData = $result['data'] ?? [];
 
-                    // 1. Determine base USD PCB manufacturing cost & actual API freight/shipping cost
-                    $baseUsd = 0.0;
+                    // 1. Determine base USD PCB manufacturing cost via JlcpcbQuoteNormalizer & actual API freight/shipping cost
+                    $normalizer = new JlcpcbQuoteNormalizer();
+                    $normalizedQuote = $normalizer->normalize($rawResultData, $payload);
+                    $baseUsd = (float)$normalizedQuote['basePcbPrice'];
+                    $jlcWeightKg = $normalizedQuote['weight'];
+
+                    if ($baseUsd <= 0.0) {
+                        $baseUsd = (float)$normalizedQuote['providerTotalFee'];
+                    }
+
                     $apiShippingUsd = 0.0;
-                    $jlcWeightKg = null;
-
                     if (is_array($rawResultData)) {
-                        if (isset($rawResultData['pcbCostInfo']['weight']) && floatval($rawResultData['pcbCostInfo']['weight']) > 0) {
-                            $jlcWeightKg = floatval($rawResultData['pcbCostInfo']['weight']);
-                        } elseif (isset($rawResultData['weight']) && floatval($rawResultData['weight']) > 0) {
-                            $w = floatval($rawResultData['weight']);
-                            $jlcWeightKg = $w > 10 ? round($w / 1000.0, 4) : round($w, 4);
-                        } elseif (isset($rawResultData['orderTotalWeight']) && floatval($rawResultData['orderTotalWeight']) > 0) {
-                            $w = floatval($rawResultData['orderTotalWeight']);
-                            $jlcWeightKg = $w > 10 ? round($w / 1000.0, 4) : round($w, 4);
-                        }
-
-                        if (isset($rawResultData['priceWithoutFreight']) && floatval($rawResultData['priceWithoutFreight']) > 0) {
-                            $baseUsd = floatval($rawResultData['priceWithoutFreight']);
-                        } elseif (isset($rawResultData['pcbCostInfo']['totalFee']) && floatval($rawResultData['pcbCostInfo']['totalFee']) > 0) {
-                            $baseUsd = floatval($rawResultData['pcbCostInfo']['totalFee']);
-                        } elseif (isset($rawResultData['totalCost']) && floatval($rawResultData['totalCost']) > 0) {
-                            $baseUsd = floatval($rawResultData['totalCost']);
-                        } elseif (isset($rawResultData['pcbPrice']) && floatval($rawResultData['pcbPrice']) > 0) {
-                            $baseUsd = floatval($rawResultData['pcbPrice']);
-                        }
-
                         // Determine actual shipping fee returned by JLCPCB API
                         if (!empty($rawResultData['shipList']) && is_array($rawResultData['shipList'])) {
                             // 1. Look specifically for UPS option ("UPS EXPRESS" or "UPS Worldwide Express Saver")
@@ -526,8 +512,24 @@ class JlcpcbService
                         ];
                     }
 
-                    // Audit log for backend debugging
-                    Log::info("JLCPCB Quotation Calculated Successfully [{$ipStr}]", [
+                    // Audit log for backend debugging & structured quotation calculation log
+                    $cpfFee = 0.0;
+                    foreach ($normalizedQuote['pcbCharges'] as $chargeItem) {
+                        if ($chargeItem['code'] === 'confirm_production_file') {
+                            $cpfFee = (float)$chargeItem['amount'];
+                            break;
+                        }
+                    }
+
+                    Log::info("JLCPCB Quote Calculation Breakdown [{$ipStr}]", [
+                        'raw_provider_total_fee' => $normalizedQuote['providerTotalFee'],
+                        'raw_individual_fees' => $rawResultData['pcbCostInfo'] ?? [],
+                        'normalized_charge_list' => $normalizedQuote['pcbCharges'],
+                        'confirm_production_file_fee' => $cpfFee,
+                        'base_pcb_price' => round($baseUsd, 2),
+                        'build_time_surcharge' => (float)($payload['achievePrice'] ?? 0),
+                        'selected_shipping' => $apiShippingUsd,
+                        'final_provider_subtotal' => round($baseUsd + $apiShippingUsd, 2),
                         'fileKey' => $payload['fileKey'] ?? '',
                         'quantity' => $quantity,
                         'layers' => $payload['pcbParam']['layer'] ?? 4,
@@ -545,6 +547,12 @@ class JlcpcbService
                         'currency' => 'INR',
                         'quantity' => $quantity,
                         'layers' => $payload['pcbParam']['layer'] ?? 4,
+
+                        // Normalized JLCPCB Quote Object
+                        'normalized_quote' => $normalizedQuote,
+                        'calculated_price_usd' => round($baseUsd, 2),
+                        'provider_total_fee' => $normalizedQuote['providerTotalFee'],
+                        'provider_price_without_freight' => $normalizedQuote['providerPriceWithoutFreight'],
 
                         // Exchange rate & dollar conversion
                         'dollar_conversion_rate' => $exchangeRate,
@@ -623,6 +631,9 @@ class JlcpcbService
                             'currency' => 'INR',
                             'base_usd' => round($baseUsd, 2),
                             'pcb_purchase_price_usd' => round($baseUsd, 2),
+                            'calculated_price_usd' => round($baseUsd, 2),
+                            'provider_total_fee' => $normalizedQuote['providerTotalFee'],
+                            'normalized_quote' => $normalizedQuote,
                             'base_inr' => $calcBreakdown['import_purchase_value'],
                             'dollar_conversion_rate' => $exchangeRate,
                             'usd_to_inr_rate' => $exchangeRate,
@@ -822,6 +833,37 @@ class JlcpcbService
             } else {
                 unset($pcbParam['goldThickness']);
             }
+        }
+
+        // 8. Confirm Production File (CPF): Map CPF to serviceConfigVos if requested
+        $hasCpf = false;
+        if (!empty($pcbParam['serviceConfigVos']) && is_array($pcbParam['serviceConfigVos'])) {
+            foreach ($pcbParam['serviceConfigVos'] as $vo) {
+                if (($vo['serviceConfigCode'] ?? '') === 'CPF') {
+                    $hasCpf = true;
+                    break;
+                }
+            }
+        }
+        $confirmRequested = false;
+        $reqCpf = $input['confirmFile'] 
+            ?? ($input['confirm_file'] 
+            ?? ($pcbParam['confirmFile'] 
+            ?? ($pcbParam['confirm_file'] ?? null)));
+        if ($reqCpf && strtolower(trim((string)$reqCpf)) === 'yes') {
+            $confirmRequested = true;
+        } elseif (isset($pcbParam['autoConfirmProductionFile']) && $pcbParam['autoConfirmProductionFile'] === false) {
+            $confirmRequested = true;
+        }
+
+        if (!$hasCpf && $confirmRequested) {
+            if (!isset($pcbParam['serviceConfigVos']) || !is_array($pcbParam['serviceConfigVos'])) {
+                $pcbParam['serviceConfigVos'] = [];
+            }
+            $pcbParam['serviceConfigVos'][] = [
+                'serviceConfigCode' => 'CPF',
+                'configOptionShow' => 'Yes'
+            ];
         }
 
         return [
