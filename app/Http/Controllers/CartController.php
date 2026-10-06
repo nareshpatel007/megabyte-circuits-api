@@ -133,6 +133,18 @@ class CartController extends Controller
 
             if ($cart) {
                 $sessionId = $cart->session_id ?: $canonicalSessionId;
+            } else if ($sessionId && $sessionId !== $canonicalSessionId) {
+                // If user doesn't have a cart yet but provided a guest session ID, look up guest cart and link it
+                $guestCart = Cart::where('session_id', $sessionId)->first();
+                if ($guestCart) {
+                    $guestCart->user_id = $userId;
+                    $guestCart->session_id = $canonicalSessionId;
+                    $guestCart->save();
+                    $cart = $guestCart;
+                    $sessionId = $canonicalSessionId;
+                } else {
+                    $sessionId = $canonicalSessionId;
+                }
             } else {
                 $sessionId = $canonicalSessionId;
             }
@@ -176,6 +188,7 @@ class CartController extends Controller
     {
         $userId = $this->resolveUserId($request);
         $guestSessionId = $request->input('guest_session_id') ?? $request->input('session_id');
+        $inputItems = $request->input('items', []);
 
         if (!$userId) {
             return response()->json([
@@ -204,6 +217,11 @@ class CartController extends Controller
             ? (json_decode($guestCart->cart_data, true) ?: [])
             : [];
 
+        // If guest cart in DB was empty or not found, fall back to input items passed from localStorage
+        if (empty($guestItems) && !empty($inputItems) && is_array($inputItems)) {
+            $guestItems = $inputItems;
+        }
+
         // Merge guest items into user items
         $mergedItems = $userItems;
         if (!empty($guestItems)) {
@@ -223,6 +241,23 @@ class CartController extends Controller
                     if ($gId) {
                         $existingItemIds[$gId] = count($mergedItems) - 1;
                     }
+                }
+            }
+        }
+
+        // Also if input items were passed and have items not already in mergedItems, include them
+        if (!empty($inputItems) && is_array($inputItems) && $inputItems !== $guestItems) {
+            $existingItemIds = [];
+            foreach ($mergedItems as $idx => $item) {
+                if (!empty($item['id'])) {
+                    $existingItemIds[strval($item['id'])] = $idx;
+                }
+            }
+            foreach ($inputItems as $inItem) {
+                $inId = !empty($inItem['id']) ? strval($inItem['id']) : null;
+                if ($inId && !isset($existingItemIds[$inId])) {
+                    $mergedItems[] = $inItem;
+                    $existingItemIds[$inId] = count($mergedItems) - 1;
                 }
             }
         }

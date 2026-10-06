@@ -108,6 +108,18 @@ class OrderPricingService
 
         $subtotal = round(max(0, $basePcbAmount), 2);
 
+        // Delivery charge calculation
+        $deliveryCharge = 0.0;
+        if (isset($params['delivery_charge']) && is_numeric($params['delivery_charge'])) {
+            $deliveryCharge = max(0.0, floatval($params['delivery_charge']));
+        } elseif (isset($params['shipping_charge']) && is_numeric($params['shipping_charge'])) {
+            $deliveryCharge = max(0.0, floatval($params['shipping_charge']));
+        }
+        $deliveryCharge = round($deliveryCharge, 2);
+
+        // Taxable amount includes base PCB subtotal + delivery charge (matching cart calculation)
+        $taxableAmount = round($subtotal + $deliveryCharge, 2);
+
         // GST calculation
         $gstSettings = static::getGstSettings();
         $requestedGstRate = isset($params['gst_rate']) && is_numeric($params['gst_rate'])
@@ -119,8 +131,8 @@ class OrderPricingService
             $requestedGstRate = $gstSettings['active_rate'];
         }
 
-        $gstAmount = round($subtotal * ($requestedGstRate / 100.0), 2);
-        $totalAmount = round($subtotal + $gstAmount, 2);
+        $gstAmount = round($taxableAmount * ($requestedGstRate / 100.0), 2);
+        $totalAmount = round($taxableAmount + $gstAmount, 2);
         $unitPrice = $qty > 0 ? round($subtotal / $qty, 2) : 0.0;
 
         return [
@@ -131,6 +143,8 @@ class OrderPricingService
             'area_per_board_sqm' => round($areaPerBoardSqm, 6),
             'total_area_sqm' => round($totalAreaSqm, 6),
             'subtotal' => $subtotal,
+            'delivery_charge' => $deliveryCharge,
+            'taxable_amount' => $taxableAmount,
             'gst_rate' => $requestedGstRate,
             'gst_amount' => $gstAmount,
             'total_amount' => $totalAmount,

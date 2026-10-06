@@ -307,7 +307,6 @@ class CheckoutController extends Controller
 
     public static function resolveAndValidateDeliveryMethod($item): ?string
     {
-        $productType = $item['productType'] ?? ($item['product_type'] ?? 'pcb');
         $raw = $item['delivery_method']
             ?? $item['deliveryMethod']
             ?? $item['shippingOptionKey']
@@ -317,11 +316,8 @@ class CheckoutController extends Controller
             ?? $item['shippingMethod']
             ?? null;
 
-        if (empty($raw)) {
-            if ($productType === 'part') {
-                return null;
-            }
-            return 'standard';
+        if (empty($raw) || strtolower(trim((string)$raw)) === 'none' || strtolower(trim((string)$raw)) === 'null') {
+            return null;
         }
 
         $clean = strtolower(trim((string)$raw));
@@ -380,13 +376,15 @@ class CheckoutController extends Controller
 
                 $productType = $item['productType'] ?? ($item['product_type'] ?? 'pcb');
                 if ($productType !== 'part') {
-                    $resolvedMethod = self::resolveAndValidateDeliveryMethod($item);
-                    if (!$resolvedMethod) {
-                        $rawMethod = $item['delivery_method'] ?? $item['deliveryMethod'] ?? $item['shippingOption'] ?? $item['shipping_option'] ?? 'Unknown';
-                        return response()->json([
-                            'status' => false,
-                            'message' => "Invalid or deactivated delivery method selected: '{$rawMethod}'"
-                        ], 400);
+                    $rawMethod = $item['delivery_method'] ?? $item['deliveryMethod'] ?? $item['shippingOptionKey'] ?? $item['shipping_option_key'] ?? $item['shipping_option'] ?? $item['shippingOption'] ?? $item['shippingMethod'] ?? null;
+                    if (!empty($rawMethod) && strtolower(trim((string)$rawMethod)) !== 'none' && strtolower(trim((string)$rawMethod)) !== 'null') {
+                        $resolvedMethod = self::resolveAndValidateDeliveryMethod($item);
+                        if (!$resolvedMethod) {
+                            return response()->json([
+                                'status' => false,
+                                'message' => "Invalid or deactivated delivery method selected: '{$rawMethod}'"
+                            ], 400);
+                        }
                     }
                 }
             }

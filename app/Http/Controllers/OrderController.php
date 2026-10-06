@@ -2009,10 +2009,13 @@ namespace App\Http\Controllers;
                     $allParams['pcb_rate'] = $pricing['pcb_rate'];
                     $allParams['price_per_sqm'] = $pricing['price_per_sqm'];
                     $allParams['subtotal'] = $pricing['subtotal'];
+                    $allParams['delivery_charge'] = $pricing['delivery_charge'];
+                    $allParams['taxable_amount'] = $pricing['taxable_amount'];
                     $allParams['gst_rate'] = $pricing['gst_rate'];
                     $allParams['gst_amount'] = $pricing['gst_amount'];
                     $allParams['total_amount'] = $pricing['total_amount'];
                     $allParams['payment_method'] = $payMethod;
+                    $allParams['delivery_method'] = $orderData['delivery_method'];
 
                     foreach ($allParams as $key => $value) {
                         if ($value !== null && $value !== '') {

@@ -88,17 +88,18 @@ Route::prefix('auth/')->group(function () {
     Route::post('reset-password', [\App\Http\Controllers\PasswordResetController::class, 'clientResetPassword']);
 });
 
+// Cart Routes (Public for guests and authenticated users, handled by CartController)
+Route::prefix('cart/')->group(function () {
+    Route::post('save', [CartController::class, 'save']);
+    Route::get('get', [CartController::class, 'get']);
+    Route::post('attach', [CartController::class, 'attach']);
+});
+
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\NotificationController;
 
 // Protected Client Frontend API Routes
 Route::middleware('verify.api.token')->group(function () {
-    // Cart Routes
-    Route::prefix('cart/')->group(function () {
-        Route::post('save', [CartController::class, 'save']);
-        Route::get('get', [CartController::class, 'get']);
-        Route::post('attach', [CartController::class, 'attach']);
-    });
 
     // Checkout Routes
     Route::prefix('checkout/')->group(function () {
