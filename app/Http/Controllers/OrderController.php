@@ -553,7 +553,10 @@ namespace App\Http\Controllers;
                     $orders = $query->skip(($page - 1) * $perPage)->take($perPage)->get();
                 }
 
-                $orders->transform(function ($order) {
+                $canViewClients = \App\Http\Controllers\Mobile\MobileOrderController::hasAdminPermission($request, 'clients.view');
+                $canViewPayments = \App\Http\Controllers\Mobile\MobileOrderController::hasAdminPermission($request, 'payments.view');
+
+                $orders->transform(function ($order) use ($canViewClients, $canViewPayments) {
                     $order->is_deleted = $order->trashed();
                     if ($order->trashed()) {
                         $order->deleted_at = $order->deleted_at ? $order->deleted_at->toDateTimeString() : null;
@@ -576,6 +579,55 @@ namespace App\Http\Controllers;
                             ?: $order->getMeta('board_name')
                             ?: $order->board_name;
                     }
+
+                    // Mask customer data if admin lacks clients.view permission
+                    if (!$canViewClients) {
+                        $order->customer_name = 'XXXX';
+                        $order->client = 'XXXX';
+                        $order->user_email = '';
+                        $order->user_mobile = '';
+                        $order->user_id = null;
+                        if ($order->relationLoaded('user') && $order->user) {
+                            $order->user->name = 'XXXX';
+                            $order->user->company_name = 'XXXX';
+                            $order->user->first_name = 'XXXX';
+                            $order->user->last_name = '';
+                            $order->user->email = '';
+                            $order->user->phone = '';
+                            $order->user->mobile = '';
+                            $order->user->phone_number = '';
+                            $order->user->id = null;
+                        }
+                        if ($order->relationLoaded('metas') && $order->metas) {
+                            foreach ($order->metas as $m) {
+                                $k = strtolower((string)$m->meta_key);
+                                if (in_array($k, ['client', 'customer_name', 'customername', 'customer'])) {
+                                    $m->meta_value = 'XXXX';
+                                } elseif (in_array($k, ['user_email', 'user_mobile', 'email', 'phone', 'mobile'])) {
+                                    $m->meta_value = '';
+                                }
+                            }
+                        }
+                    }
+
+                    // Mask payment data if admin lacks payments.view permission
+                    if (!$canViewPayments) {
+                        $order->unit_price = 0;
+                        $order->order_value = 0;
+                        $order->transaction_id = null;
+                        $order->payment_status = null;
+                        $order->payment_method = null;
+                        $order->payment_mode = null;
+                        if ($order->relationLoaded('metas') && $order->metas) {
+                            foreach ($order->metas as $m) {
+                                $k = strtolower((string)$m->meta_key);
+                                if (in_array($k, ['payment_id', 'razorpay_payment_id', 'transaction_id', 'payment_status', 'payment_mode', 'payment_method', 'jlcpcb_price'])) {
+                                    $m->meta_value = '';
+                                }
+                            }
+                        }
+                    }
+
                     return $order;
                 });
 
@@ -592,7 +644,7 @@ namespace App\Http\Controllers;
                         'total_records'    => (int) $totalRecords,
                         'active_orders'    => $statsActiveOrders,
                         'completed_orders' => $statsCompletedOrders,
-                        'total_value'      => $statsTotalValue,
+                        'total_value'      => $canViewPayments ? $statsTotalValue : 0,
                         'total_qty'        => $statsTotalQty,
                         'ordered_qty'      => $statsTotalQty,
                         'launch_qty'       => $statsLaunchQty,
@@ -857,6 +909,56 @@ namespace App\Http\Controllers;
                 $order->status = $order->statusDetails->name;
             } elseif (empty($order->status)) {
                 $order->status = 'Pending';
+            }
+
+            $req = request();
+            $canViewClients = \App\Http\Controllers\Mobile\MobileOrderController::hasAdminPermission($req, 'clients.view');
+            $canViewPayments = \App\Http\Controllers\Mobile\MobileOrderController::hasAdminPermission($req, 'payments.view');
+
+            if (!$canViewClients) {
+                $order->customer_name = 'XXXX';
+                $order->client = 'XXXX';
+                $order->user_email = '';
+                $order->user_mobile = '';
+                $order->user_id = null;
+                if ($order->relationLoaded('user') && $order->user) {
+                    $order->user->name = 'XXXX';
+                    $order->user->company_name = 'XXXX';
+                    $order->user->first_name = 'XXXX';
+                    $order->user->last_name = '';
+                    $order->user->email = '';
+                    $order->user->phone = '';
+                    $order->user->mobile = '';
+                    $order->user->phone_number = '';
+                    $order->user->id = null;
+                }
+                if ($order->relationLoaded('metas') && $order->metas) {
+                    foreach ($order->metas as $m) {
+                        $k = strtolower((string)$m->meta_key);
+                        if (in_array($k, ['client', 'customer_name', 'customername', 'customer'])) {
+                            $m->meta_value = 'XXXX';
+                        } elseif (in_array($k, ['user_email', 'user_mobile', 'email', 'phone', 'mobile'])) {
+                            $m->meta_value = '';
+                        }
+                    }
+                }
+            }
+
+            if (!$canViewPayments) {
+                $order->unit_price = 0;
+                $order->order_value = 0;
+                $order->transaction_id = null;
+                $order->payment_status = null;
+                $order->payment_method = null;
+                $order->payment_mode = null;
+                if ($order->relationLoaded('metas') && $order->metas) {
+                    foreach ($order->metas as $m) {
+                        $k = strtolower((string)$m->meta_key);
+                        if (in_array($k, ['payment_id', 'razorpay_payment_id', 'transaction_id', 'payment_status', 'payment_mode', 'payment_method', 'jlcpcb_price'])) {
+                            $m->meta_value = '';
+                        }
+                    }
+                }
             }
 
             return response()->json([
