@@ -11,6 +11,12 @@ class Cart extends Model
 
     protected $fillable = [
         'session_id',
+        'user_id',
         'cart_data',
     ];
+
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
 }

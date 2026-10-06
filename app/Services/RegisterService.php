@@ -350,10 +350,11 @@ class RegisterService
                 'success' => true,
                 'message' => 'Account created successfully!',
                 'data'    => [
-                    'access_token' => $jwt_token,
-                    'user_id'      => $user_id,
-                    'name'         => $pending->name,
-                    'email'        => $pending->email
+                    'access_token'    => $jwt_token,
+                    'user_id'         => $user_id,
+                    'name'            => $pending->name,
+                    'email'           => $pending->email,
+                    'cart_session_id' => \App\Http\Controllers\CartController::getUserCartSessionId($user_id),
                 ]
             ];
 

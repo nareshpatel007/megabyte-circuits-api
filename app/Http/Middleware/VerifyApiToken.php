@@ -22,6 +22,13 @@ class VerifyApiToken
             $jwtToken = str_replace('Bearer ', '', $authHeader);
         }
 
+        // If the bearer token matches the static server-to-server API token, treat as static API token
+        $apiToken = \App\Services\CredentialService::get('auth', 'API_TOKEN', 'API_TOKEN');
+        if (!empty($jwtToken) && !empty($apiToken) && $jwtToken === $apiToken) {
+            $jwtToken = null;
+            $xApiToken = $apiToken;
+        }
+
         // If a JWT user token is present, we MUST validate user token & database status first
         if (!empty($jwtToken)) {
             $userCheck = $this->verifyUserTokenAndStatus($jwtToken, $request);
@@ -33,7 +40,6 @@ class VerifyApiToken
 
         // If no JWT token, check for static API token (server-to-server fallback)
         if ($xApiToken) {
-            $apiToken = \App\Services\CredentialService::get('auth', 'API_TOKEN', 'API_TOKEN');
             if ($apiToken && $xApiToken === $apiToken) {
                 return $next($request);
             }

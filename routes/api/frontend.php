@@ -97,6 +97,7 @@ Route::middleware('verify.api.token')->group(function () {
     Route::prefix('cart/')->group(function () {
         Route::post('save', [CartController::class, 'save']);
         Route::get('get', [CartController::class, 'get']);
+        Route::post('attach', [CartController::class, 'attach']);
     });
 
     // Checkout Routes

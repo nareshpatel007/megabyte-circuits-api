@@ -743,7 +743,8 @@ class AuthController extends Controller
                     'name' => $user->name,
                     'email' => $user->email,
                     'credits' => $user->available_credits,
-                    'avatar' => $user->avatar
+                    'avatar' => $user->avatar,
+                    'cart_session_id' => \App\Http\Controllers\CartController::getUserCartSessionId($user->id),
                 ]
             ]);
         } catch (\Throwable $th) {

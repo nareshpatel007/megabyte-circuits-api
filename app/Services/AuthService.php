@@ -127,6 +127,7 @@ class AuthService
                     'user_id' => $user->id,
                     'name' => $user->name ?? (($user->first_name ?? '') . ' ' . ($user->last_name ?? '')),
                     'email' => $user->email,
+                    'cart_session_id' => \App\Http\Controllers\CartController::getUserCartSessionId($user->id),
                 ]
             ];
         } else {
