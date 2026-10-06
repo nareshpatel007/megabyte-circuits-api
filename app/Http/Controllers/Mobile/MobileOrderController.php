@@ -10,6 +10,240 @@ use Illuminate\Support\Facades\Schema;
 
 class MobileOrderController extends Controller
 {
+    public static function hasAdminPermission(Request $request, string $permission): bool
+    {
+        $adminId = $request->attributes->get('admin_id') ?: $request->header('X-Admin-Id') ?: $request->query('admin_id');
+        $admin = null;
+        if ($adminId) {
+            $admin = DB::table('admins')->where('id', $adminId)->first() ?: DB::table('users')->where('id', $adminId)->first();
+        } elseif ($request->user()) {
+            $admin = $request->user();
+        }
+
+        // If no admin identity is associated with the token (e.g. master server-to-server API_TOKEN), grant access
+        if (!$admin && !$adminId) {
+            return true;
+        }
+
+        if (!$admin) {
+            return false;
+        }
+
+        if (isset($admin->is_super_admin) && $admin->is_super_admin) {
+            return true;
+        }
+
+        if (!empty($admin->role_id) && Schema::hasTable('roles')) {
+            $role = DB::table('roles')->where('id', $admin->role_id)->first();
+            if ($role && (strtolower($role->name) === 'super admin' || (int)$role->id === 1)) {
+                return true;
+            }
+        }
+
+        $permissions = MobileAuthController::fetchPermissionsForAdmin($admin);
+
+        if (in_array('*', $permissions) || in_array($permission, $permissions)) {
+            return true;
+        }
+
+        // Module fallbacks & alias mappings
+        if ($permission === 'clients.view' && (in_array('users.manage', $permissions) || in_array('clients.manage', $permissions))) {
+            return true;
+        }
+
+        if ($permission === 'payments.view' && in_array('payments.manage', $permissions)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function fetchOrderHistory($order, bool $canViewPayments, bool $canViewClients = true): array
+    {
+        $history = [];
+        if (Schema::hasTable('pcb_order_logs')) {
+            $logs = DB::table('pcb_order_logs')
+                ->where('pcb_order_id', $order->id)
+                ->orWhere('order_number', $order->order_number ?? '')
+                ->orderBy('id', 'desc')
+                ->get();
+
+            $history = $logs->map(function ($log) {
+                return [
+                    'id' => (string) $log->id,
+                    'status' => $log->status ?? 'Updated',
+                    'action' => $log->action ?? 'Status Change',
+                    'description' => $log->description ?? '',
+                    'created_at' => $log->created_at ? date('d M Y · h:i A', strtotime($log->created_at)) : '',
+                ];
+            })->toArray();
+        } elseif (Schema::hasTable('pcb_order_status_histories')) {
+            $histories = DB::table('pcb_order_status_histories')
+                ->where('pcb_order_id', $order->id)
+                ->orderBy('id', 'desc')
+                ->get();
+
+            $history = $histories->map(function ($h) {
+                return [
+                    'id' => (string) $h->id,
+                    'status' => $h->status_name ?? 'Updated',
+                    'action' => 'Status Updated',
+                    'description' => $h->remark ?? ('Status updated to ' . ($h->status_name ?? '')),
+                    'created_at' => $h->created_at ? date('d M Y · h:i A', strtotime($h->created_at)) : '',
+                ];
+            })->toArray();
+        }
+
+        return $this->filterHistoryForPermissions($history, $canViewPayments, $canViewClients, $order);
+    }
+
+    private function filterHistoryForPermissions(array $history, bool $canViewPayments, bool $canViewClients = true, $order = null): array
+    {
+        $filtered = [];
+
+        foreach ($history as $item) {
+            $status = strtolower(trim((string)($item['status'] ?? '')));
+            $action = strtolower(trim((string)($item['action'] ?? '')));
+            $desc   = trim((string)($item['description'] ?? ''));
+            $descLower = strtolower($desc);
+
+            // 1. If user cannot view payments, filter out payment actions & details
+            if (!$canViewPayments) {
+                if (
+                    str_contains($action, 'payment') ||
+                    str_contains($status, 'payment') ||
+                    str_contains($action, 'paid') ||
+                    str_contains($status, 'paid') ||
+                    str_contains($action, 'transaction') ||
+                    str_contains($status, 'transaction') ||
+                    str_contains($action, 'razorpay') ||
+                    str_contains($status, 'razorpay') ||
+                    str_contains($action, 'refund') ||
+                    str_contains($status, 'refund')
+                ) {
+                    continue;
+                }
+
+                $hasPaymentInDesc = str_contains($descLower, 'payment')
+                    || str_contains($descLower, 'razorpay')
+                    || str_contains($descLower, 'paid')
+                    || str_contains($descLower, 'txn ref')
+                    || str_contains($descLower, 'transaction')
+                    || str_contains($descLower, 'refund');
+
+                if ($hasPaymentInDesc) {
+                    if (
+                        preg_match('/^payment\s+(of|verified|received|recorded|status|failed|pending|processed)/i', $desc) ||
+                        str_starts_with($descLower, 'payment') ||
+                        str_contains($descLower, 'verified via razorpay') ||
+                        str_contains($descLower, 'payment recorded by') ||
+                        str_contains($descLower, 'manual payment recorded')
+                    ) {
+                        continue;
+                    }
+
+                    $cleanedDesc = preg_replace('/,?\s*payment\s+status:\s*[^,.]+/i', '', $desc);
+                    $cleanedDesc = preg_replace('/payment\s+status:\s*[^,.]+,?\s*/i', '', $cleanedDesc);
+                    $cleanedDesc = preg_replace('/,?\s*paid\s*\([^)]*\)/i', '', $cleanedDesc);
+                    $cleanedDesc = preg_replace('/,?\s*razorpay\s*(id)?\s*[\'"][^\'"]*[\'"]/i', '', $cleanedDesc);
+                    $cleanedDesc = trim(preg_replace('/\s+/', ' ', $cleanedDesc));
+                    $cleanedDesc = trim($cleanedDesc, " ,.:-");
+
+                    if (
+                        empty($cleanedDesc) ||
+                        preg_match('/^updated(\s*\[[^\]]+\])?\s*by\s*[^:]+:\s*$/i', $cleanedDesc) ||
+                        preg_match('/^updated(\s*\[[^\]]+\])?\s*by\s*[^:]+$/i', $cleanedDesc)
+                    ) {
+                        continue;
+                    }
+
+                    $desc = $cleanedDesc;
+                }
+            }
+
+            // 2. If user cannot view clients, mask customer name in history description and action
+            if (!$canViewClients) {
+                $desc = $this->maskCustomerInText($desc, $order);
+                if (isset($item['action']) && is_string($item['action'])) {
+                    $item['action'] = $this->maskCustomerInText($item['action'], $order);
+                }
+            }
+
+            $item['description'] = $desc;
+            $filtered[] = $item;
+        }
+
+        return array_values($filtered);
+    }
+
+    private function maskCustomerInText(string $text, $order = null): string
+    {
+        // 1. Mask "Customer: 'old' → 'new'" or "Customer: old -> new" or "Customer name: ..." or "Customer: val"
+        $text = preg_replace_callback(
+            '/(Customer(?:\s*name)?\s*:\s*)(\'[^\']*\'|"[^"]*"|[^,→\-\n]+?)(?:\s*(?:→|->)\s*(\'[^\']*\'|"[^"]*"|[^,.\n]+))?(?=[,.]|$)/iu',
+            function ($m) {
+                $prefix = $m[1];
+                $from = trim($m[2], " '\"");
+                $to = isset($m[3]) ? trim($m[3], " '\"") : null;
+
+                if ($to !== null) {
+                    $fromMasked = in_array(strtolower($from), ['n/a', 'none', 'null', '']) ? "'N/A'" : "'XXXX'";
+                    return "{$prefix}{$fromMasked} → 'XXXX'";
+                } else {
+                    return "{$prefix}'XXXX'";
+                }
+            },
+            $text
+        );
+
+        // 2. Mask "Customer ID: 'old' → 'new'" or "Customer ID: val"
+        $text = preg_replace_callback(
+            '/(Customer\s*ID\s*:\s*)(\'[^\']*\'|"[^"]*"|[^,→\-\n]+?)(?:\s*(?:→|->)\s*(\'[^\']*\'|"[^"]*"|[^,.\n]+))?(?=[,.]|$)/iu',
+            function ($m) {
+                $prefix = $m[1];
+                $from = trim($m[2], " '\"");
+                $to = isset($m[3]) ? trim($m[3], " '\"") : null;
+
+                if ($to !== null) {
+                    $fromMasked = in_array(strtolower($from), ['n/a', 'none', 'null', '']) ? "'N/A'" : "'XXXX'";
+                    return "{$prefix}{$fromMasked} → 'XXXX'";
+                } else {
+                    return "{$prefix}'XXXX'";
+                }
+            },
+            $text
+        );
+
+        // 3. Fallback: if order customer name or meta client is known, mask any residual occurrences
+        if ($order) {
+            $namesToMask = [];
+            if (!empty($order->customer_name)) {
+                $namesToMask[] = trim((string)$order->customer_name);
+            }
+            if (Schema::hasTable('pcb_order_meta')) {
+                $metaClients = DB::table('pcb_order_meta')
+                    ->where('pcb_order_id', $order->id)
+                    ->whereIn('meta_key', ['client', 'customer_name', 'customer'])
+                    ->pluck('meta_value')
+                    ->filter()
+                    ->toArray();
+                foreach ($metaClients as $mc) {
+                    $namesToMask[] = trim((string)$mc);
+                }
+            }
+
+            foreach (array_unique($namesToMask) as $name) {
+                if (strlen($name) >= 2 && !in_array(strtolower($name), ['n/a', 'none', 'null', 'xxxx', 'admin', 'operator', 'production'])) {
+                    $text = str_ireplace("'{$name}'", "'XXXX'", $text);
+                    $text = str_ireplace("\"{$name}\"", "'XXXX'", $text);
+                    $text = str_ireplace($name, 'XXXX', $text);
+                }
+            }
+        }
+
+        return $text;
+    }
+
     private function checkPermission(Request $request)
     {
         $adminId = $request->attributes->get('admin_id');
@@ -378,7 +612,9 @@ class MobileOrderController extends Controller
                     ->toArray();
             }
 
-            $items = $orders->map(function ($order) use ($today, $childToParentMap) {
+            $canViewClients = self::hasAdminPermission($request, 'clients.view');
+
+            $items = $orders->map(function ($order) use ($today, $childToParentMap, $canViewClients) {
                 $dueDateStr = 'Upcoming';
                 $delDate = $order->delivery_date ?? null;
                 if ($delDate) {
@@ -458,7 +694,7 @@ class MobileOrderController extends Controller
                     'customer_note' => $customerNote,
                     'pcb_remark' => $customerNote,
                     'customer_remark' => $customerNote,
-                    'client' => ($order->customer_name ?? null) ?: ($metaMap['client'] ?? 'Apex Controls'),
+                    'client' => $canViewClients ? (($order->customer_name ?? null) ?: ($metaMap['client'] ?? 'Apex Controls')) : 'XXXX',
                     'gerber_file_name' => $gerberFileName,
                     'board_name' => $order->board_name ?? $metaMap['board_name'] ?? $gerberFileName,
                     'department' => $metaMap['department'] ?? 'Production',
@@ -544,40 +780,11 @@ class MobileOrderController extends Controller
             $delDate = $order->delivery_date ?? null;
             $dueDateStr = $delDate === $today ? 'Today' : ($delDate ? date('d M Y', strtotime($delDate)) : 'Upcoming');
 
-            // Fetch order history logs
-            $history = [];
-            if (Schema::hasTable('pcb_order_logs')) {
-                $logs = DB::table('pcb_order_logs')
-                    ->where('pcb_order_id', $order->id)
-                    ->orWhere('order_number', $order->order_number ?? '')
-                    ->orderBy('id', 'desc')
-                    ->get();
+            $canViewClients = self::hasAdminPermission($request, 'clients.view');
+            $canViewPayments = self::hasAdminPermission($request, 'payments.view');
 
-                $history = $logs->map(function ($log) {
-                    return [
-                        'id' => (string) $log->id,
-                        'status' => $log->status ?? 'Updated',
-                        'action' => $log->action ?? 'Status Change',
-                        'description' => $log->description ?? '',
-                        'created_at' => $log->created_at ? date('d M Y · h:i A', strtotime($log->created_at)) : '',
-                    ];
-                })->toArray();
-            } elseif (Schema::hasTable('pcb_order_status_histories')) {
-                $histories = DB::table('pcb_order_status_histories')
-                    ->where('pcb_order_id', $order->id)
-                    ->orderBy('id', 'desc')
-                    ->get();
-
-                $history = $histories->map(function ($h) {
-                    return [
-                        'id' => (string) $h->id,
-                        'status' => $h->status_name ?? 'Updated',
-                        'action' => 'Status Updated',
-                        'description' => $h->remark ?? ('Status updated to ' . ($h->status_name ?? '')),
-                        'created_at' => $h->created_at ? date('d M Y · h:i A', strtotime($h->created_at)) : '',
-                    ];
-                })->toArray();
-            }
+            // Fetch order history logs (filtered by payments and clients permission)
+            $history = $this->fetchOrderHistory($order, $canViewPayments, $canViewClients);
 
             $orderQty = (int) ($order->order_qty ?? $order->quantity ?? $metaMap['quantity'] ?? $metaMap['order_qty'] ?? 50);
             $launchQty = (int) ($order->launch_qty ?? $metaMap['launch_qty'] ?? $orderQty);
@@ -683,7 +890,7 @@ class MobileOrderController extends Controller
                 'delivery_date' => $order->delivery_date ?? null,
                 'delivery_method' => $order->delivery_method ?? ($metaMap['shipping_option'] ?? null),
                 'delivery_method_label' => !empty($order->delivery_method ?? ($metaMap['shipping_option'] ?? null)) ? ucfirst(strtolower($order->delivery_method ?? ($metaMap['shipping_option'] ?? null))) : null,
-                'customer_name' => ($order->customer_name ?? null) ?: ($metaMap['client'] ?? null),
+                'customer_name' => $canViewClients ? (($order->customer_name ?? null) ?: ($metaMap['client'] ?? null)) : 'XXXX',
                 'user_id' => $order->user_id ?? null,
                 'customer_notes' => $customerNote,
                 'customer_note' => $customerNote,
@@ -691,7 +898,7 @@ class MobileOrderController extends Controller
                 'customer_remark' => $customerNote,
                 'gerber_file' => $actualGerber,
                 'has_gerber' => $actualGerber !== null,
-                'client' => ($order->customer_name ?? null) ?: ($metaMap['client'] ?? 'Apex Controls'),
+                'client' => $canViewClients ? (($order->customer_name ?? null) ?: ($metaMap['client'] ?? 'Apex Controls')) : 'XXXX',
                 'department' => $metaMap['department'] ?? 'Production',
                 'priority' => $metaMap['priority'] ?? 'Normal',
                 'orderDate' => ($order->created_at ?? null) ? date('d M Y', strtotime($order->created_at)) : date('d M Y'),
@@ -737,12 +944,17 @@ class MobileOrderController extends Controller
                 'old_orders' => $oldOrders,
                 'old_order_ids' => $oldOrderIds,
                 'lastUpdate' => ($order->updated_at ?? null) ? date('h:i A', strtotime($order->updated_at)) : 'Just now',
-                'user_email' => $order->user_email ?? '',
-                'user_mobile' => $order->user_mobile ?? '',
+                'user_email' => $canViewClients ? ($order->user_email ?? '') : '',
+                'user_mobile' => $canViewClients ? ($order->user_mobile ?? '') : '',
                 'unit_price' => (float)($order->unit_price ?? 0),
                 'order_value' => (float)($order->order_value ?? 0),
                 'history' => $history,
-                'metas' => $metaMap,
+                'metas' => array_merge($metaMap, !$canViewClients ? [
+                    'client' => 'XXXX',
+                    'customer_name' => 'XXXX',
+                    'customerName' => 'XXXX',
+                    'customer' => 'XXXX'
+                ] : []),
                 'base_material' => $metaMap['base_material'] ?? $metaMap['material'] ?? 'FR-4',
                 'substrate_type' => $metaMap['substrate_type'] ?? 'N/A',
                 'material_type' => $metaMap['material_type'] ?? 'FR4-TG135',
@@ -804,24 +1016,9 @@ class MobileOrderController extends Controller
                 return response()->json(['success' => false, 'message' => 'Order not found'], 404);
             }
 
-            $history = [];
-            if (Schema::hasTable('pcb_order_logs')) {
-                $logs = DB::table('pcb_order_logs')
-                    ->where('pcb_order_id', $order->id)
-                    ->orWhere('order_number', $order->order_number ?? '')
-                    ->orderBy('id', 'desc')
-                    ->get();
-
-                $history = $logs->map(function ($log) {
-                    return [
-                        'id' => (string) $log->id,
-                        'status' => $log->status ?? 'Updated',
-                        'action' => $log->action ?? 'Status Change',
-                        'description' => $log->description ?? '',
-                        'created_at' => $log->created_at ? date('d M Y · h:i A', strtotime($log->created_at)) : '',
-                    ];
-                });
-            }
+            $canViewPayments = self::hasAdminPermission($request, 'payments.view');
+            $canViewClients = self::hasAdminPermission($request, 'clients.view');
+            $history = $this->fetchOrderHistory($order, $canViewPayments, $canViewClients);
 
             return response()->json([
                 'success' => true,
@@ -1439,6 +1636,16 @@ class MobileOrderController extends Controller
         }
 
         try {
+            // Prevent accidental overwrite of customer name if employee lacks clients.view
+            if (!self::hasAdminPermission($request, 'clients.view')) {
+                if ($request->input('customer_name') === 'XXXX') {
+                    $request->request->remove('customer_name');
+                }
+                if ($request->input('client') === 'XXXX') {
+                    $request->request->remove('client');
+                }
+            }
+
             // Forward request to the shared OrderController update method with mobile source tag
             $request->merge(['source' => 'mobile']);
             $orderController = app(\App\Http\Controllers\OrderController::class);
