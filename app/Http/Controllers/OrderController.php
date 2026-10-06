@@ -3007,8 +3007,6 @@ namespace App\Http\Controllers;
                     'viaPlating' => $metas['via_plating'] ?? 'Not Specified',
                     'minHole' => $metas['min_hole'] ?? '0.3mm/(0.4/0.45mm)',
                     'confirmFile' => $metas['confirm_file'] ?? 'No',
-                    'markOnPcb' => $metas['mark_on_pcb'] ?? 'Remove Mark',
-                    'elecTest' => $metas['elec_test'] ?? 'Flying Probe Fully Test',
                     'goldFingers' => $metas['gold_fingers'] ?? 'No',
                     'castellated' => $metas['castellated'] ?? 'No',
                     'edgePlating' => $metas['edge_plating'] ?? 'No',

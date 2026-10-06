@@ -106,18 +106,6 @@ class PcbProviderRulesSeeder extends Seeder
                     'value' => ['Not Specified', ''],
                     'sort_order' => 12,
                 ],
-                [
-                    'field' => 'mark_on_pcb',
-                    'operator' => 'in',
-                    'value' => ['none', 'Not Specified', 'no', ''],
-                    'sort_order' => 13,
-                ],
-                [
-                    'field' => 'elec_test',
-                    'operator' => 'in',
-                    'value' => ['none', 'not tested', 'no', ''],
-                    'sort_order' => 14,
-                ],
             ];
 
             foreach ($conditions as $cond) {

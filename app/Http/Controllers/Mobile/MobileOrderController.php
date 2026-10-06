@@ -758,8 +758,6 @@ class MobileOrderController extends Controller
                 'via_plating' => $metaMap['via_plating'] ?? 'N/A',
                 'min_hole' => $metaMap['min_hole'] ?? $metaMap['min_hole_size'] ?? 'N/A',
                 'confirm_file' => $metaMap['confirm_file'] ?? 'No',
-                'mark_on_pcb' => $metaMap['mark_on_pcb'] ?? 'Remove Mark',
-                'elec_test' => $metaMap['elec_test'] ?? 'Flying Probe Fully Test',
                 'different_design' => $metaMap['different_design'] ?? '1',
                 'delivery_format' => $metaMap['delivery_format'] ?? 'Single PCB',
                 'panel_format' => $metaMap['panel_format'] ?? 'N/A',

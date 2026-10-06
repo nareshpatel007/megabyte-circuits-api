@@ -273,13 +273,6 @@ class ManufacturingProviderResolver
             case 'viaPlatingMethod':
                 return trim((string)($data['viaPlating'] ?? $data['via_plating'] ?? $data['viaPlatingMethod'] ?? ''));
 
-            case 'mark_on_pcb':
-            case 'markOnPcb':
-                return trim((string)($data['markOnPcb'] ?? $data['mark_on_pcb'] ?? ''));
-
-            case 'elec_test':
-            case 'elecTest':
-                return trim((string)($data['elecTest'] ?? $data['elec_test'] ?? ''));
 
             default:
                 return $data[$field] ?? null;
@@ -442,8 +435,6 @@ class ManufacturingProviderResolver
             'blind_slots' => 'Blind Slots',
             'via_covering' => 'Via Covering',
             'via_plating' => 'Via Plating',
-            'mark_on_pcb' => 'Mark on PCB',
-            'elec_test' => 'Electrical Test',
         ];
 
         $label = $fieldLabels[$field] ?? ucwords(str_replace('_', ' ', $field));
@@ -568,19 +559,6 @@ class ManufacturingProviderResolver
             }
         }
 
-        // 15. Mark on PCB: None/empty qualifies
-        $rawMark = trim((string)($data['markOnPcb'] ?? $data['mark_on_pcb'] ?? ''));
-        $markLower = strtolower($rawMark);
-        if ($markLower !== '' && $markLower !== 'none' && $markLower !== 'not specified' && $markLower !== 'no') {
-            $reasons[] = "Mark on PCB: '{$rawMark}' requires JLCPCB.";
-        }
-
-        // 16. Electrical Test: None/empty qualifies
-        $rawEt = trim((string)($data['elecTest'] ?? $data['elec_test'] ?? ''));
-        $etLower = strtolower($rawEt);
-        if ($etLower !== '' && $etLower !== 'none' && $etLower !== 'not tested' && $etLower !== 'no') {
-            $reasons[] = "Electrical Test: '{$rawEt}' requires JLCPCB.";
-        }
 
         $isEligible = empty($reasons);
 

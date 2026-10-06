@@ -2,7 +2,7 @@
 
 namespace Tests\Unit;
 
-use PHPUnit\Framework\TestCase;
+use Tests\TestCase;
 use App\Services\ManufacturingProviderResolver;
 use App\Services\OrderPricingService;
 
@@ -255,46 +255,16 @@ class ManufacturingProviderResolverTest extends TestCase
         }
     }
 
-    // Rule 15: Mark on PCB (Empty/none qualifies; selecting any value forces JLCPCB)
-    public function test_rule_15_mark_on_pcb(): void
+    // Rule 15 & 16: Mark on PCB and Electrical Test are permanently removed and do not force JLCPCB
+    public function test_mark_on_pcb_and_electrical_test_do_not_force_jlcpcb(): void
     {
         $base = $this->getBaselineInHouseSpecs();
 
-        $this->assertFalse(ManufacturingProviderResolver::isJlcpcbRequired(array_merge($base, ['mark_on_pcb' => ''])));
-        $this->assertFalse(ManufacturingProviderResolver::isJlcpcbRequired(array_merge($base, ['mark_on_pcb' => 'none'])));
-        $this->assertFalse(ManufacturingProviderResolver::isJlcpcbRequired(array_merge($base, ['mark_on_pcb' => 'Not Specified'])));
-
-        $forbidden = ['Remove Mark', 'Specify Location', 'Any Location'];
-        foreach ($forbidden as $m) {
-            $this->assertTrue(
-                ManufacturingProviderResolver::isJlcpcbRequired(array_merge($base, ['mark_on_pcb' => $m])),
-                "Mark on PCB {$m} must force JLCPCB"
-            );
-            $this->assertTrue(
-                ManufacturingProviderResolver::isJlcpcbRequired(array_merge($base, ['markOnPcb' => $m])),
-                "Mark on PCB {$m} (camelCase) must force JLCPCB"
-            );
-        }
-    }
-
-    // Rule 16: Electrical Test (Empty/none qualifies; Flying Probe Fully Test forces JLCPCB)
-    public function test_rule_16_electrical_test(): void
-    {
-        $base = $this->getBaselineInHouseSpecs();
-
-        $this->assertFalse(ManufacturingProviderResolver::isJlcpcbRequired(array_merge($base, ['elecTest' => ''])));
-        $this->assertFalse(ManufacturingProviderResolver::isJlcpcbRequired(array_merge($base, ['elec_test' => ''])));
-        $this->assertFalse(ManufacturingProviderResolver::isJlcpcbRequired(array_merge($base, ['elecTest' => 'none'])));
-        $this->assertFalse(ManufacturingProviderResolver::isJlcpcbRequired(array_merge($base, ['elecTest' => 'not tested'])));
-
-        $this->assertTrue(
-            ManufacturingProviderResolver::isJlcpcbRequired(array_merge($base, ['elecTest' => 'Flying Probe Fully Test'])),
-            "Flying Probe Fully Test must force JLCPCB"
-        );
-        $this->assertTrue(
-            ManufacturingProviderResolver::isJlcpcbRequired(array_merge($base, ['elec_test' => 'Flying Probe Fully Test'])),
-            "Flying Probe Fully Test (snake_case) must force JLCPCB"
-        );
+        // Even with previously forbidden values, in-house remains valid
+        $this->assertFalse(ManufacturingProviderResolver::isJlcpcbRequired(array_merge($base, ['mark_on_pcb' => 'Remove Mark'])));
+        $this->assertFalse(ManufacturingProviderResolver::isJlcpcbRequired(array_merge($base, ['markOnPcb' => 'Remove Mark'])));
+        $this->assertFalse(ManufacturingProviderResolver::isJlcpcbRequired(array_merge($base, ['elecTest' => 'Flying Probe Fully Test'])));
+        $this->assertFalse(ManufacturingProviderResolver::isJlcpcbRequired(array_merge($base, ['elec_test' => 'Flying Probe Fully Test'])));
     }
 
     // Transition & Regression Scenarios

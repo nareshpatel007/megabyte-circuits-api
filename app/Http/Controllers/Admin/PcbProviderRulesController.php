@@ -170,26 +170,6 @@ class PcbProviderRulesController extends Controller
                 'default_value' => ['Not Specified'],
                 'tooltip' => 'Special conductive via plating technology',
             ],
-            [
-                'field' => 'mark_on_pcb',
-                'label' => 'Mark on PCB',
-                'type' => 'select',
-                'options' => ['none', 'Remove Mark', 'Not Specified'],
-                'supported_operators' => ['equals', 'not_equals', 'in', 'not_in'],
-                'default_operator' => 'in',
-                'default_value' => ['none', 'Not Specified', 'no'],
-                'tooltip' => 'Manufacturer serial mark or barcode placement',
-            ],
-            [
-                'field' => 'elec_test',
-                'label' => 'Electrical Test',
-                'type' => 'select',
-                'options' => ['none', 'not tested', 'Flying Probe Fully Test'],
-                'supported_operators' => ['equals', 'not_equals', 'in', 'not_in'],
-                'default_operator' => 'in',
-                'default_value' => ['none', 'not tested'],
-                'tooltip' => 'Testing methodology specification',
-            ],
         ];
 
         $operators = [

@@ -678,8 +678,6 @@ class CheckoutController extends Controller
                         'via_plating' => $item['viaPlating'] ?? 'Not Specified',
                         'min_hole' => $item['minHole'] ?? '0.3mm/(0.4/0.45mm)',
                         'confirm_file' => $item['confirmFile'] ?? 'No',
-                        'mark_on_pcb' => $item['markOnPcb'] ?? 'Remove Mark',
-                        'elec_test' => $item['elecTest'] ?? 'Flying Probe Fully Test',
                         'gold_fingers' => $item['goldFingers'] ?? 'No',
                         'castellated' => $item['castellated'] ?? 'No',
                         'edge_plating' => $item['edgePlating'] ?? 'No',
