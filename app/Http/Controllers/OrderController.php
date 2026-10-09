@@ -74,7 +74,7 @@ namespace App\Http\Controllers;
                 $sourceResolution = \App\Services\OrderPricingService::resolveOrderSource($request->all());
                 $reqSource = $sourceResolution['quotation_source'];
                 $reqOrderType = $sourceResolution['order_type'];
-                $series = $sourceResolution['series'];
+                $series = \App\Services\OrderPricingService::resolveSeriesForOrder($request->all());
                 $orderNumber = \App\Services\OrderNumberService::generateOrderNumber($series);
 
                 // Handle file upload
@@ -1976,7 +1976,7 @@ namespace App\Http\Controllers;
                     $sourceResolution = \App\Services\OrderPricingService::resolveOrderSource($request->all());
                     $reqSource = $sourceResolution['quotation_source'];
                     $reqOrderType = $sourceResolution['order_type'];
-                    $series = $sourceResolution['series'];
+                    $series = \App\Services\OrderPricingService::resolveSeriesForOrder($request->all());
                     $orderNumber = \App\Services\OrderNumberService::generateOrderNumber($series);
 
                     // Handle Gerber file upload

@@ -43,27 +43,34 @@ class OrderNumberServiceTest extends TestCase
         $this->assertEquals('JL0003', $jl3);
     }
 
-    public function test_legacy_j_series_parameter_maps_to_jl_format(): void
+    public function test_j_series_parameter_generates_j_prefix_order_number(): void
     {
         $j1 = OrderNumberService::generateOrderNumber('J');
-        $this->assertStringStartsWith('JL', $j1);
-        $this->assertEquals('JL0001', $j1);
+        $this->assertStringStartsWith('J', $j1);
+        $this->assertFalse(str_starts_with($j1, 'JL'));
+        $this->assertEquals('J0001', $j1);
     }
 
-    public function test_generates_m_and_jl_series_independently(): void
+    public function test_generates_m_jl_and_j_series_independently(): void
     {
         $m1 = OrderNumberService::generateOrderNumber('M');
         $jl1 = OrderNumberService::generateOrderNumber('JL');
+        $j1 = OrderNumberService::generateOrderNumber('J');
         $m2 = OrderNumberService::generateOrderNumber('M');
         $jl2 = OrderNumberService::generateOrderNumber('JL');
+        $j2 = OrderNumberService::generateOrderNumber('J');
 
         $this->assertStringStartsWith('M', $m1);
         $this->assertStringStartsWith('JL', $jl1);
-        $this->assertStringStartsWith('M', $m2);
-        $this->assertStringStartsWith('JL', $jl2);
+        $this->assertStringStartsWith('J', $j1);
+        $this->assertFalse(str_starts_with($j1, 'JL'));
 
+        $this->assertEquals('M0001', $m1);
         $this->assertEquals('JL0001', $jl1);
+        $this->assertEquals('J0001', $j1);
+        $this->assertEquals('M0002', $m2);
         $this->assertEquals('JL0002', $jl2);
+        $this->assertEquals('J0002', $j2);
     }
 
     public function test_generates_correct_series_for_order_type(): void
@@ -90,21 +97,26 @@ class OrderNumberServiceTest extends TestCase
 
         $this->assertEquals($seqJLBefore + 1, $seqJLAfter);
         $this->assertEquals('JL' . str_pad($seqJLAfter, 4, '0', STR_PAD_LEFT), $numJL);
+
+        $seqJBefore = DB::table('order_sequences')->where('series', 'J')->value('last_number') ?? 0;
+        $numJ = OrderNumberService::generateOrderNumber('J');
+        $seqJAfter = DB::table('order_sequences')->where('series', 'J')->value('last_number');
+
+        $this->assertEquals($seqJBefore + 1, $seqJAfter);
+        $this->assertEquals('J' . str_pad($seqJAfter, 4, '0', STR_PAD_LEFT), $numJ);
     }
 
-    public function test_existing_j_orders_do_not_prevent_starting_jl_from_0001(): void
+    public function test_existing_j_orders_initialize_j_series_without_affecting_jl(): void
     {
         // Insert historical J-prefixed orders
         DB::table('pcb_orders')->insert([
-            'order_number' => 'J0001',
+            'order_number' => 'J0538',
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
-        DB::table('pcb_orders')->insert([
-            'order_number' => 'J0002',
-            'created_at' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s'),
-        ]);
+
+        $nextJ = OrderNumberService::generateOrderNumber('J');
+        $this->assertEquals('J0539', $nextJ);
 
         $nextJL = OrderNumberService::generateOrderNumber('JL');
         $this->assertEquals('JL0001', $nextJL);

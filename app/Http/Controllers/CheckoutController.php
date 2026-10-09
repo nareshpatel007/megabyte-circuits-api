@@ -477,7 +477,7 @@ class CheckoutController extends Controller
                 $sourceResolution = \App\Services\OrderPricingService::resolveOrderSource($item);
                 $quotationSource = $sourceResolution['quotation_source'];
                 $orderType = $sourceResolution['order_type'];
-                $series = $sourceResolution['series'];
+                $series = \App\Services\OrderPricingService::resolveSeriesForOrder($item);
 
                 // Always generate next clean sequential Order Number (e.g. JL0001 or M00002) via atomic OrderNumberService
                 $orderNumber = \App\Services\OrderNumberService::generateOrderNumber($series);

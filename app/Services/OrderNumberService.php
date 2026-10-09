@@ -20,7 +20,12 @@ class OrderNumberService
     public static function generateOrderNumber(string $series = 'M', ?int $paddingLength = null): string
     {
         $series = strtoupper(trim($series));
-        if ($series === 'J' || $series === 'JL') {
+        if ($series === 'J') {
+            $series = 'J';
+            if ($paddingLength === null) {
+                $paddingLength = 4;
+            }
+        } elseif ($series === 'JL') {
             $series = 'JL';
             if ($paddingLength === null) {
                 $paddingLength = 4;
@@ -59,6 +64,19 @@ class OrderNumberService
                 } else if ($series === 'JL') {
                     $lastOrder = DB::table('pcb_orders')
                         ->where('order_number', 'LIKE', 'JL%')
+                        ->where('order_number', 'NOT LIKE', '%-%')
+                        ->orderBy('id', 'desc')
+                        ->first();
+
+                    if ($lastOrder && !empty($lastOrder->order_number)) {
+                        $initialNumber = (int) preg_replace('/[^0-9]/', '', $lastOrder->order_number);
+                    } else {
+                        $initialNumber = 0;
+                    }
+                } else if ($series === 'J') {
+                    $lastOrder = DB::table('pcb_orders')
+                        ->where('order_number', 'LIKE', 'J%')
+                        ->where('order_number', 'NOT LIKE', 'JL%')
                         ->where('order_number', 'NOT LIKE', '%-%')
                         ->orderBy('id', 'desc')
                         ->first();

@@ -174,5 +174,104 @@ class OrderPricingServiceTest extends TestCase
         $this->assertEquals('internal', $stencilRes['quotation_source']);
         $this->assertEquals('M', $stencilRes['series']);
     }
+
+    public function test_combo_customer_account_identification_and_series_resolution(): void
+    {
+        // Mock DB user for verified Combo account
+        $comboUserMock = (object)[
+            'id' => 101,
+            'name' => 'Combo (Combo)',
+            'company_name' => 'Combo',
+            'email' => 'combo@megabytecircuits.com',
+        ];
+
+        // 1. Verified Combo customer receives J series
+        $comboPayload = [
+            'user_email' => 'combo@megabytecircuits.com',
+            'customer_name' => 'Combo (Combo)',
+            'layers' => 2,
+            'base_material' => 'FR-4',
+        ];
+        $this->assertEquals('J', OrderPricingService::resolveSeriesForOrder($comboPayload));
+
+        // Manufacturing provider stays IN_HOUSE / internal for 2-layer FR-4
+        $res = OrderPricingService::resolveOrderSource($comboPayload);
+        $this->assertEquals('internal', $res['quotation_source']);
+        $this->assertEquals('normal', $res['order_type']);
+
+        // 2. Combo customer with 4-layer board receives J series while provider selection stays JLCPCB
+        $comboJlPayload = [
+            'user_email' => 'combo@megabytecircuits.com',
+            'layers' => 4,
+            'base_material' => 'FR-4',
+        ];
+        $this->assertEquals('J', OrderPricingService::resolveSeriesForOrder($comboJlPayload));
+        $resJl = OrderPricingService::resolveOrderSource($comboJlPayload);
+        $this->assertEquals('jlcpcb', $resJl['quotation_source']);
+
+        // 3. Ordinary customer named 'Combustion Technologies' does NOT receive J series
+        $combustionPayload = [
+            'customer_name' => 'Combustion Technologies',
+            'company_name' => 'Combustion Tech Inc',
+            'user_email' => 'info@combustiontech.com',
+            'layers' => 2,
+            'base_material' => 'FR-4',
+        ];
+        $this->assertFalse(OrderPricingService::isComboCustomerAccount($combustionPayload));
+        $this->assertEquals('M', OrderPricingService::resolveSeriesForOrder($combustionPayload));
+
+        // 4. Ordinary customer named 'Alan Combot' is NOT classified as Combo
+        $combotPayload = [
+            'customer_name' => 'Alan Combot',
+            'user_email' => 'alan.combot@example.com',
+            'layers' => 2,
+            'base_material' => 'FR-4',
+        ];
+        $this->assertFalse(OrderPricingService::isComboCustomerAccount($combotPayload));
+        $this->assertEquals('M', OrderPricingService::resolveSeriesForOrder($combotPayload));
+
+        // 5. Ordinary customer email containing 'combo' does NOT trigger Combo classification
+        $comboEmailPayload = [
+            'customer_name' => 'John Combs',
+            'user_email' => 'j.combs@company.com',
+            'layers' => 2,
+            'base_material' => 'FR-4',
+        ];
+        $this->assertFalse(OrderPricingService::isComboCustomerAccount($comboEmailPayload));
+        $this->assertEquals('M', OrderPricingService::resolveSeriesForOrder($comboEmailPayload));
+
+        // 6. Forged Combo flag for unverified/ordinary customer is ignored
+        $forgedPayload = [
+            'customer_name' => 'John Doe',
+            'user_email' => 'john@acme.com',
+            'is_combo_account' => true,
+            'account_type' => 'combo',
+            'layers' => 2,
+            'base_material' => 'FR-4',
+        ];
+        $this->assertFalse(OrderPricingService::isComboCustomerAccount($forgedPayload));
+        $this->assertEquals('M', OrderPricingService::resolveSeriesForOrder($forgedPayload));
+
+        // 7. Missing or invalid customer ID cannot trigger Combo classification through name/email fallback
+        $unregisteredPayload = [
+            'user_id' => 999999,
+            'customer_name' => 'Combo',
+            'user_email' => 'unregistered.combo@external.com',
+            'layers' => 2,
+            'base_material' => 'FR-4',
+        ];
+        $this->assertFalse(OrderPricingService::isComboCustomerAccount($unregisteredPayload));
+        $this->assertEquals('M', OrderPricingService::resolveSeriesForOrder($unregisteredPayload));
+
+        // 8. Normal customer requiring JLCPCB gets JL series
+        $normalJlPayload = [
+            'customer_name' => 'Jane Smith',
+            'user_email' => 'jane@smith.com',
+            'layers' => 4,
+            'base_material' => 'FR-4',
+        ];
+        $this->assertFalse(OrderPricingService::isComboCustomerAccount($normalJlPayload));
+        $this->assertEquals('JL', OrderPricingService::resolveSeriesForOrder($normalJlPayload));
+    }
 }
 

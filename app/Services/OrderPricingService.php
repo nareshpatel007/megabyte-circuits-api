@@ -184,5 +184,74 @@ class OrderPricingService
             'reasons' => $res['reasons'],
         ];
     }
+
+    /**
+     * Determine authoritatively whether a request payload corresponds to the verified Combo customer account.
+     * Requires an authoritative database customer record matching designated Combo account attributes.
+     *
+     * @param array $data
+     * @return bool
+     */
+    public static function isComboCustomerAccount(array $data): bool
+    {
+        $userId = $data['user_id'] ?? null;
+        $userEmail = trim((string)($data['user_email'] ?? $data['email'] ?? ''));
+
+        $user = null;
+        if (!empty($userId) && is_numeric($userId) && (int)$userId > 0 && class_exists(\App\Models\PcbUser::class)) {
+            $user = \App\Models\PcbUser::find((int)$userId);
+        }
+        if (!$user && !empty($userEmail) && class_exists(\App\Models\PcbUser::class)) {
+            $user = \App\Models\PcbUser::where('email', $userEmail)->first();
+        }
+
+        // Must resolve an authoritative customer database record
+        if (!$user) {
+            return false;
+        }
+
+        // Check explicit database account type if column exists on user model
+        if (isset($user->account_type) && strtolower(trim((string)$user->account_type)) === 'combo') {
+            return true;
+        }
+        if (isset($user->is_combo) && (bool)$user->is_combo) {
+            return true;
+        }
+
+        // Match exact/strict Combo customer identity against database user attributes
+        $userName = strtolower(trim((string)($user->name ?? '')));
+        $userCompany = strtolower(trim((string)($user->company_name ?? '')));
+        $userEmailAddr = strtolower(trim((string)($user->email ?? '')));
+        $userEmailPrefix = strtolower(trim(strtok($userEmailAddr, '@')));
+
+        $comboNames = ['combo', 'combo (combo)', 'combo account', 'combo customer'];
+
+        if (
+            in_array($userName, $comboNames, true) ||
+            in_array($userCompany, $comboNames, true) ||
+            $userEmailAddr === 'combo@megabytecircuits.com' ||
+            ($userEmailPrefix === 'combo' && (in_array($userName, $comboNames, true) || in_array($userCompany, $comboNames, true)))
+        ) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Authoritatively resolve the final order number series ('J' for Combo customer, otherwise 'M' or 'JL').
+     *
+     * @param array $data
+     * @return string 'J' | 'M' | 'JL'
+     */
+    public static function resolveSeriesForOrder(array $data): string
+    {
+        if (static::isComboCustomerAccount($data)) {
+            return 'J';
+        }
+
+        $sourceRes = static::resolveOrderSource($data);
+        return $sourceRes['series'] ?? 'M';
+    }
 }
 
