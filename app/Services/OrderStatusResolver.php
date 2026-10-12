@@ -94,6 +94,8 @@ class OrderStatusResolver
             $query = 'completed';
         } elseif ($query === 'canceled') {
             $query = 'cancelled';
+        } elseif ($query === 'traveller') {
+            $query = 'traveler';
         }
 
         // 1. Exact match on name

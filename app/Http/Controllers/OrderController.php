@@ -328,6 +328,9 @@ namespace App\Http\Controllers;
                         });
                     } else if (strtolower($statusParam) !== 'all') {
                         $statusLower = strtolower($statusParam);
+                        if ($statusLower === 'traveller') {
+                            $statusLower = 'traveler';
+                        }
                         $query->where(function ($q) use ($statusLower, $isSearchActive) {
                             $q->where(function ($sq) use ($statusLower) {
                                 $sq->where(function ($subQ) use ($statusLower) {
@@ -362,6 +365,44 @@ namespace App\Http\Controllers;
                 if ($request->filled('c_g') && strtolower($request->c_g) !== 'all') {
                     $cgFilterVal = strtoupper(trim($request->c_g));
                     $query->where('c_g', $cgFilterVal);
+                }
+
+                // Layer Filter (All, 1 Layer, 2 Layers)
+                if ($request->filled('layer') && strtolower(trim($request->input('layer'))) !== 'all') {
+                    $rawLayerInput = trim($request->input('layer'));
+                    $layerNum = intval($rawLayerInput);
+                    if ($layerNum > 0) {
+                        $layerVariants = [
+                            (string)$layerNum,
+                            "{$layerNum} Layer",
+                            "{$layerNum} Layers",
+                            "{$layerNum}layer",
+                            "{$layerNum}layers",
+                        ];
+                        $query->where(function ($lq) use ($layerVariants) {
+                            $lq->where(function ($colQ) use ($layerVariants) {
+                                foreach ($layerVariants as $idx => $v) {
+                                    if ($idx === 0) {
+                                        $colQ->whereRaw('LOWER(TRIM(pcb_orders.layers)) = ?', [strtolower($v)]);
+                                    } else {
+                                        $colQ->orWhereRaw('LOWER(TRIM(pcb_orders.layers)) = ?', [strtolower($v)]);
+                                    }
+                                }
+                            })
+                            ->orWhereHas('metas', function ($mq) use ($layerVariants) {
+                                $mq->whereIn('meta_key', ['layer', 'layers'])
+                                   ->where(function ($subMq) use ($layerVariants) {
+                                       foreach ($layerVariants as $idx => $v) {
+                                           if ($idx === 0) {
+                                               $subMq->whereRaw('LOWER(TRIM(meta_value)) = ?', [strtolower($v)]);
+                                           } else {
+                                               $subMq->orWhereRaw('LOWER(TRIM(meta_value)) = ?', [strtolower($v)]);
+                                           }
+                                       }
+                                   });
+                            });
+                        });
+                    }
                 }
 
                 // Search Filter (by Order #, Board Name, Email, Mobile, Customer Name, User/Company, Metas, Razorpay Payment IDs)
