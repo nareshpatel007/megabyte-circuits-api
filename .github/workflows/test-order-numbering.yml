@@ -37,7 +37,7 @@ jobs:
           php -l app/Services/OrderImportService.php
 
       - name: Run Order Numbering Unit Tests
-        run: ./vendor/bin/phpunit tests/Unit/OrderNumberServiceTest.php --colors=always
+        run: php vendor/bin/phpunit tests/Unit/OrderNumberServiceTest.php --colors=always
         env:
           APP_ENV: testing
           APP_KEY: base64:t7s8d9f0g1h2j3k4l5z6x7c8v9b0n1m2q3w4e5r6t7y=
