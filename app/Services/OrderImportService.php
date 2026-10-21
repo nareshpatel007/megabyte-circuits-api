@@ -297,19 +297,7 @@ class OrderImportService
         $newCustomersCreatedCount = 0;
         $usedExistingCustomerIds = [];
 
-        $lastOrder = PcbOrder::withTrashed()
-            ->where('order_number', 'LIKE', 'M%')
-            ->where('order_number', 'NOT LIKE', '%-%')
-            ->orderBy('id', 'desc')
-            ->first();
-
-        $nextNumericId = 1000;
-        if ($lastOrder && !empty($lastOrder->order_number)) {
-            $num = (int) preg_replace('/[^0-9]/', '', $lastOrder->order_number);
-            if ($num > 0) {
-                $nextNumericId = $num;
-            }
-        }
+        // Note: Fallback order numbers for rows without a tool number are generated dynamically via OrderNumberService
 
         $totalRowsInSheet = count($allRows);
         $processedCount = 0;
@@ -435,8 +423,7 @@ class OrderImportService
                 } else {
                     $orderNumber = $toolVal;
                     if (empty($orderNumber)) {
-                        $nextNumericId++;
-                        $orderNumber = 'M' . str_pad($nextNumericId, 4, '0', STR_PAD_LEFT);
+                        $orderNumber = \App\Services\OrderNumberService::generateOrderNumber('M');
                     }
 
                     $newOrder = $this->createPcbOrderRecord($orderNumber, $extracted, $resolvedUserId);
@@ -738,20 +725,7 @@ class OrderImportService
             $newCustomersCreatedCount = 0;
             $usedExistingCustomerIds = [];
 
-            // Get highest numeric order number for sequential auto-generation if needed
-            $lastOrder = PcbOrder::withTrashed()
-                ->where('order_number', 'LIKE', 'M%')
-                ->where('order_number', 'NOT LIKE', '%-%')
-                ->orderBy('id', 'desc')
-                ->first();
-
-            $nextNumericId = 1000;
-            if ($lastOrder && !empty($lastOrder->order_number)) {
-                $num = (int) preg_replace('/[^0-9]/', '', $lastOrder->order_number);
-                if ($num > 0) {
-                    $nextNumericId = $num;
-                }
-            }
+            // Note: Fallback order numbers for rows without a tool number are generated dynamically via OrderNumberService
 
             $batchSize = 250;
             $rowCounter = 0;
@@ -836,8 +810,7 @@ class OrderImportService
                     // Create new order record
                     $orderNumber = $toolVal;
                     if (empty($orderNumber)) {
-                        $nextNumericId++;
-                        $orderNumber = 'M' . str_pad($nextNumericId, 4, '0', STR_PAD_LEFT);
+                        $orderNumber = \App\Services\OrderNumberService::generateOrderNumber('M');
                     }
 
                     $newOrder = $this->createPcbOrderRecord($orderNumber, $extracted, $resolvedUserId);
@@ -1814,19 +1787,7 @@ class OrderImportService
             }
         }
 
-        $lastOrder = PcbOrder::withTrashed()
-            ->where('order_number', 'LIKE', 'M%')
-            ->where('order_number', 'NOT LIKE', '%-%')
-            ->orderBy('id', 'desc')
-            ->first();
-
-        $nextNumericId = 1000;
-        if ($lastOrder && !empty($lastOrder->order_number)) {
-            $num = (int) preg_replace('/[^0-9]/', '', $lastOrder->order_number);
-            if ($num > 0) {
-                $nextNumericId = $num;
-            }
-        }
+        // Note: Fallback order numbers for rows without a tool number are generated dynamically via OrderNumberService
 
         // Fetch un-processed valid rows in chunk
         $chunkRows = \App\Models\PcbImportRow::where('import_id', $import->id)
@@ -1917,8 +1878,7 @@ class OrderImportService
 
                     $orderNum = $toolVal;
                     if (empty($orderNum)) {
-                        $nextNumericId++;
-                        $orderNum = 'M' . $nextNumericId;
+                        $orderNum = \App\Services\OrderNumberService::generateOrderNumber('M');
                     }
                     $order = $this->createPcbOrderRecord($orderNum, $data, $resolvedUserId);
 

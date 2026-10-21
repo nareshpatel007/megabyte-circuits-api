@@ -1,0 +1,49 @@
+name: PCB Order Numbering Validation
+
+on:
+  push:
+    branches:
+      - 'test/pcb-order-numbering-validation'
+      - 'test/**'
+  workflow_dispatch:
+
+jobs:
+  validate-and-test:
+    name: PHP 8.2 Syntax Checks and Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, xml, ctype, json, sqlite3, pdo_sqlite, curl, bcmath
+          coverage: none
+          tools: composer:v2
+
+      - name: Validate Composer Configuration
+        run: composer validate --strict
+
+      - name: Install Dependencies from composer.lock
+        run: composer install --no-interaction --prefer-dist --no-scripts --no-progress
+
+      - name: Run PHP Syntax Checks (php -l)
+        run: |
+          php -l app/Services/OrderNumberService.php
+          php -l app/Http/Controllers/Mobile/MobileOrderController.php
+          php -l app/Services/OrderImportService.php
+
+      - name: Run Order Numbering Unit Tests
+        run: ./vendor/bin/phpunit tests/Unit/OrderNumberServiceTest.php --colors=always
+        env:
+          APP_ENV: testing
+          APP_KEY: base64:t7s8d9f0g1h2j3k4l5z6x7c8v9b0n1m2q3w4e5r6t7y=
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+          CACHE_DRIVER: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+          MAIL_MAILER: array

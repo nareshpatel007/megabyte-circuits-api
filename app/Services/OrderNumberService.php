@@ -44,64 +44,55 @@ class OrderNumberService
                 ->lockForUpdate()
                 ->first();
 
-            if (!$sequence) {
-                // Initialize sequence if not present in table
-                $initialNumber = 0;
-                if ($series === 'M') {
-                    $lastOrder = DB::table('pcb_orders')
+            // Determine highest numeric suffix currently present in pcb_orders for this series
+            $highestPcbOrderNum = 0;
+            if ($series === 'M') {
+                // If sequence counter exists, use it authoritatively without scanning historical orders.
+                // Only scan active records if the sequence row is completely missing.
+                if (!$sequence) {
+                    $orders = DB::table('pcb_orders')
                         ->where('order_number', 'LIKE', 'M%')
                         ->where('order_number', 'NOT LIKE', '%-%')
-                        ->orderBy('id', 'desc')
-                        ->first();
-
-                    if ($lastOrder && !empty($lastOrder->order_number)) {
-                        $num = (int) preg_replace('/[^0-9]/', '', $lastOrder->order_number);
-                        $maxId = DB::table('pcb_orders')->max('id') ?? 0;
-                        $initialNumber = max($num, $maxId);
-                    } else {
-                        $initialNumber = DB::table('pcb_orders')->max('id') ?? 0;
-                    }
-                } else if ($series === 'JL') {
-                    $lastOrder = DB::table('pcb_orders')
-                        ->where('order_number', 'LIKE', 'JL%')
-                        ->where('order_number', 'NOT LIKE', '%-%')
-                        ->orderBy('id', 'desc')
-                        ->first();
-
-                    if ($lastOrder && !empty($lastOrder->order_number)) {
-                        $initialNumber = (int) preg_replace('/[^0-9]/', '', $lastOrder->order_number);
-                    } else {
-                        $initialNumber = 0;
-                    }
-                } else if ($series === 'J') {
-                    $lastOrder = DB::table('pcb_orders')
-                        ->where('order_number', 'LIKE', 'J%')
-                        ->where('order_number', 'NOT LIKE', 'JL%')
-                        ->where('order_number', 'NOT LIKE', '%-%')
-                        ->orderBy('id', 'desc')
-                        ->first();
-
-                    if ($lastOrder && !empty($lastOrder->order_number)) {
-                        $initialNumber = (int) preg_replace('/[^0-9]/', '', $lastOrder->order_number);
-                    } else {
-                        $initialNumber = 0;
+                        ->whereNull('deleted_at')
+                        ->get(['order_number']);
+                    foreach ($orders as $ord) {
+                        if (preg_match('/^M([0-9]+)$/', (string)$ord->order_number, $matches)) {
+                            $num = (int)$matches[1];
+                            if ($num > $highestPcbOrderNum) {
+                                $highestPcbOrderNum = $num;
+                            }
+                        }
                     }
                 }
-
-                DB::table('order_sequences')->insert([
-                    'series' => $series,
-                    'last_number' => $initialNumber,
-                    'created_at' => date('Y-m-d H:i:s'),
-                    'updated_at' => date('Y-m-d H:i:s'),
-                ]);
-
-                $sequence = DB::table('order_sequences')
-                    ->where('series', $series)
-                    ->lockForUpdate()
-                    ->first();
+            } else if ($series === 'JL') {
+                $orders = DB::table('pcb_orders')
+                    ->where('order_number', 'LIKE', 'JL%')
+                    ->where('order_number', 'NOT LIKE', '%-%')
+                    ->get(['order_number']);
+                foreach ($orders as $ord) {
+                    $num = (int) preg_replace('/[^0-9]/', '', (string)$ord->order_number);
+                    if ($num > $highestPcbOrderNum) {
+                        $highestPcbOrderNum = $num;
+                    }
+                }
+            } else if ($series === 'J') {
+                $orders = DB::table('pcb_orders')
+                    ->where('order_number', 'LIKE', 'J%')
+                    ->where('order_number', 'NOT LIKE', 'JL%')
+                    ->where('order_number', 'NOT LIKE', '%-%')
+                    ->get(['order_number']);
+                foreach ($orders as $ord) {
+                    $num = (int) preg_replace('/[^0-9]/', '', (string)$ord->order_number);
+                    if ($num > $highestPcbOrderNum) {
+                        $highestPcbOrderNum = $num;
+                    }
+                }
             }
 
-            $candidateNumber = ((int)$sequence->last_number) + 1;
+            $currentSequenceLast = $sequence ? (int)$sequence->last_number : 0;
+            // Self-healing counter reconciliation: Never regress backwards below historical orders
+            $reconciledLast = max($currentSequenceLast, $highestPcbOrderNum);
+            $candidateNumber = $reconciledLast + 1;
 
             // Check if candidate order number already exists in pcb_orders and auto-increment if found
             while (true) {
@@ -122,12 +113,21 @@ class OrderNumberService
                 $candidateNumber++;
             }
 
-            DB::table('order_sequences')
-                ->where('series', $series)
-                ->update([
+            if ($sequence) {
+                DB::table('order_sequences')
+                    ->where('series', $series)
+                    ->update([
+                        'last_number' => $candidateNumber,
+                        'updated_at'  => date('Y-m-d H:i:s'),
+                    ]);
+            } else {
+                DB::table('order_sequences')->insert([
+                    'series'      => $series,
                     'last_number' => $candidateNumber,
+                    'created_at'  => date('Y-m-d H:i:s'),
                     'updated_at'  => date('Y-m-d H:i:s'),
                 ]);
+            }
 
             return $series . str_pad($candidateNumber, $paddingLength, '0', STR_PAD_LEFT);
         });

@@ -106,20 +106,65 @@ class OrderNumberServiceTest extends TestCase
         $this->assertEquals('J' . str_pad($seqJAfter, 4, '0', STR_PAD_LEFT), $numJ);
     }
 
-    public function test_existing_j_orders_initialize_j_series_without_affecting_jl(): void
+    public function test_self_healing_reconciles_stale_j_sequence_counter_from_j0539_to_j0540(): void
     {
-        // Insert historical J-prefixed orders
+        // 1. Pre-existing sequence counter stuck at 20
+        DB::table('order_sequences')->insert([
+            'series' => 'J',
+            'last_number' => 20,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        // 2. Historical J orders up to J0539 and J0021 in pcb_orders
         DB::table('pcb_orders')->insert([
-            'order_number' => 'J0538',
+            'order_number' => 'J0021',
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        DB::table('pcb_orders')->insert([
+            'order_number' => 'J0539',
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+        // Also insert JL order to ensure it is excluded from J maximum
+        DB::table('pcb_orders')->insert([
+            'order_number' => 'JL0999',
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        // Next number must reconcile from J0539 -> J0540
+        $nextJ = OrderNumberService::generateOrderNumber('J');
+        $this->assertEquals('J0540', $nextJ);
+
+        // Verify J0021 order in DB remains completely unchanged
+        $j0021Exists = DB::table('pcb_orders')->where('order_number', 'J0021')->exists();
+        $this->assertTrue($j0021Exists);
+
+        // Verify updated last_number in order_sequences is 540
+        $seqAfter = DB::table('order_sequences')->where('series', 'J')->value('last_number');
+        $this->assertEquals(540, $seqAfter);
+    }
+
+    public function test_sequence_counter_greater_than_historical_maximum_does_not_regress(): void
+    {
+        // Sequence counter set to 600 (higher than existing orders)
+        DB::table('order_sequences')->insert([
+            'series' => 'J',
+            'last_number' => 600,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        DB::table('pcb_orders')->insert([
+            'order_number' => 'J0539',
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
 
         $nextJ = OrderNumberService::generateOrderNumber('J');
-        $this->assertEquals('J0539', $nextJ);
-
-        $nextJL = OrderNumberService::generateOrderNumber('JL');
-        $this->assertEquals('JL0001', $nextJL);
+        $this->assertEquals('J0601', $nextJ);
     }
 
     public function test_continues_from_highest_existing_jl_number(): void

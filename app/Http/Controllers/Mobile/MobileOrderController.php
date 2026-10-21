@@ -1591,18 +1591,24 @@ class MobileOrderController extends Controller
             $quantity = (int) $request->input('quantity', 100);
             $status = trim($request->input('status', 'In Production'));
 
-            $orderId = DB::table('pcb_orders')->insertGetId([
-                'customer_name' => $customerName,
-                'board_name' => $boardName,
-                'order_qty' => $quantity,
-                'launch_qty' => $quantity,
-                'status' => $status,
-                'created_at' => date('Y-m-d H:i:s'),
-                'updated_at' => date('Y-m-d H:i:s')
-            ]);
+            $orderData = DB::transaction(function () use ($customerName, $boardName, $quantity, $status) {
+                $orderNumber = \App\Services\OrderNumberService::generateOrderNumber('M');
 
-            $orderNumber = 'M' . str_pad($orderId, 4, '0', STR_PAD_LEFT);
-            DB::table('pcb_orders')->where('id', $orderId)->update(['order_number' => $orderNumber]);
+                $orderId = DB::table('pcb_orders')->insertGetId([
+                    'order_number'  => $orderNumber,
+                    'customer_name' => $customerName,
+                    'board_name'    => $boardName,
+                    'order_qty'     => $quantity,
+                    'launch_qty'    => $quantity,
+                    'status'        => $status,
+                    'created_at'    => date('Y-m-d H:i:s'),
+                    'updated_at'    => date('Y-m-d H:i:s'),
+                ]);
+
+                return [$orderId, $orderNumber];
+            });
+
+            [$orderId, $orderNumber] = $orderData;
 
             return response()->json([
                 'success' => true,

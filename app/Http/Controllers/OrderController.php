@@ -489,6 +489,135 @@ namespace App\Http\Controllers;
                                     ->orWhere('razorpay_order_id', 'LIKE', "%{$search}%");
                             });
                         }
+
+                        // Combo Search: Discrete token match on pcb_orders.combo
+                        $cleanSearch = ltrim(trim($search), '#');
+                        $tokensToMatch = array_values(array_unique(array_filter([$search, $cleanSearch])));
+                        $dbDriver = \Illuminate\Support\Facades\DB::connection()->getDriverName();
+
+                        if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'combo')) {
+                            foreach ($tokensToMatch as $token) {
+                                if ($dbDriver === 'mysql') {
+                                    $pattern = '(^|[^a-zA-Z0-9_-])' . preg_quote($token, '/') . '([^a-zA-Z0-9_-]|$)';
+                                    $q->orWhereRaw('pcb_orders.combo REGEXP ?', [$pattern]);
+                                } else {
+                                    $q->orWhere(function ($sq) use ($token) {
+                                        $sq->where('pcb_orders.combo', $token)
+                                           ->orWhere('pcb_orders.combo', 'LIKE', "{$token},%")
+                                           ->orWhere('pcb_orders.combo', 'LIKE', "%, {$token},%")
+                                           ->orWhere('pcb_orders.combo', 'LIKE', "%,{$token},%")
+                                           ->orWhere('pcb_orders.combo', 'LIKE', "%, {$token}")
+                                           ->orWhere('pcb_orders.combo', 'LIKE', "%,{$token}")
+                                           ->orWhere('pcb_orders.combo', 'LIKE', "{$token}+%")
+                                           ->orWhere('pcb_orders.combo', 'LIKE', "%+{$token}+%")
+                                           ->orWhere('pcb_orders.combo', 'LIKE', "%+{$token}%")
+                                           ->orWhere('pcb_orders.combo', 'LIKE', "{$token} %")
+                                           ->orWhere('pcb_orders.combo', 'LIKE', "% {$token} %")
+                                           ->orWhere('pcb_orders.combo', 'LIKE', "% {$token}");
+                                    });
+                                }
+                            }
+                        }
+
+                        // Old Order Number Search: Discrete token match on pcb_orders.old_order_number
+                        if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_orders', 'old_order_number')) {
+                            foreach ($tokensToMatch as $token) {
+                                if ($dbDriver === 'mysql') {
+                                    $pattern = '(^|[^a-zA-Z0-9_-])' . preg_quote($token, '/') . '([^a-zA-Z0-9_-]|$)';
+                                    $q->orWhereRaw('pcb_orders.old_order_number REGEXP ?', [$pattern]);
+                                } else {
+                                    $q->orWhere(function ($sq) use ($token) {
+                                        $sq->where('pcb_orders.old_order_number', $token)
+                                           ->orWhere('pcb_orders.old_order_number', 'LIKE', "{$token},%")
+                                           ->orWhere('pcb_orders.old_order_number', 'LIKE', "%, {$token},%")
+                                           ->orWhere('pcb_orders.old_order_number', 'LIKE', "%,{$token},%")
+                                           ->orWhere('pcb_orders.old_order_number', 'LIKE', "%, {$token}")
+                                           ->orWhere('pcb_orders.old_order_number', 'LIKE', "%,{$token}")
+                                           ->orWhere('pcb_orders.old_order_number', 'LIKE', "{$token} %")
+                                           ->orWhere('pcb_orders.old_order_number', 'LIKE', "% {$token}");
+                                    });
+                                }
+                            }
+                        }
+
+                        // Relational Combo Search via pcb_order_combos
+                        if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_combos')) {
+                            // Find child orders whose parent combo matches the search token
+                            $q->orWhereIn('pcb_orders.id', function ($sub) use ($search, $tokensToMatch, $dbDriver) {
+                                $sub->select('poc.combo_order_id')
+                                    ->from('pcb_order_combos as poc')
+                                    ->join('pcb_orders as parent', 'poc.parent_order_id', '=', 'parent.id')
+                                    ->where(function ($pQ) use ($search, $tokensToMatch, $dbDriver) {
+                                        $pQ->where('parent.order_number', 'LIKE', "%{$search}%");
+                                        foreach ($tokensToMatch as $token) {
+                                            if ($token !== $search) {
+                                                $pQ->orWhere('parent.order_number', 'LIKE', "%{$token}%");
+                                            }
+                                            if ($dbDriver === 'mysql') {
+                                                $pattern = '(^|[^a-zA-Z0-9_-])' . preg_quote($token, '/') . '([^a-zA-Z0-9_-]|$)';
+                                                $pQ->orWhereRaw('parent.combo REGEXP ?', [$pattern]);
+                                            } else {
+                                                $pQ->orWhere(function ($sq) use ($token) {
+                                                    $sq->where('parent.combo', $token)
+                                                       ->orWhere('parent.combo', 'LIKE', "{$token},%")
+                                                       ->orWhere('parent.combo', 'LIKE', "%, {$token},%")
+                                                       ->orWhere('parent.combo', 'LIKE', "%,{$token},%")
+                                                       ->orWhere('parent.combo', 'LIKE', "%, {$token}")
+                                                       ->orWhere('parent.combo', 'LIKE', "%,{$token}")
+                                                       ->orWhere('parent.combo', 'LIKE', "{$token}+%")
+                                                       ->orWhere('parent.combo', 'LIKE', "%+{$token}%")
+                                                       ->orWhere('parent.combo', 'LIKE', "{$token} %")
+                                                       ->orWhere('parent.combo', 'LIKE', "% {$token}");
+                                                });
+                                            }
+                                        }
+                                    });
+
+                                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_combos', 'deleted_at')) {
+                                    $sub->whereNull('poc.deleted_at');
+                                }
+                            });
+
+                            // Find parent combo order whose child order matches the search token
+                            $q->orWhereIn('pcb_orders.id', function ($sub) use ($search, $tokensToMatch) {
+                                $sub->select('poc.parent_order_id')
+                                    ->from('pcb_order_combos as poc')
+                                    ->join('pcb_orders as child', 'poc.combo_order_id', '=', 'child.id')
+                                    ->where(function ($cQ) use ($search, $tokensToMatch) {
+                                        $cQ->where('child.order_number', 'LIKE', "%{$search}%");
+                                        foreach ($tokensToMatch as $token) {
+                                            if ($token !== $search) {
+                                                $cQ->orWhere('child.order_number', 'LIKE', "%{$token}%");
+                                            }
+                                        }
+                                    });
+
+                                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_combos', 'deleted_at')) {
+                                    $sub->whereNull('poc.deleted_at');
+                                }
+                            });
+                        }
+
+                        // Relational Old Orders Search via pcb_order_old_orders
+                        if (\Illuminate\Support\Facades\Schema::hasTable('pcb_order_old_orders')) {
+                            $q->orWhereIn('pcb_orders.id', function ($sub) use ($search, $tokensToMatch) {
+                                $sub->select('poo.order_id')
+                                    ->from('pcb_order_old_orders as poo')
+                                    ->join('pcb_orders as old_ord', 'poo.old_order_id', '=', 'old_ord.id')
+                                    ->where(function ($oQ) use ($search, $tokensToMatch) {
+                                        $oQ->where('old_ord.order_number', 'LIKE', "%{$search}%");
+                                        foreach ($tokensToMatch as $token) {
+                                            if ($token !== $search) {
+                                                $oQ->orWhere('old_ord.order_number', 'LIKE', "%{$token}%");
+                                            }
+                                        }
+                                    });
+
+                                if (\Illuminate\Support\Facades\Schema::hasColumn('pcb_order_old_orders', 'deleted_at')) {
+                                    $sub->whereNull('poo.deleted_at');
+                                }
+                            });
+                        }
                     });
                 }
 
